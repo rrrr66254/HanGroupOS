@@ -194,7 +194,7 @@ def get_provider_from_db(db, user_id: int, provider_name: Optional[str] = None) 
         query = query.filter(ProviderConfig.provider == provider_name)
 
     config = query.first()
-    if config and config.api_key:
+    if config and (config.api_key or config.provider in ("ollama", "mock")):
         return AIProvider(
             provider=config.provider,
             api_key=config.api_key,

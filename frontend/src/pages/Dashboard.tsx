@@ -7,14 +7,15 @@ import {
 import { dashboardApi, approvalsApi, companiesApi } from '../api/client'
 import type { DashboardStats, ApprovalRequest, Company } from '../types'
 
-function StatCard({ icon: Icon, label, value, color }: {
+function StatCard({ icon: Icon, label, value, color, to }: {
   icon: React.ElementType
   label: string
   value: number
   color: string
+  to: string
 }) {
   return (
-    <div className="card p-4 flex items-center gap-4">
+    <Link to={to} className="card p-4 flex items-center gap-4 hover:border-brand/30 hover:bg-bg-elevated transition-colors cursor-pointer">
       <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${color}`}>
         <Icon size={18} />
       </div>
@@ -22,7 +23,7 @@ function StatCard({ icon: Icon, label, value, color }: {
         <div className="text-xl font-bold text-slate-100">{value}</div>
         <div className="text-xs text-slate-500">{label}</div>
       </div>
-    </div>
+    </Link>
   )
 }
 
@@ -48,7 +49,7 @@ export default function Dashboard() {
           </div>
           <h2 className="text-xl font-bold text-slate-100">AI 기업 생태계에 오신 것을 환영합니다</h2>
           <p className="text-slate-400 text-sm mt-1">
-            AI 회장과 대화를 시작하거나 새로운 계열사를 설립하세요.
+            AI 회장·위원회와 대화하거나 AI 오피스를 확인하세요.
           </p>
         </div>
         <Link to="/chairman" className="btn-primary flex items-center gap-2 flex-shrink-0">
@@ -60,14 +61,14 @@ export default function Dashboard() {
       {/* Stats */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard icon={Building2} label="전체 계열사" value={stats.total_companies} color="bg-brand/15 text-brand-light" />
-          <StatCard icon={Users} label="AI 조직원" value={stats.total_org_nodes} color="bg-accent/15 text-accent" />
-          <StatCard icon={CheckSquare} label="승인 대기" value={stats.pending_approvals} color="bg-warning/15 text-warning" />
-          <StatCard icon={Brain} label="기업 기억" value={stats.total_memories} color="bg-purple-400/15 text-purple-400" />
-          <StatCard icon={FlaskConical} label="시뮬레이션" value={stats.recent_simulations} color="bg-pink-400/15 text-pink-400" />
-          <StatCard icon={Map} label="전략 항목" value={stats.total_strategies} color="bg-success/15 text-success" />
-          <StatCard icon={Users} label="오픈 회의" value={stats.open_meetings} color="bg-orange-400/15 text-orange-400" />
-          <StatCard icon={Building2} label="활성 계열사" value={stats.active_companies} color="bg-teal-400/15 text-teal-400" />
+          <StatCard icon={Building2} label="전체 계열사" value={stats.total_companies} color="bg-brand/15 text-brand-light" to="/companies" />
+          <StatCard icon={Users} label="AI 조직원" value={stats.total_org_nodes} color="bg-accent/15 text-accent" to="/live-office" />
+          <StatCard icon={CheckSquare} label="승인 대기" value={stats.pending_approvals} color="bg-warning/15 text-warning" to="/approvals" />
+          <StatCard icon={Brain} label="기업 기억" value={stats.total_memories} color="bg-purple-400/15 text-purple-400" to="/memory" />
+          <StatCard icon={FlaskConical} label="시뮬레이션" value={stats.recent_simulations} color="bg-pink-400/15 text-pink-400" to="/simulation" />
+          <StatCard icon={Map} label="전략 항목" value={stats.total_strategies} color="bg-success/15 text-success" to="/strategy" />
+          <StatCard icon={Users} label="오픈 회의" value={stats.open_meetings} color="bg-orange-400/15 text-orange-400" to="/meetings" />
+          <StatCard icon={Building2} label="활성 계열사" value={stats.active_companies} color="bg-teal-400/15 text-teal-400" to="/companies" />
         </div>
       )}
 

@@ -133,28 +133,6 @@ def _seed_data():
                 )
                 db.add(c)
 
-        # ── Initial 3 Companies ───────────────────────────────────────────────
-        if db.query(Company).count() == 0:
-            initial_companies = [
-                Company(name="한미디어", description="콘텐츠와 트래픽을 담당하는 미디어 계열사",
-                        industry="미디어", status="active",
-                        vision="AI 기반 콘텐츠 생태계 구축", created_by=admin.id),
-                Company(name="한소프트", description="소프트웨어와 SaaS 개발 계열사",
-                        industry="소프트웨어", status="active",
-                        vision="AI 네이티브 SaaS 플랫폼 구축", created_by=admin.id),
-                Company(name="한데이터", description="데이터 분석 및 전략 계열사",
-                        industry="데이터", status="active",
-                        vision="데이터 기반 의사결정 솔루션 리더", created_by=admin.id),
-            ]
-            for c in initial_companies:
-                db.add(c)
-            db.flush()
-
-            industry_map = {"한미디어": "미디어", "한소프트": "소프트웨어", "한데이터": "데이터"}
-            for c in initial_companies:
-                db.refresh(c)
-                create_company_org(db, c.id, industry_map.get(c.name, "general"))
-
         # ── Initial Corporate Memory ──────────────────────────────────────────
         if db.query(CorporateMemory).count() == 0:
             memories = [
@@ -185,9 +163,9 @@ def _seed_data():
                 StrategyItem(title="글로벌 AI 기업 생태계 형성", item_type="objective",
                              description="콘텐츠 · 소프트웨어 · 데이터 · 교육 · 커뮤니티를 하나의 AI 생태계로 통합",
                              priority="high", progress=5),
-                StrategyItem(title="한미디어 MVP 출시", item_type="milestone",
-                             description="AI 콘텐츠 생성 플랫폼 첫 번째 버전 출시",
-                             priority="high", progress=30, due_date="2025-Q2"),
+                StrategyItem(title="첫 번째 AI 계열사 설립", item_type="milestone",
+                             description="수출입 데이터를 저장·가공하는 첫 번째 AI 계열사 설립",
+                             priority="high", progress=0, due_date="2026-Q2"),
             ]
             for s in strategies:
                 db.add(s)

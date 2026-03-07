@@ -183,7 +183,7 @@ def providers_health(
     result = {"mock": {"status": "always_available", "model": "mock-model"}}
     for c in configs:
         result[c.provider] = {
-            "status": "configured" if c.api_key else "no_api_key",
+            "status": "configured" if (c.api_key or c.provider in ("ollama", "mock")) else "no_api_key",
             "model": c.model_override or "default",
         }
     return result

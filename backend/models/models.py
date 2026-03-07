@@ -119,6 +119,7 @@ class ChatSession(Base):
     session_type = Column(String(50), default="chairman")
     # chairman | ceo | committee | general
     title = Column(String(200), default="New Session")
+    agent_name = Column(String(100), nullable=True)  # display name of the AI agent
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
 

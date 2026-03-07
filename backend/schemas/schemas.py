@@ -215,6 +215,7 @@ class ChatSessionCreate(BaseModel):
     company_id: Optional[int] = None
     session_type: str = "chairman"
     title: str = "New Session"
+    agent_name: Optional[str] = None
 
 
 class ChatSessionOut(BaseModel):
@@ -222,6 +223,7 @@ class ChatSessionOut(BaseModel):
     company_id: Optional[int]
     session_type: str
     title: str
+    agent_name: Optional[str] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

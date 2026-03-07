@@ -46,6 +46,7 @@ def create_session(
         company_id=session_in.company_id,
         session_type=session_in.session_type,
         title=session_in.title,
+        agent_name=session_in.agent_name,
         created_by=current_user.id,
     )
     db.add(session)
@@ -111,7 +112,7 @@ def send_message(
     )
 
     # Save AI response
-    ai_name = {
+    ai_name = session.agent_name or {
         "chairman": "AI 회장",
         "ceo": "AI CEO",
         "committee": "AI 위원회",

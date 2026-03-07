@@ -1,7 +1,7 @@
-# HAN Group OS v27
+# HAN Group OS v28
 **AI 기반 기업 운영 시스템 (AI Corporate Operating System)**
 
-그룹사 전체를 AI 에이전트로 운영하는 통합 플랫폼입니다. 회장 AI부터 각 계열사 CEO까지 역할별 AI 에이전트를 배치하고, 경영 의사결정·승인·회의·전략·시장분석을 하나의 시스템에서 처리합니다.
+그룹사 전체를 AI 에이전트로 운영하는 통합 플랫폼입니다. 회장 AI부터 각 위원회까지 역할별 AI 에이전트를 배치하고, 경영 의사결정·승인·회의·전략·시장분석을 하나의 시스템에서 처리합니다.
 
 ---
 
@@ -9,16 +9,26 @@
 
 | 기능 | 설명 |
 |------|------|
-| **AI 회장실** | Claude/GPT-4o/Gemini 기반 전략 의사결정 |
+| **AI 허브 (다중 AI 대화)** | 회장·위원회·CEO 등 AI 구성원 각자와 1:1 대화 |
+| **픽셀 AI 오피스** | AI 캐릭터가 실시간으로 움직이는 픽셀아트 사무실, 회의 시 회의실 자동 활성화 |
 | **조직도 관리** | 회장 → 위원회 → 계열사 → 직책 계층 구조 |
 | **결재 워크플로우** | 요청 → 검토 → 승인/반려 파이프라인 |
-| **회의 관리** | 일정 수립, AI 참여, 회의록 자동 생성 |
+| **회의 관리** | 일정 수립, AI 참여, 회의실 픽셀 오피스 반영 |
 | **시장 분석** | 산업별 기회/위협 리포트 |
 | **전략 트래킹** | 목표·이니셔티브·마일스톤·KPI 관리 |
 | **비즈니스 시뮬레이션** | What-if 시나리오 분석 |
 | **기업 메모리** | 의사결정·사실·교훈 등 기관 지식 축적 |
-| **Live Office** | AI 에이전트 실시간 활동 모니터링 |
-| **멀티 AI 프로바이더** | Claude, GPT-4o, Gemini, Ollama, Mock 전환 가능 |
+| **멀티 AI 프로바이더** | Claude, GPT-4o, Gemini, **Ollama (무료 로컬)**, Mock 전환 가능 |
+
+---
+
+## v28 업데이트 내역
+
+- **Ollama 로컬 LLM 지원 강화** — API 키 없이 Ollama 설정 가능, 무료로 LLM 활용
+- **픽셀 AI 오피스** — AI 캐릭터가 실시간 애니메이션으로 근무 현황 표시, 회의 시 회의실 활성화
+- **AI 허브** — AI 회장 전용 채팅 → 회장·위원회 각자와 개별 대화 가능한 멀티 AI 허브로 개편
+- **대시보드 카드 클릭** — 모든 통계 카드 클릭 시 해당 페이지로 이동
+- **계열사 초기 데이터 제거** — 빈 상태에서 시작, 필요에 따라 계열사 직접 설립
 
 ---
 
@@ -42,7 +52,7 @@
 - Anthropic Claude (Opus/Sonnet/Haiku)
 - OpenAI GPT-4o / GPT-4o-mini
 - Google Gemini 1.5 Flash
-- Ollama (로컬 Llama)
+- **Ollama (로컬 Llama, Mistral 등 — 무료, API 키 불필요)**
 - Mock (API 키 없이 테스트)
 
 ---
@@ -152,11 +162,28 @@ ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 GEMINI_API_KEY=...
 
-# 로컬 AI (Ollama 사용 시)
+# 로컬 AI (Ollama 사용 시 — API 키 불필요)
 OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2
 ```
 
 API 키 없이 시작하려면 `DEFAULT_PROVIDER=mock` 상태로 두면 됩니다.
+
+### Ollama 로컬 LLM 사용법 (무료)
+
+1. [Ollama 설치](https://ollama.com/download)
+2. 모델 다운로드:
+   ```bash
+   ollama pull llama3.2      # 추천 (2GB)
+   ollama pull mistral       # 대안
+   ollama pull phi3          # 경량화 (1.7GB)
+   ```
+3. 앱 실행 후 **관리자 > AI Provider 설정** 에서:
+   - Provider: `Ollama (로컬)` 선택
+   - API Key: 비워두기 (불필요)
+   - Base URL: `http://localhost:11434`
+   - 모델: `llama3.2` (또는 설치한 모델명)
+   - 저장
 
 ---
 
@@ -178,21 +205,9 @@ HanGroupOS/
 │   ├── schemas/
 │   │   └── schemas.py        # Pydantic 스키마
 │   ├── services/
-│   │   ├── ai_provider.py    # AI 프로바이더 추상화
+│   │   ├── ai_provider.py    # AI 프로바이더 추상화 (Ollama 포함)
 │   │   └── org_service.py    # 조직 생성 로직
 │   └── routers/              # API 엔드포인트 (13개)
-│       ├── auth.py
-│       ├── companies.py
-│       ├── org.py
-│       ├── chat.py
-│       ├── approvals.py
-│       ├── meetings.py
-│       ├── market.py
-│       ├── simulation.py
-│       ├── ai_models.py
-│       ├── memory.py
-│       ├── strategy.py
-│       └── knowledge.py
 │
 └── frontend/
     ├── package.json
@@ -202,22 +217,11 @@ HanGroupOS/
         ├── api/client.ts      # Axios 클라이언트
         ├── store/useStore.ts  # Zustand 전역 상태
         ├── components/        # 공통 컴포넌트
-        │   ├── Layout.tsx
-        │   ├── Sidebar.tsx
-        │   ├── Header.tsx
-        │   └── OrgChart.tsx
         └── pages/             # 12개 페이지
-            ├── Dashboard.tsx
-            ├── Chairman.tsx
-            ├── Companies.tsx
-            ├── Approvals.tsx
-            ├── Meetings.tsx
-            ├── Market.tsx
-            ├── Strategy.tsx
-            ├── Simulation.tsx
-            ├── Memory.tsx
-            ├── LiveOffice.tsx
-            └── Admin.tsx
+            ├── Dashboard.tsx  # 클릭 가능한 통계 카드
+            ├── Chairman.tsx   # AI 허브 (다중 AI 대화)
+            ├── LiveOffice.tsx # 픽셀 AI 오피스
+            └── ...
 ```
 
 ---
@@ -237,7 +241,7 @@ http://localhost:8000/docs
 | `POST /auth/login` | 로그인 (JWT 발급) |
 | `GET /companies` | 계열사 목록 |
 | `GET /org/group-tree` | 전체 조직도 트리 |
-| `POST /chat/{session_id}/message` | AI 에이전트 대화 |
+| `POST /chat/send` | AI 에이전트 대화 |
 | `GET /approvals/inbox` | 결재 수신함 |
 | `POST /simulation/run` | 시뮬레이션 실행 |
 | `GET /market/reports` | 시장 분석 리포트 |
@@ -249,10 +253,10 @@ http://localhost:8000/docs
 
 최초 실행 시 아래 데이터가 자동으로 생성됩니다.
 
-- **계열사 3개**: 한미디어, 한소프트, 한데이터
+- **계열사**: 없음 (빈 상태에서 시작, 직접 설립)
 - **조직**: AI 회장 + 전략위원회, 투자위원회, 데이터위원회
 - **AI 모델 카탈로그**: Claude Opus/Sonnet/Haiku, GPT-4o, GPT-4o-mini, Gemini 1.5 Flash, Llama 3.2, Mock
-- **전략 이니셔티브** 3개 샘플
+- **전략 이니셔티브** 2개 샘플
 - **기업 메모리** 2개 샘플
 
 ---
