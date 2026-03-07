@@ -46,8 +46,8 @@ export const authApi = {
 export const companiesApi = {
   list: (status?: string) => api.get('/companies', { params: { status } }),
   get: (id: number) => api.get(`/companies/${id}`),
-  create: (data: object, autoOrg = true) =>
-    api.post(`/companies?auto_org=${autoOrg}`, data),
+  create: (data: object, autoOrg = true, aiBudget = 'any') =>
+    api.post(`/companies?auto_org=${autoOrg}&ai_budget=${aiBudget}`, data),
   update: (id: number, data: object) => api.patch(`/companies/${id}`, data),
   delete: (id: number) => api.delete(`/companies/${id}`),
   orgTree: (id: number) => api.get(`/companies/${id}/org-tree`),

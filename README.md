@@ -1,5 +1,9 @@
-# HAN Group OS v28
+# HAN Group OS v29
 **AI 기반 기업 운영 시스템 (AI Corporate Operating System)**
+
+<p align="center">
+  <img src="frontend/public/logo.png" alt="HAN Group Logo" width="220" />
+</p>
 
 그룹사 전체를 AI 에이전트로 운영하는 통합 플랫폼입니다. 회장 AI부터 각 위원회까지 역할별 AI 에이전트를 배치하고, 경영 의사결정·승인·회의·전략·시장분석을 하나의 시스템에서 처리합니다.
 
@@ -11,6 +15,7 @@
 |------|------|
 | **AI 허브 (다중 AI 대화)** | 회장·위원회·CEO 등 AI 구성원 각자와 1:1 대화 |
 | **픽셀 AI 오피스** | AI 캐릭터가 실시간으로 움직이는 픽셀아트 사무실, 회의 시 회의실 자동 활성화 |
+| **역할별 AI 자동 배정** | 계열사 설립 시 직급·역할에 맞는 AI 모델 자동 배정 (CEO → Claude Sonnet, 팀장 → GPT-4o-mini 등) |
 | **조직도 관리** | 회장 → 위원회 → 계열사 → 직책 계층 구조 |
 | **결재 워크플로우** | 요청 → 검토 → 승인/반려 파이프라인 |
 | **회의 관리** | 일정 수립, AI 참여, 회의실 픽셀 오피스 반영 |
@@ -19,6 +24,29 @@
 | **비즈니스 시뮬레이션** | What-if 시나리오 분석 |
 | **기업 메모리** | 의사결정·사실·교훈 등 기관 지식 축적 |
 | **멀티 AI 프로바이더** | Claude, GPT-4o, Gemini, **Ollama (무료 로컬)**, Mock 전환 가능 |
+
+---
+
+## v29 업데이트 내역
+
+### 계열사 설립 시 역할별 특화 AI 자동 배정
+- **직급 기반 모델 티어** — CEO는 고성능 모델, 팀장은 경량 모델 자동 배정
+- **AI 예산 설정** — 설립 모달에서 무료 / 절약 / 최고 성능 3단계 선택
+- **배정 미리보기** — 설립 전 직급별 배정될 모델 미리 확인
+- **역할 전문성 설명** — 각 직위에 맞는 특화 설명 자동 생성 (예: "데이터 총괄 — 수치 분석 특화")
+- **AI 편집 탭** — 계열사 조직도 옆에 "AI 편집" 탭 추가, 조직원별 모델 개별 변경 가능
+
+| 직급 | 무료 | 절약 | 최고 성능 |
+|------|------|------|---------|
+| CEO | llama3.2 (ollama) | gpt-4o-mini | claude-sonnet-4-6 |
+| Chief | llama3.2 (ollama) | gpt-4o-mini | claude-haiku-4-5 |
+| 팀장 | mock-model | llama3.2 | gpt-4o-mini |
+| 전문가 | mock-model | mock-model | llama3.2 |
+
+### HAN Group 공식 로고 적용
+- 사이드바 상단에 HAN Group 3D 로고 표시 (투명 배경 PNG)
+- 브라우저 파비콘도 로고로 변경
+- 로고 로드 실패 시 Zap 아이콘으로 자동 폴백
 
 ---
 
@@ -193,35 +221,41 @@ API 키 없이 시작하려면 `DEFAULT_PROVIDER=mock` 상태로 두면 됩니�
 HanGroupOS/
 ├── start.sh                  # 통합 실행 스크립트 (Linux/Mac)
 │
-├── backend/
-│   ├── main.py               # FastAPI 진입점
-│   ├── requirements.txt      # Python 의존성
-│   ├── core/
-│   │   ├── config.py         # 환경변수 설정
-│   │   ├── database.py       # DB 초기화
-│   │   └── security.py       # JWT 인증
-│   ├── models/
-│   │   └── models.py         # 25개 DB 모델
-│   ├── schemas/
-│   │   └── schemas.py        # Pydantic 스키마
-│   ├── services/
-│   │   ├── ai_provider.py    # AI 프로바이더 추상화 (Ollama 포함)
-│   │   └── org_service.py    # 조직 생성 로직
-│   └── routers/              # API 엔드포인트 (13개)
+├── frontend/
+│   ├── public/
+│   │   └── logo.png          # HAN Group 로고 (투명 배경 PNG)
+│   ├── index.html
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── src/
+│       ├── App.tsx            # 라우팅
+│       ├── api/client.ts      # Axios 클라이언트
+│       ├── store/useStore.ts  # Zustand 전역 상태
+│       ├── components/        # 공통 컴포넌트
+│       │   ├── Sidebar.tsx    # 로고 + 네비게이션
+│       │   └── ...
+│       └── pages/             # 12개 페이지
+│           ├── Dashboard.tsx  # 클릭 가능한 통계 카드
+│           ├── Chairman.tsx   # AI 허브 (다중 AI 대화)
+│           ├── Companies.tsx  # 계열사 설립 + AI 자동 배정
+│           ├── LiveOffice.tsx # 픽셀 AI 오피스
+│           └── ...
 │
-└── frontend/
-    ├── package.json
-    ├── vite.config.ts
-    └── src/
-        ├── App.tsx            # 라우팅
-        ├── api/client.ts      # Axios 클라이언트
-        ├── store/useStore.ts  # Zustand 전역 상태
-        ├── components/        # 공통 컴포넌트
-        └── pages/             # 12개 페이지
-            ├── Dashboard.tsx  # 클릭 가능한 통계 카드
-            ├── Chairman.tsx   # AI 허브 (다중 AI 대화)
-            ├── LiveOffice.tsx # 픽셀 AI 오피스
-            └── ...
+└── backend/
+    ├── main.py               # FastAPI 진입점
+    ├── requirements.txt      # Python 의존성
+    ├── core/
+    │   ├── config.py         # 환경변수 설정
+    │   ├── database.py       # DB 초기화
+    │   └── security.py       # JWT 인증
+    ├── models/
+    │   └── models.py         # 25개 DB 모델
+    ├── schemas/
+    │   └── schemas.py        # Pydantic 스키마
+    ├── services/
+    │   ├── ai_provider.py    # AI 프로바이더 추상화 (Ollama 포함)
+    │   └── org_service.py    # 조직 생성 + AI 자동 배정 로직
+    └── routers/              # API 엔드포인트 (13개)
 ```
 
 ---
@@ -240,12 +274,16 @@ http://localhost:8000/docs
 |------|------|
 | `POST /auth/login` | 로그인 (JWT 발급) |
 | `GET /companies` | 계열사 목록 |
+| `POST /companies?ai_budget=any` | 계열사 설립 (AI 예산 티어 지정) |
 | `GET /org/group-tree` | 전체 조직도 트리 |
+| `PATCH /org/nodes/{id}` | 조직원 AI 모델 변경 |
 | `POST /chat/send` | AI 에이전트 대화 |
 | `GET /approvals/inbox` | 결재 수신함 |
 | `POST /simulation/run` | 시뮬레이션 실행 |
 | `GET /market/reports` | 시장 분석 리포트 |
 | `GET /memory` | 기업 메모리 조회 |
+| `GET /models/catalog` | AI 모델 카탈로그 |
+| `POST /models/recommend` | 역할별 AI 모델 추천 |
 
 ---
 

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, MessageSquare, Building2, CheckSquare,
@@ -22,6 +23,7 @@ const NAV = [
 
 export default function Sidebar() {
   const { sidebarOpen, toggleSidebar } = useAppStore()
+  const [logoError, setLogoError] = useState(false)
 
   return (
     <aside
@@ -31,13 +33,25 @@ export default function Sidebar() {
       {/* Logo */}
       <div className="flex items-center h-16 px-4 border-b border-bg-border">
         <div className="flex items-center gap-3 overflow-hidden">
-          <div className="w-8 h-8 bg-brand rounded-lg flex items-center justify-center flex-shrink-0">
-            <Zap size={16} className="text-white" />
+          {/* Logo image with Zap fallback */}
+          <div className="w-8 h-8 flex items-center justify-center flex-shrink-0">
+            {!logoError ? (
+              <img
+                src="/logo.png"
+                alt="HAN Group"
+                className="w-8 h-8 object-contain"
+                onError={() => setLogoError(true)}
+              />
+            ) : (
+              <div className="w-8 h-8 bg-brand rounded-lg flex items-center justify-center">
+                <Zap size={16} className="text-white" />
+              </div>
+            )}
           </div>
           {sidebarOpen && (
             <div className="animate-fade-in">
               <div className="text-sm font-bold text-slate-100">HAN Group</div>
-              <div className="text-[10px] text-slate-500 font-mono">OS v27</div>
+              <div className="text-[10px] text-slate-500 font-mono">OS v29</div>
             </div>
           )}
         </div>

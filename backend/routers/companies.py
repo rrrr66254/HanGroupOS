@@ -26,6 +26,7 @@ def list_companies(
 def create_company(
     company_in: CompanyCreate,
     auto_org: bool = True,
+    ai_budget: str = "any",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -42,7 +43,7 @@ def create_company(
     db.refresh(company)
 
     if auto_org:
-        create_company_org(db, company.id, company_in.industry or "general")
+        create_company_org(db, company.id, company_in.industry or "general", ai_budget)
 
     return company
 
