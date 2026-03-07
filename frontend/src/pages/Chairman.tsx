@@ -181,9 +181,15 @@ export default function Chairman() {
               >
                 {LEVEL_EMOJI[agent.level] || '🤖'}
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="truncate font-medium">{agent.name}</div>
                 <div className="text-[9px] text-slate-600 truncate">{LEVEL_LABELS[agent.level] || agent.level}</div>
+                {agent.ai_model && (
+                  <div className="text-[8px] font-mono truncate mt-0.5"
+                    style={{ color: LEVEL_COLORS[agent.level] ? `${LEVEL_COLORS[agent.level]}cc` : '#6b7280' }}>
+                    {agent.ai_model}
+                  </div>
+                )}
               </div>
               {selectedAgent?.id === agent.id && <ChevronRight size={10} className="ml-auto flex-shrink-0 text-slate-400" />}
             </div>

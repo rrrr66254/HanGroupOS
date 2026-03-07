@@ -118,13 +118,30 @@ export default function Admin() {
                 />
               </div>
               <div>
-                <label className="block text-[10px] text-slate-500 mb-1">모델 Override (선택)</label>
-                <input
-                  className="input text-xs font-mono"
-                  value={newProvider.model_override}
-                  onChange={(e) => setNewProvider((p) => ({ ...p, model_override: e.target.value }))}
-                  placeholder="기본값 사용"
-                />
+                <label className="block text-[10px] text-slate-500 mb-1">모델 선택</label>
+                {newProvider.provider === 'ollama' ? (
+                  <input
+                    className="input text-xs font-mono"
+                    value={newProvider.model_override}
+                    onChange={(e) => setNewProvider((p) => ({ ...p, model_override: e.target.value }))}
+                    placeholder="llama3.2"
+                  />
+                ) : (
+                  <select
+                    className="input text-xs font-mono"
+                    value={newProvider.model_override}
+                    onChange={(e) => setNewProvider((p) => ({ ...p, model_override: e.target.value }))}
+                  >
+                    <option value="">기본값 사용</option>
+                    {catalog
+                      .filter((m) => m.provider === newProvider.provider)
+                      .map((m) => (
+                        <option key={m.id} value={m.model_id}>
+                          {m.name} ({m.model_id})
+                        </option>
+                      ))}
+                  </select>
+                )}
               </div>
               {newProvider.provider === 'ollama' && (
                 <div>
@@ -213,7 +230,7 @@ export default function Admin() {
             </h3>
             <div className="space-y-2">
               {[
-                { label: '버전', value: 'HAN Group OS v27.0.0' },
+                { label: '버전', value: 'HAN Group OS v29.0.0' },
                 { label: '헌장', value: 'HAN Group Charter v1.0' },
                 { label: '백엔드', value: 'FastAPI + SQLite' },
                 { label: '프론트엔드', value: 'React 18 + TypeScript + Tailwind' },

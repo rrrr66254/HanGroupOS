@@ -1,413 +1,495 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { meetingsApi, orgApi } from '../api/client'
+import type { OrgNode } from '../types'
 
-// ── Constants ──────────────────────────────────────────────────────────────
-const CELL = 48       // grid cell size px
-const COLS = 18
-const ROWS = 12
-const TICK_MS = 3500  // state update interval
+// ── Layout ────────────────────────────────────────────────────────────────────
+const CW = 900
+const CH = 580
+const TILE = 32
 
-const LEVEL_COLORS: Record<string, string> = {
-  chairman: '#e24c4b',
-  committee: '#9b59b6',
-  ceo: '#3498db',
-  chief: '#27ae60',
-  team_lead: '#f39c12',
-  specialist: '#7f8c8d',
+// Zone bounds (px)
+const ZONES = {
+  main:    { x: 0,   y: 220, w: 900, h: 360 },
+  breakR:  { x: 0,   y: 0,   w: 390, h: 220 },
+  meetR:   { x: 510, y: 0,   w: 390, h: 220 },
+  corridor:{ x: 390, y: 0,   w: 120, h: 220 },
+}
+
+// Desk anchor positions (character stands at this y, desk drawn above)
+const DESK_ANCHORS = [
+  { x: 130, y: 310 }, { x: 310, y: 310 }, { x: 490, y: 310 }, { x: 670, y: 310 },
+  { x: 130, y: 400 }, { x: 310, y: 400 }, { x: 490, y: 400 }, { x: 670, y: 400 },
+  { x: 130, y: 490 }, { x: 310, y: 490 }, { x: 490, y: 490 }, { x: 670, y: 490 },
+]
+const MEETING_TABLE_CENTER = { x: 705, y: 110 }
+const MEETING_SEATS = [
+  { x: 638, y: 78 }, { x: 772, y: 78 },
+  { x: 638, y: 142 }, { x: 772, y: 142 },
+]
+const BREAK_SPOTS = [{ x: 200, y: 130 }, { x: 200, y: 185 }]
+
+const TICK_MS = 4000
+
+// ── Character designs ─────────────────────────────────────────────────────────
+const DESIGNS = [
+  { hair: '#1a0a00', skin: '#f4c5a1', shirt: '#e74c3c',  pants: '#2c3e50' },
+  { hair: '#2d1b00', skin: '#8d5524', shirt: '#3498db',  pants: '#1a252f' },
+  { hair: '#e8c840', skin: '#f4c5a1', shirt: '#9b59b6',  pants: '#2c3e50' },
+  { hair: '#1a1a2e', skin: '#f8e0c8', shirt: '#27ae60',  pants: '#34495e' },
+  { hair: '#8b4513', skin: '#e8a87c', shirt: '#e67e22',  pants: '#2c3e50' },
+  { hair: '#d3d3d3', skin: '#fde8d8', shirt: '#1abc9c',  pants: '#263238' },
+  { hair: '#0a0a0a', skin: '#6b3a2a', shirt: '#e91e63',  pants: '#1a252f' },
+  { hair: '#c8a96e', skin: '#f0d5b0', shirt: '#2196f3',  pants: '#37474f' },
+]
+
+const LEVEL_COLOR: Record<string, string> = {
+  chairman: '#e24c4b', committee: '#9b59b6', ceo: '#3498db',
+  chief: '#27ae60', team_lead: '#f39c12', specialist: '#7f8c8d',
 }
 const LEVEL_EMOJI: Record<string, string> = {
-  chairman: '👔',
-  committee: '📊',
-  ceo: '💼',
-  chief: '⚡',
-  team_lead: '🎯',
-  specialist: '🔧',
+  chairman: '👔', committee: '📊', ceo: '💼',
+  chief: '⚡', team_lead: '🎯', specialist: '🔧',
 }
-
-// Office zones (grid coords)
-const MEETING_ZONE = { x: 1, y: 1, w: 7, h: 4 }
-const COFFEE_ZONE = { x: 14, y: 1, w: 3, h: 3 }
-
+const LEVEL_KO: Record<string, string> = {
+  chairman: '회장', committee: '위원회', ceo: 'CEO',
+  chief: 'Chief', team_lead: '팀장', specialist: '스페셜리스트',
+}
 const ACTIVITIES: Record<string, string[]> = {
-  chairman: ['전략 검토 중…', '보고서 분석 중…', '의사결정 준비…', '데이터 검토…'],
-  committee: ['시장 분석 중…', '투자 심사 중…', '거버넌스 확인…', '리포트 작성…'],
-  ceo: ['팀 관리 중…', '로드맵 수립…', 'KPI 분석 중…', '운영 최적화…'],
-  general: ['작업 처리 중…', '분석 중…', '검토 중…', '대기 중…'],
+  chairman: ['전략 검토', '보고서 분석', '의사결정'],
+  committee: ['시장 분석', '투자 심사', '거버넌스'],
+  ceo: ['팀 관리', '로드맵 수립', 'KPI 분석'],
+  general: ['작업 처리', '분석 중', '검토 중'],
 }
-const MEETING_MSGS = [
-  '전략 방향을 논의합니다.',
-  '시장 진입 시나리오를 검토합니다.',
-  '리소스 배분 안건입니다.',
-  '분기 목표를 조율합니다.',
-  '리스크 평가를 공유합니다.',
-]
+const MEETING_MSGS = ['전략 방향 논의', '시장 진입 검토', '리소스 배분', '분기 목표 조율']
 
 type AgentMode = 'idle' | 'working' | 'thinking' | 'meeting' | 'coffee'
 
-interface PixelAgent {
-  id: number
-  name: string
-  level: string
-  emoji: string
-  color: string
-  x: number
-  y: number
-  mode: AgentMode
-  activity: string
-  bubble: string
-  deskX: number
-  deskY: number
+// ── Canvas drawing ─────────────────────────────────────────────────────────────
+function drawBg(canvas: HTMLCanvasElement, meetingActive: boolean) {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.clearRect(0, 0, CW, CH)
+
+  const { main, breakR, meetR, corridor } = ZONES
+
+  // ─ Main office: warm wooden plank floor ─
+  const planks = ['#c09560', '#b8895a', '#ba915e', '#bf9762', '#b58854', '#c29862']
+  for (let py = main.y; py < main.y + main.h; py += TILE) {
+    const ci = Math.floor((py - main.y) / TILE) % planks.length
+    ctx.fillStyle = planks[ci]
+    ctx.fillRect(main.x, py, main.w, TILE)
+    ctx.fillStyle = 'rgba(0,0,0,0.055)'
+    ctx.fillRect(main.x, py, main.w, 1)
+    const offset = (Math.floor((py - main.y) / TILE) * 47) % 80
+    for (let sx = offset; sx < main.w; sx += 80) {
+      ctx.fillStyle = 'rgba(0,0,0,0.035)'
+      ctx.fillRect(main.x + sx, py, 1, TILE)
+    }
+  }
+
+  // ─ Break room: cool dark tiles ─
+  for (let ty = breakR.y; ty < breakR.y + breakR.h; ty += TILE) {
+    for (let tx = breakR.x; tx < breakR.x + breakR.w; tx += TILE) {
+      const alt = (Math.floor(tx / TILE) + Math.floor(ty / TILE)) % 2 === 0
+      ctx.fillStyle = alt ? '#536170' : '#4a5564'
+      ctx.fillRect(tx, ty, TILE, TILE)
+    }
+  }
+  for (let ty = breakR.y; ty < breakR.y + breakR.h; ty += TILE) {
+    ctx.fillStyle = 'rgba(0,0,0,0.14)'; ctx.fillRect(breakR.x, ty, breakR.w, 1)
+  }
+  for (let tx = breakR.x; tx < breakR.x + breakR.w; tx += TILE) {
+    ctx.fillStyle = 'rgba(0,0,0,0.10)'; ctx.fillRect(tx, breakR.y, 1, breakR.h)
+  }
+
+  // ─ Meeting room: lighter wood ─
+  for (let py = meetR.y; py < meetR.y + meetR.h; py += TILE) {
+    const ci = Math.floor((py - meetR.y) / TILE) % 3
+    ctx.fillStyle = meetingActive
+      ? ['#d4b896', '#c8aa82', '#d0b48e'][ci]
+      : ['#c4a27c', '#b8966e', '#c0a07a'][ci]
+    ctx.fillRect(meetR.x, py, meetR.w, TILE)
+    ctx.fillStyle = 'rgba(0,0,0,0.045)'; ctx.fillRect(meetR.x, py, meetR.w, 1)
+  }
+  if (meetingActive) {
+    const g = ctx.createRadialGradient(
+      MEETING_TABLE_CENTER.x, MEETING_TABLE_CENTER.y, 0,
+      MEETING_TABLE_CENTER.x, MEETING_TABLE_CENTER.y, 130,
+    )
+    g.addColorStop(0, 'rgba(155,89,182,0.18)')
+    g.addColorStop(1, 'rgba(155,89,182,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(meetR.x, meetR.y, meetR.w, meetR.h)
+  }
+
+  // ─ Corridor: dark passage ─
+  ctx.fillStyle = '#312418'; ctx.fillRect(corridor.x, corridor.y, corridor.w, corridor.h)
+  ctx.fillStyle = '#3a2c1e'; ctx.fillRect(corridor.x + 16, corridor.y, corridor.w - 32, corridor.h)
+  for (let ky = corridor.y + 16; ky < corridor.y + corridor.h - 16; ky += 48) {
+    ctx.fillStyle = 'rgba(255,220,120,0.12)'
+    ctx.beginPath(); ctx.arc(corridor.x + corridor.w / 2, ky, 4, 0, Math.PI * 2); ctx.fill()
+  }
+
+  // ─ Walls ─
+  ctx.fillStyle = '#221610'
+  ctx.fillRect(0, 0, CW, 10); ctx.fillRect(0, CH - 6, CW, 6)
+  ctx.fillRect(0, 0, 6, CH); ctx.fillRect(CW - 6, 0, 6, CH)
+  ctx.fillStyle = '#1a1008'
+  ctx.fillRect(0, main.y - 14, CW, 14)
+  // doorways
+  ctx.fillStyle = planks[0]; ctx.fillRect(breakR.w - 28, main.y - 14, 56, 14)
+  ctx.fillStyle = meetingActive ? '#d4b896' : '#c4a27c'
+  ctx.fillRect(meetR.x + 24, main.y - 14, 56, 14)
+
+  // ─ Bookshelves ─
+  shelf(ctx, 6,      main.y,       76, 52)
+  shelf(ctx, 820,    main.y,       74, 52)
+  shelf(ctx, 210,    main.y,       100, 52)
+  shelf(ctx, 590,    main.y,       100, 52)
+  shelf(ctx, CW-76,  10,           70, 96)
+  shelf(ctx, CW-76,  112,          70, 88)
+  shelf(ctx, 6,      10,           70, 88)
+  shelf(ctx, 6,      104,          70, 96)
+
+  // ─ Desks ─
+  for (const dp of DESK_ANCHORS) drawDesk(ctx, dp.x - 52, dp.y - 54)
+
+  // ─ Meeting table ─
+  drawMeetTable(ctx, MEETING_TABLE_CENTER.x, MEETING_TABLE_CENTER.y, meetingActive)
+
+  // ─ Plants ─
+  plant(ctx, 8,        main.y + 12)
+  plant(ctx, CW - 48,  main.y + 12)
+  plant(ctx, 8,        main.y + 300)
+  plant(ctx, CW - 48,  main.y + 300)
+  plant(ctx, meetR.x + 6, 8)
+
+  // ─ Coffee machine ─
+  coffeeMachine(ctx, 300, 34)
+
+  // ─ Clock ─
+  drawClock(ctx, meetR.x + 44, 20)
+
+  // ─ Picture frame ─
+  picture(ctx, meetR.x + 155, 18)
+
+  // ─ Wall labels ─
+  ctx.font = 'bold 9px monospace'
+  ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillText('BREAK ROOM', 106, 14)
+  ctx.fillStyle = meetingActive ? 'rgba(200,140,255,0.5)' : 'rgba(255,255,255,0.18)'
+  ctx.fillText('MEETING ROOM', meetR.x + 80, 14)
 }
 
-// ── Pixel character component ──────────────────────────────────────────────
-function PixelChar({ agent }: { agent: PixelAgent }) {
-  const isMeeting = agent.mode === 'meeting'
-  const isWorking = agent.mode === 'working'
-  const isThinking = agent.mode === 'thinking'
+function shelf(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+  ctx.fillStyle = '#5a3818'; ctx.fillRect(x, y, w, h)
+  ctx.fillStyle = '#3e2610'; ctx.fillRect(x, y + Math.floor(h / 2) - 2, w, 4)
+  const bc = ['#e74c3c','#3498db','#27ae60','#f39c12','#9b59b6','#e67e22','#1abc9c','#e91e63']
+  const bw = 9, halfH = Math.floor(h / 2)
+  for (let bx = x + 3; bx < x + w - 3; bx += bw) {
+    const c = bc[Math.floor((bx - x) / bw) % bc.length]
+    ctx.fillStyle = c
+    ctx.fillRect(bx, y + 4, bw - 2, halfH - 6)
+    ctx.fillRect(bx, y + halfH + 2, bw - 2, halfH - 6)
+  }
+  ctx.strokeStyle = '#2a1808'; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h)
+}
+
+function drawDesk(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.fillRect(x + 5, y + 57, 100, 8)
+  ctx.fillStyle = '#8b5e3c'; ctx.fillRect(x, y, 100, 50)
+  ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(x, y, 100, 3)
+  ctx.fillStyle = '#6b4220'; ctx.fillRect(x, y + 43, 100, 14)
+  ctx.fillStyle = '#5a3818'
+  ctx.fillRect(x + 4, y + 54, 9, 8); ctx.fillRect(x + 87, y + 54, 9, 8)
+  ctx.fillStyle = '#1a1a2e'; ctx.fillRect(x + 28, y + 6, 44, 30)
+  ctx.fillStyle = '#0d1117'; ctx.fillRect(x + 30, y + 8, 40, 26)
+  ctx.fillStyle = 'rgba(40,120,200,0.35)'; ctx.fillRect(x + 30, y + 8, 40, 26)
+  ctx.fillStyle = 'rgba(120,200,255,0.7)'
+  ctx.fillRect(x + 33, y + 12, 22, 2); ctx.fillRect(x + 33, y + 16, 30, 2)
+  ctx.fillRect(x + 33, y + 20, 18, 2); ctx.fillRect(x + 33, y + 24, 26, 2)
+  ctx.fillStyle = 'rgba(120,255,180,0.5)'; ctx.fillRect(x + 33, y + 28, 14, 2)
+  ctx.fillStyle = '#4a4a4a'
+  ctx.fillRect(x + 46, y + 34, 8, 8); ctx.fillRect(x + 40, y + 40, 20, 4)
+  ctx.fillStyle = '#c8c8c8'; ctx.fillRect(x + 24, y + 38, 36, 6)
+  ctx.fillStyle = '#aaaaaa'
+  for (let ki = 0; ki < 6; ki++) ctx.fillRect(x + 26 + ki * 5, y + 39, 4, 4)
+}
+
+function drawMeetTable(ctx: CanvasRenderingContext2D, cx: number, cy: number, active: boolean) {
+  ctx.fillStyle = 'rgba(0,0,0,0.18)'
+  ctx.beginPath(); ctx.ellipse(cx + 4, cy + 5, 72, 44, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.fillStyle = active ? '#a07848' : '#8b6340'
+  ctx.beginPath(); ctx.ellipse(cx, cy, 72, 44, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.fillStyle = active ? '#b8905a' : '#9e7248'
+  ctx.beginPath(); ctx.ellipse(cx, cy - 4, 65, 38, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.fillStyle = 'rgba(255,255,255,0.1)'
+  ctx.beginPath(); ctx.ellipse(cx - 22, cy - 16, 28, 16, -Math.PI / 4, 0, Math.PI * 2); ctx.fill()
+  if (active) {
+    ctx.strokeStyle = 'rgba(155,89,182,0.7)'; ctx.lineWidth = 2
+    ctx.beginPath(); ctx.ellipse(cx, cy, 74, 46, 0, 0, Math.PI * 2); ctx.stroke()
+  }
+  // chairs
+  for (const cp of [
+    { x: cx - 80, y: cy - 10 }, { x: cx + 80, y: cy - 10 },
+    { x: cx - 52, y: cy + 42 }, { x: cx + 52, y: cy + 42 },
+  ]) {
+    ctx.fillStyle = '#5d3a1a'; ctx.fillRect(cp.x - 14, cp.y - 8, 28, 18)
+    ctx.fillStyle = '#7a4e28'; ctx.fillRect(cp.x - 12, cp.y - 6, 24, 14)
+  }
+}
+
+function plant(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  ctx.fillStyle = '#b06030'; ctx.fillRect(x + 7, y + 22, 18, 14)
+  ctx.fillStyle = '#8a4820'; ctx.fillRect(x + 5, y + 20, 22, 4)
+  ctx.fillStyle = '#2e7d32'
+  ctx.beginPath(); ctx.ellipse(x + 16, y + 13, 15, 11, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.fillStyle = '#388e3c'
+  ctx.beginPath(); ctx.ellipse(x + 9,  y + 8, 8, 7,  Math.PI / 5, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.ellipse(x + 23, y + 8, 8, 7, -Math.PI / 5, 0, Math.PI * 2); ctx.fill()
+  ctx.fillStyle = '#43a047'
+  ctx.beginPath(); ctx.ellipse(x + 16, y + 7, 6, 5, 0, 0, Math.PI * 2); ctx.fill()
+}
+
+function coffeeMachine(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect(x + 4, y + 4, 44, 62)
+  ctx.fillStyle = '#2a2a2a'; ctx.fillRect(x, y, 44, 62)
+  ctx.fillStyle = '#333'; ctx.fillRect(x, y, 44, 8)
+  ctx.fillStyle = '#0d4a28'; ctx.fillRect(x + 6, y + 10, 32, 18)
+  ctx.fillStyle = '#1a8a4a'; ctx.fillRect(x + 8, y + 12, 8, 3)
+  ctx.fillStyle = '#0d6638'; ctx.fillRect(x + 8, y + 17, 20, 3)
+  ctx.fillStyle = '#1aaa5a'; ctx.fillRect(x + 8, y + 22, 10, 2)
+  ctx.fillStyle = '#444'; ctx.fillRect(x + 10, y + 38, 24, 16)
+  ctx.fillStyle = '#f5f5dc'; ctx.fillRect(x + 14, y + 40, 16, 12)
+  ctx.fillStyle = '#c8a060'; ctx.fillRect(x + 16, y + 44, 12, 4)
+  ctx.strokeStyle = 'rgba(220,220,220,0.5)'; ctx.lineWidth = 1.5
+  for (let si = 0; si < 2; si++) {
+    ctx.beginPath(); ctx.moveTo(x + 18 + si * 8, y + 34)
+    ctx.quadraticCurveTo(x + 14 + si * 8, y + 28, x + 18 + si * 8, y + 22); ctx.stroke()
+  }
+  ctx.fillStyle = '#1a1a1a'; ctx.fillRect(x - 2, y + 58, 48, 8)
+}
+
+function drawClock(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  const now = new Date(), h = now.getHours() % 12, m = now.getMinutes()
+  ctx.fillStyle = '#e8e0d0'
+  ctx.beginPath(); ctx.arc(x + 20, y + 20, 18, 0, Math.PI * 2); ctx.fill()
+  ctx.strokeStyle = '#5d3a1a'; ctx.lineWidth = 2.5; ctx.stroke()
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2 - Math.PI / 2
+    ctx.fillStyle = i % 3 === 0 ? '#333' : '#888'
+    ctx.fillRect(x + 20 + Math.cos(a) * 14 - 1, y + 20 + Math.sin(a) * 14 - 1, 2, 2)
+  }
+  const ha = (h / 12 + m / 720) * Math.PI * 2 - Math.PI / 2
+  const ma = (m / 60) * Math.PI * 2 - Math.PI / 2
+  ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 2
+  ctx.beginPath(); ctx.moveTo(x + 20, y + 20)
+  ctx.lineTo(x + 20 + Math.cos(ha) * 10, y + 20 + Math.sin(ha) * 10); ctx.stroke()
+  ctx.lineWidth = 1.5
+  ctx.beginPath(); ctx.moveTo(x + 20, y + 20)
+  ctx.lineTo(x + 20 + Math.cos(ma) * 14, y + 20 + Math.sin(ma) * 14); ctx.stroke()
+  ctx.fillStyle = '#333'
+  ctx.beginPath(); ctx.arc(x + 20, y + 20, 2, 0, Math.PI * 2); ctx.fill()
+}
+
+function picture(ctx: CanvasRenderingContext2D, x: number, y: number) {
+  ctx.fillStyle = '#5d3a1a'; ctx.fillRect(x, y, 64, 44)
+  ctx.fillStyle = '#4a90e2'; ctx.fillRect(x + 4, y + 4, 56, 22)
+  ctx.fillStyle = '#27ae60'; ctx.fillRect(x + 4, y + 26, 56, 14)
+  ctx.fillStyle = '#2ecc71'
+  for (let ti = 0; ti < 3; ti++) {
+    ctx.beginPath()
+    ctx.moveTo(x + 10 + ti * 18, y + 28); ctx.lineTo(x + 19 + ti * 18, y + 14); ctx.lineTo(x + 28 + ti * 18, y + 28)
+    ctx.fill()
+  }
+  ctx.fillStyle = '#f1c40f'
+  ctx.beginPath(); ctx.arc(x + 50, y + 12, 6, 0, Math.PI * 2); ctx.fill()
+}
+
+// ── SVG pixel-art character ────────────────────────────────────────────────────
+const P = 3
+
+function buildPixels(d: typeof DESIGNS[0]): [number, number, string][] {
+  const { hair: H, skin: S, shirt: C, pants: Pt } = d
+  const eye = '#222', mouth = '#c0506a', foot = '#3a3a3a'
+  return [
+    [1,0,H],[2,0,H],[3,0,H],[4,0,H],[5,0,H],
+    [0,1,H],[1,1,H],[2,1,H],[3,1,H],[4,1,H],[5,1,H],[6,1,H],
+    [0,2,S],[1,2,S],[2,2,S],[3,2,S],[4,2,S],[5,2,S],[6,2,S],
+    [0,3,S],[1,3,eye],[2,3,S],[3,3,S],[4,3,eye],[5,3,S],[6,3,S],
+    [0,4,S],[1,4,S],[2,4,S],[3,4,S],[4,4,S],[5,4,S],[6,4,S],
+    [0,5,S],[1,5,S],[2,5,mouth],[3,5,mouth],[4,5,mouth],[5,5,S],[6,5,S],
+    [0,6,C],[1,6,C],[2,6,C],[3,6,C],[4,6,C],[5,6,C],[6,6,C],
+    [0,7,C],[1,7,C],[2,7,C],[3,7,C],[4,7,C],[5,7,C],[6,7,C],
+    [0,8,C],[1,8,C],[2,8,C],[3,8,C],[4,8,C],[5,8,C],[6,8,C],
+    [0,9,Pt],[1,9,Pt],[2,9,Pt],[4,9,Pt],[5,9,Pt],[6,9,Pt],
+    [0,10,Pt],[1,10,Pt],[5,10,Pt],[6,10,Pt],
+    [0,11,foot],[1,11,foot],[5,11,foot],[6,11,foot],
+  ]
+}
+
+const CHAR_W = 7 * P
+const CHAR_H = 12 * P
+
+interface LiveAgent {
+  id: number; name: string; level: string; ai_model: string; ai_provider: string
+  charIdx: number; deskIdx: number; x: number; y: number; mode: AgentMode; bubble: string
+}
+
+function PixelChar({
+  charIdx, name, level, x, y, mode, bubble, isSelected, onClick,
+}: {
+  charIdx: number; name: string; level: string; x: number; y: number
+  mode: AgentMode; bubble: string; isSelected: boolean; onClick: () => void
+}) {
+  const design = DESIGNS[charIdx % DESIGNS.length]
+  const pixels = buildPixels(design)
+  const lc = LEVEL_COLOR[level] || '#7f8c8d'
 
   return (
     <div
+      onClick={onClick}
       style={{
         position: 'absolute',
-        left: agent.x,
-        top: agent.y,
-        transition: 'left 1.8s cubic-bezier(0.4,0,0.2,1), top 1.8s cubic-bezier(0.4,0,0.2,1)',
-        zIndex: isMeeting ? 20 : 5,
-        width: 44,
-        textAlign: 'center',
-        pointerEvents: 'none',
+        left: x - CHAR_W / 2,
+        top: y - CHAR_H,
+        width: CHAR_W,
+        transition: 'left 1.6s cubic-bezier(0.4,0,0.2,1), top 1.6s cubic-bezier(0.4,0,0.2,1)',
+        zIndex: mode === 'meeting' ? 20 : 10,
+        cursor: 'pointer',
+        userSelect: 'none',
       }}
     >
-      {/* Speech bubble */}
-      {agent.bubble && (
+      {bubble && (
         <div style={{
-          position: 'absolute',
-          bottom: '100%',
-          left: '50%',
+          position: 'absolute', bottom: CHAR_H + 5, left: '50%',
           transform: 'translateX(-50%)',
-          background: 'rgba(15,15,30,0.97)',
-          border: `1px solid ${agent.color}55`,
-          borderRadius: 3,
-          padding: '2px 7px',
-          fontSize: 9,
-          color: '#ccc',
-          whiteSpace: 'nowrap',
-          marginBottom: 5,
-          maxWidth: 130,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          fontFamily: 'monospace',
-          letterSpacing: 0,
+          background: 'rgba(8,8,18,0.94)', border: `1px solid ${lc}55`,
+          borderRadius: 4, padding: '2px 7px', fontSize: 8.5, color: '#ccc',
+          whiteSpace: 'nowrap', fontFamily: 'monospace', pointerEvents: 'none', zIndex: 30,
+          minWidth: 60, textAlign: 'center',
         }}>
-          {agent.bubble}
+          {bubble}
           <div style={{
-            position: 'absolute',
-            bottom: -4,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            width: 0,
-            height: 0,
-            borderLeft: '4px solid transparent',
-            borderRight: '4px solid transparent',
-            borderTop: `4px solid ${agent.color}55`,
+            position: 'absolute', bottom: -5, left: '50%', transform: 'translateX(-50%)',
+            borderLeft: '4px solid transparent', borderRight: '4px solid transparent',
+            borderTop: `5px solid ${lc}55`,
           }} />
         </div>
       )}
 
-      {/* Character head */}
-      <div style={{
-        width: 32,
-        height: 32,
-        margin: '0 auto',
-        background: agent.color,
-        border: `2px solid ${agent.color}cc`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: 16,
-        imageRendering: 'pixelated',
-        boxShadow: isWorking
-          ? `0 0 14px ${agent.color}88, 0 0 4px ${agent.color}`
-          : isMeeting
-          ? `0 0 10px ${agent.color}66`
-          : 'none',
-        animation: isThinking
-          ? 'charPulse 1.4s ease-in-out infinite'
-          : agent.mode === 'idle'
-          ? 'charBob 2.2s ease-in-out infinite'
-          : 'none',
-      }}>
-        {agent.emoji}
-      </div>
-
-      {/* Body */}
-      <div style={{
-        width: 24,
-        height: 10,
-        background: agent.color,
-        opacity: 0.55,
-        margin: '2px auto 0',
-        borderRadius: '0 0 3px 3px',
-      }} />
-
-      {/* Name tag */}
-      <div style={{
-        fontSize: 8,
-        color: '#94a3b8',
-        marginTop: 3,
-        fontFamily: 'monospace',
-        lineHeight: 1.2,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}>
-        {agent.name.length > 6 ? agent.name.slice(0, 6) + '…' : agent.name}
-      </div>
-    </div>
-  )
-}
-
-// ── Meeting room label ─────────────────────────────────────────────────────
-function MeetingRoom({ active, msg }: { active: boolean; msg: string }) {
-  return (
-    <div style={{
-      position: 'absolute',
-      left: MEETING_ZONE.x * CELL,
-      top: MEETING_ZONE.y * CELL,
-      width: MEETING_ZONE.w * CELL,
-      height: MEETING_ZONE.h * CELL,
-      border: active ? '2px solid #9b59b6' : '1px dashed #333',
-      borderRadius: 4,
-      background: active ? 'rgba(155,89,182,0.08)' : 'rgba(255,255,255,0.01)',
-      transition: 'all 0.8s ease',
-      boxShadow: active ? '0 0 24px rgba(155,89,182,0.25) inset' : 'none',
-      pointerEvents: 'none',
-    }}>
-      <div style={{
-        position: 'absolute',
-        top: 6,
-        left: 10,
-        fontSize: 9,
-        color: active ? '#9b59b6' : '#444',
-        fontFamily: 'monospace',
-        letterSpacing: 1,
-        textTransform: 'uppercase',
-        transition: 'color 0.5s',
-      }}>
-        {active ? '● 회의 진행 중' : '회의실'}
-      </div>
-
-      {/* Meeting table */}
-      <div style={{
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -30%)',
-        width: 100,
-        height: 44,
-        background: active ? 'rgba(155,89,182,0.2)' : 'rgba(255,255,255,0.04)',
-        border: '1px solid #333',
-        borderRadius: 22,
-        transition: 'all 0.5s',
-      }} />
-
-      {/* Meeting message */}
-      {active && msg && (
+      {isSelected && (
         <div style={{
-          position: 'absolute',
-          bottom: 8,
-          left: 0,
-          right: 0,
-          textAlign: 'center',
-          fontSize: 9,
-          color: '#c4a0e8',
-          fontFamily: 'monospace',
-          padding: '0 8px',
-        }}>
-          "{msg}"
-        </div>
+          position: 'absolute', inset: -4, border: `2px solid ${lc}`,
+          borderRadius: 4, pointerEvents: 'none', animation: 'selPulse 1.4s ease-in-out infinite',
+        }} />
       )}
+
+      <svg
+        width={CHAR_W} height={CHAR_H}
+        style={{ imageRendering: 'pixelated', display: 'block' }}
+        shapeRendering="crispEdges"
+      >
+        {pixels.map(([px, py, color], i) => (
+          <rect key={i} x={px * P} y={py * P} width={P} height={P} fill={color} />
+        ))}
+      </svg>
+
+      <div style={{
+        position: 'absolute', top: CHAR_H + 2, left: '50%', transform: 'translateX(-50%)',
+        background: 'rgba(0,0,0,0.75)', border: `1px solid ${lc}44`, borderRadius: 3,
+        padding: '1px 5px', fontSize: 7.5, color: '#ddd', whiteSpace: 'nowrap',
+        fontFamily: 'monospace', pointerEvents: 'none', textAlign: 'center',
+      }}>
+        {name.length > 7 ? name.slice(0, 7) + '…' : name}
+      </div>
     </div>
   )
 }
 
-// ── Coffee zone ─────────────────────────────────────────────────────────────
-function CoffeeZone() {
-  return (
-    <div style={{
-      position: 'absolute',
-      left: COFFEE_ZONE.x * CELL,
-      top: COFFEE_ZONE.y * CELL,
-      width: COFFEE_ZONE.w * CELL,
-      height: COFFEE_ZONE.h * CELL,
-      border: '1px dashed #2a2a3a',
-      borderRadius: 4,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexDirection: 'column',
-      gap: 2,
-      pointerEvents: 'none',
-    }}>
-      <div style={{ fontSize: 18 }}>☕</div>
-      <div style={{ fontSize: 8, color: '#444', fontFamily: 'monospace' }}>휴식</div>
-    </div>
-  )
-}
-
-// ── Floor tile grid ─────────────────────────────────────────────────────────
-function FloorGrid() {
-  return (
-    <div style={{
-      position: 'absolute',
-      inset: 0,
-      backgroundImage: `
-        linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px)
-      `,
-      backgroundSize: `${CELL}px ${CELL}px`,
-      pointerEvents: 'none',
-    }} />
-  )
-}
-
-// ── Desk ───────────────────────────────────────────────────────────────────
-function Desk({ x, y, active }: { x: number; y: number; active: boolean }) {
-  return (
-    <div style={{
-      position: 'absolute',
-      left: x * CELL + 4,
-      top: y * CELL + 14,
-      width: CELL - 8,
-      height: CELL * 0.6,
-      background: active ? 'rgba(52,152,219,0.12)' : 'rgba(255,255,255,0.04)',
-      border: active ? '1px solid rgba(52,152,219,0.3)' : '1px solid #2a2a3a',
-      borderRadius: 3,
-      transition: 'all 0.5s',
-      pointerEvents: 'none',
-    }} />
-  )
-}
-
-// ── Main component ──────────────────────────────────────────────────────────
+// ── Main component ─────────────────────────────────────────────────────────────
 export default function LiveOffice() {
-  const [agents, setAgents] = useState<PixelAgent[]>([])
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [agents, setAgents] = useState<LiveAgent[]>([])
   const [meetingActive, setMeetingActive] = useState(false)
-  const [meetingMsg, setMeetingMsg] = useState('')
-  const [tick, setTick] = useState(0)
+  const [selectedAgent, setSelectedAgent] = useState<LiveAgent | null>(null)
   const tickRef = useRef(0)
+  const meetRef = useRef(false)
 
-  // Load org nodes once
   useEffect(() => {
     orgApi.nodes().then((res) => {
-      const nodes = res.data as { id: number; name: string; level: string }[]
-      // Assign desk positions row by row
-      const deskPositions = buildDeskPositions(nodes.length)
-      const built: PixelAgent[] = nodes.map((n, i) => {
-        const dp = deskPositions[i] || { col: (i % 8) + 2, row: 7 }
-        const px = dp.col * CELL
-        const py = dp.row * CELL - 36  // character sits above desk
+      const nodes = res.data as OrgNode[]
+      setAgents(nodes.map((n, i) => {
+        const dp = DESK_ANCHORS[i % DESK_ANCHORS.length]
         return {
-          id: n.id,
-          name: n.name,
-          level: n.level,
-          emoji: LEVEL_EMOJI[n.level] || '🤖',
-          color: LEVEL_COLORS[n.level] || '#7f8c8d',
-          x: px,
-          y: py,
-          mode: 'idle',
-          activity: '',
-          bubble: '',
-          deskX: dp.col,
-          deskY: dp.row,
+          id: n.id, name: n.name, level: n.level,
+          ai_model: n.ai_model || '—', ai_provider: n.ai_provider || 'mock',
+          charIdx: i, deskIdx: i % DESK_ANCHORS.length,
+          x: dp.x, y: dp.y,
+          mode: 'idle' as AgentMode, bubble: '',
         }
-      })
-      setAgents(built)
+      }))
     })
   }, [])
 
-  // Check for open meetings
   useEffect(() => {
-    const checkMeetings = () => {
+    const check = () => {
       meetingsApi.list().then((res) => {
         const open = (res.data as { status: string }[]).some((m) => m.status === 'open')
-        setMeetingActive(open)
-        if (open) {
-          setMeetingMsg(MEETING_MSGS[Math.floor(Math.random() * MEETING_MSGS.length)])
-        }
+        setMeetingActive(open); meetRef.current = open
       }).catch(() => {})
     }
-    checkMeetings()
-    const interval = setInterval(checkMeetings, 10000)
-    return () => clearInterval(interval)
+    check(); const iv = setInterval(check, 10000); return () => clearInterval(iv)
   }, [])
 
-  // Animation tick - update agent states
+  useEffect(() => {
+    if (canvasRef.current) drawBg(canvasRef.current, meetingActive)
+  }, [meetingActive, agents.length])
+
+  useEffect(() => {
+    const iv = setInterval(() => {
+      if (canvasRef.current) drawBg(canvasRef.current, meetRef.current)
+    }, 60000)
+    return () => clearInterval(iv)
+  }, [])
+
   useEffect(() => {
     if (agents.length === 0) return
-
     const timer = setInterval(() => {
       tickRef.current += 1
       const t = tickRef.current
-      setTick(t)
-
       setAgents((prev) =>
         prev.map((agent, i) => {
-          // If meeting is active, some agents go to meeting room
-          if (meetingActive && i < 4) {
-            const meetingPositions = [
-              { x: (MEETING_ZONE.x + 1) * CELL + 10, y: (MEETING_ZONE.y + 1) * CELL },
-              { x: (MEETING_ZONE.x + 3) * CELL - 10, y: (MEETING_ZONE.y + 1) * CELL },
-              { x: (MEETING_ZONE.x + 1) * CELL + 10, y: (MEETING_ZONE.y + 2) * CELL + 4 },
-              { x: (MEETING_ZONE.x + 3) * CELL - 10, y: (MEETING_ZONE.y + 2) * CELL + 4 },
-            ]
-            const pos = meetingPositions[i]
-            const actPool = ACTIVITIES[agent.level] || ACTIVITIES.general
+          if (meetRef.current && i < 4) {
+            const seat = MEETING_SEATS[i % MEETING_SEATS.length]
             return {
-              ...agent,
-              x: pos.x,
-              y: pos.y,
-              mode: 'meeting',
-              bubble: t % 3 === i % 3 ? MEETING_MSGS[t % MEETING_MSGS.length] : '',
+              ...agent, x: seat.x, y: seat.y, mode: 'meeting' as AgentMode,
+              bubble: t % 4 === i % 4 ? MEETING_MSGS[t % MEETING_MSGS.length] : '',
             }
           }
-
-          // Normal desk work with occasional coffee break
-          const cycle = (t + i * 3) % 12
-          let mode: AgentMode = 'idle'
-          let bubble = ''
+          const cycle = (t + i * 2) % 14
+          let mode: AgentMode = 'idle', bubble = ''
+          const dp = DESK_ANCHORS[agent.deskIdx]
+          let x = dp.x, y = dp.y
 
           if (cycle < 5) {
             mode = 'working'
             const pool = ACTIVITIES[agent.level] || ACTIVITIES.general
             bubble = pool[(t + i) % pool.length]
           } else if (cycle < 8) {
-            mode = 'thinking'
-            bubble = '...'
-          } else if (cycle === 9 && i % 3 === 0) {
+            mode = 'thinking'; bubble = '분석 중…'
+          } else if (cycle === 10 && i % 4 === 0) {
             mode = 'coffee'
+            const bp = BREAK_SPOTS[i % BREAK_SPOTS.length]
+            x = bp.x; y = bp.y; bubble = '☕'
           }
-
-          // Coffee break position
-          const deskX = agent.deskX * CELL
-          const deskY = agent.deskY * CELL - 36
-          let x = deskX
-          let y = deskY
-          if (mode === 'coffee') {
-            x = (COFFEE_ZONE.x + 1) * CELL
-            y = (COFFEE_ZONE.y + 0.5) * CELL
-          }
-
           return { ...agent, x, y, mode, bubble }
         })
       )
     }, TICK_MS)
-
     return () => clearInterval(timer)
-  }, [agents.length, meetingActive])
+  }, [agents.length])
 
-  const W = COLS * CELL
-  const H = ROWS * CELL
+  const selData = selectedAgent ? agents.find((a) => a.id === selectedAgent.id) : null
 
   return (
     <div className="space-y-3 animate-fade-in">
@@ -415,106 +497,115 @@ export default function LiveOffice() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold text-slate-200">AI 픽셀 오피스</h2>
-          <p className="text-[10px] text-slate-600 mt-0.5">
-            {agents.length}명의 AI가 실시간으로 근무 중입니다
-            {meetingActive && (
-              <span className="ml-2 text-purple-400 animate-pulse">● 회의 진행 중</span>
-            )}
+          <p className="text-[10px] text-slate-500 mt-0.5">
+            {agents.length}명 근무 중
+            {meetingActive && <span className="ml-2 text-purple-400 animate-pulse">● 회의 진행 중</span>}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {Object.entries(LEVEL_COLORS).slice(0, 4).map(([level, color]) => (
-            <div key={level} className="flex items-center gap-1">
-              <div style={{ width: 8, height: 8, background: color, borderRadius: 2 }} />
-              <span className="text-[9px] text-slate-500 font-mono">
-                {level === 'chairman' ? '회장' : level === 'committee' ? '위원회' : level === 'ceo' ? 'CEO' : level}
-              </span>
+        <div className="flex gap-3 flex-wrap">
+          {(['chairman','committee','ceo','chief','team_lead'] as const).map((lv) => (
+            <div key={lv} className="flex items-center gap-1">
+              <div style={{ width: 8, height: 8, borderRadius: 2, background: LEVEL_COLOR[lv] }} />
+              <span className="text-[9px] text-slate-500 font-mono">{LEVEL_KO[lv]}</span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Office canvas */}
-      <div
-        className="card overflow-hidden"
-        style={{ width: '100%', overflowX: 'auto' }}
-      >
-        <div
-          style={{
-            position: 'relative',
-            width: W,
-            height: H,
-            background: 'linear-gradient(135deg, #0d0d1a 0%, #0a0a14 100%)',
-            imageRendering: 'pixelated',
-            minWidth: W,
-          }}
-        >
-          <FloorGrid />
+      {/* Canvas + characters */}
+      <div className="card overflow-hidden p-0">
+        <div style={{ overflowX: 'auto' }}>
+          <div style={{ position: 'relative', width: CW, height: CH }}>
+            <canvas
+              ref={canvasRef} width={CW} height={CH}
+              style={{ display: 'block', imageRendering: 'pixelated' }}
+            />
+            {agents.map((agent) => (
+              <PixelChar
+                key={agent.id}
+                charIdx={agent.charIdx} name={agent.name} level={agent.level}
+                x={agent.x} y={agent.y} mode={agent.mode} bubble={agent.bubble}
+                isSelected={selectedAgent?.id === agent.id}
+                onClick={() => setSelectedAgent((p) => p?.id === agent.id ? null : agent)}
+              />
+            ))}
+            {agents.length === 0 && (
+              <div style={{
+                position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center', gap: 10,
+              }}>
+                <div style={{ fontSize: 36 }}>🏢</div>
+                <div style={{ color: '#555', fontSize: 13, fontFamily: 'monospace' }}>조직원이 없습니다</div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
-          {/* Zones */}
-          <MeetingRoom active={meetingActive} msg={meetingMsg} />
-          <CoffeeZone />
-
-          {/* Desks */}
-          {agents.map((a) => (
-            <Desk key={a.id} x={a.deskX} y={a.deskY} active={a.mode === 'working' || a.mode === 'thinking'} />
-          ))}
-
-          {/* Characters */}
-          {agents.map((a) => (
-            <PixelChar key={a.id} agent={a} />
-          ))}
-
-          {/* Empty state */}
-          {agents.length === 0 && (
-            <div style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-            }}>
-              <div style={{ fontSize: 32 }}>🏢</div>
-              <div style={{ color: '#444', fontSize: 12, fontFamily: 'monospace' }}>
-                조직원이 없습니다
+      {/* Selected agent detail */}
+      {selData && (
+        <div className="card p-4" style={{ borderLeft: `3px solid ${LEVEL_COLOR[selData.level] || '#555'}` }}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-3">
+              <div style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: LEVEL_COLOR[selData.level] || '#555',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
+              }}>
+                {LEVEL_EMOJI[selData.level] || '🤖'}
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-slate-200">{selData.name}</div>
+                <div className="text-[10px] text-slate-500 font-mono">{LEVEL_KO[selData.level] || selData.level}</div>
               </div>
             </div>
-          )}
+            <button onClick={() => setSelectedAgent(null)} className="text-slate-600 hover:text-slate-300 text-xs px-2">✕</button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-bg-elevated rounded-lg px-3 py-2">
+              <div className="text-[9px] text-slate-500 mb-1">AI 프로바이더</div>
+              <div className="text-xs font-mono text-brand-light">{selData.ai_provider}</div>
+            </div>
+            <div className="bg-bg-elevated rounded-lg px-3 py-2">
+              <div className="text-[9px] text-slate-500 mb-1">AI 모델</div>
+              <div className="text-xs font-mono text-emerald-400 truncate">{selData.ai_model}</div>
+            </div>
+            <div className="bg-bg-elevated rounded-lg px-3 py-2">
+              <div className="text-[9px] text-slate-500 mb-1">현재 상태</div>
+              <div className="text-xs">
+                {selData.mode === 'meeting' ? '🟣 회의 중'
+                  : selData.mode === 'working' ? '🟢 작업 중'
+                  : selData.mode === 'thinking' ? '🔵 분석 중'
+                  : selData.mode === 'coffee' ? '☕ 휴식' : '⚪ 대기'}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Agent status list */}
+      {/* Agent cards */}
       {agents.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {agents.map((a) => (
             <div
               key={a.id}
-              className="bg-bg-elevated rounded-lg px-3 py-2 flex items-center gap-2"
+              onClick={() => setSelectedAgent((p) => p?.id === a.id ? null : a)}
+              className="bg-bg-elevated rounded-lg px-3 py-2 flex items-center gap-2 cursor-pointer hover:bg-bg-card transition-colors"
+              style={{ borderLeft: `3px solid ${LEVEL_COLOR[a.level] || '#555'}` }}
             >
-              <div
-                style={{
-                  width: 20,
-                  height: 20,
-                  background: a.color,
-                  borderRadius: 3,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 10,
-                  flexShrink: 0,
-                }}
-              >
-                {a.emoji}
-              </div>
-              <div className="min-w-0">
+              <div style={{ fontSize: 13, flexShrink: 0 }}>{LEVEL_EMOJI[a.level] || '🤖'}</div>
+              <div className="min-w-0 flex-1">
                 <div className="text-[10px] font-medium text-slate-300 truncate">{a.name}</div>
                 <div className="text-[9px] text-slate-600 font-mono truncate">
-                  {a.mode === 'meeting' ? '🟣 회의 중' :
-                   a.mode === 'working' ? '🟢 작업 중' :
-                   a.mode === 'thinking' ? '🔵 분석 중' :
-                   a.mode === 'coffee' ? '☕ 휴식' : '⚪ 대기'}
+                  {a.ai_provider}/{a.ai_model !== '—' ? a.ai_model : '미지정'}
+                </div>
+                <div className="text-[9px] mt-0.5">
+                  {a.mode === 'meeting' ? '🟣' : a.mode === 'working' ? '🟢'
+                    : a.mode === 'thinking' ? '🔵' : a.mode === 'coffee' ? '☕' : '⚪'}
+                  <span className="text-slate-600 ml-1">
+                    {a.mode === 'meeting' ? '회의' : a.mode === 'working' ? '작업'
+                      : a.mode === 'thinking' ? '분석' : a.mode === 'coffee' ? '휴식' : '대기'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -523,31 +614,11 @@ export default function LiveOffice() {
       )}
 
       <style>{`
-        @keyframes charBob {
-          0%, 100% { transform: translateY(0px); }
-          50% { transform: translateY(-3px); }
-        }
-        @keyframes charPulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.7; transform: scale(0.95); }
+        @keyframes selPulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.35; }
         }
       `}</style>
     </div>
   )
-}
-
-function buildDeskPositions(count: number): { col: number; row: number }[] {
-  const positions: { col: number; row: number }[] = []
-  const rowConfigs = [
-    { row: 7, startCol: 2, maxCount: 8 },
-    { row: 9, startCol: 2, maxCount: 8 },
-    { row: 11, startCol: 2, maxCount: 8 },
-  ]
-  let idx = 0
-  for (const cfg of rowConfigs) {
-    for (let c = 0; c < cfg.maxCount && idx < count; c++, idx++) {
-      positions.push({ col: cfg.startCol + c * 2, row: cfg.row })
-    }
-  }
-  return positions
 }
