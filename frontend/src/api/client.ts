@@ -79,6 +79,8 @@ export const chatApi = {
   messages: (sessionId: number) =>
     api.get(`/chat/sessions/${sessionId}/messages`),
   send: (data: object) => api.post('/chat/send', data),
+  companyQuery: (companyId: number, question: string) =>
+    api.post('/chat/company-query', { company_id: companyId, question }),
   suggestions: (companyId?: number) =>
     api.get('/chat/suggestions', { params: { company_id: companyId } }),
   dismissSuggestion: (id: number) => api.post(`/chat/suggestions/${id}/dismiss`),

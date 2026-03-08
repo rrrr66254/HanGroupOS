@@ -253,6 +253,11 @@ class ChatRequest(BaseModel):
     model_override: Optional[str] = None
 
 
+class CompanyQueryRequest(BaseModel):
+    company_id: int
+    question: str
+
+
 # ── Market ───────────────────────────────────────────────────────────────────
 class MarketAnalyzeRequest(BaseModel):
     industry: str

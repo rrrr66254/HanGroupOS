@@ -39,7 +39,7 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route index element={<Navigate to="/chairman" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="chairman" element={<Chairman />} />
           <Route path="companies" element={<Companies />} />
@@ -52,7 +52,7 @@ export default function App() {
           <Route path="memory" element={<Memory />} />
           <Route path="admin" element={<Admin />} />
         </Route>
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/chairman" replace />} />
       </Routes>
     </BrowserRouter>
   )

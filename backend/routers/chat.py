@@ -5,10 +5,10 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from core.database import get_db
 from core.security import get_current_user
-from models.models import ChatSession, ChatMessage, User, AISuggestion, Company
+from models.models import ChatSession, ChatMessage, User, AISuggestion, Company, OrgNode
 from schemas.schemas import (
     ChatSessionCreate, ChatSessionOut,
-    ChatMessageOut, ChatRequest,
+    ChatMessageOut, ChatRequest, CompanyQueryRequest,
 )
 from services.ai_provider import (
     get_provider_from_db,
@@ -177,6 +177,56 @@ def send_message(
     db.commit()
     db.refresh(ai_msg)
     return ai_msg
+
+
+@router.post("/company-query")
+def company_query(
+    req: CompanyQueryRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Query a company through its CEO — returns delegation steps + AI answer."""
+    company = db.query(Company).filter(Company.id == req.company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    # Find CEO node for this company
+    ceo_node = (
+        db.query(OrgNode)
+        .filter(OrgNode.company_id == req.company_id, OrgNode.level == "ceo")
+        .first()
+    )
+    ceo_name = ceo_node.name if ceo_node else f"{company.name} CEO"
+
+    # Build company context and call CEO AI
+    context = (
+        f"회사: {company.name}\n"
+        f"산업: {company.industry}\n"
+        f"설명: {company.description}\n"
+        f"비전: {company.vision}\n\n"
+        f"회장 질문: {req.question}"
+    )
+
+    provider = get_provider_from_db(db, current_user.id)
+    answer = provider.chat(
+        [{"role": "user", "content": context}],
+        system=CEO_SYSTEM,
+        session_type="ceo",
+    )
+
+    delegation = [
+        {"from": "회장", "to": ceo_name, "message": f"질문 전달: {req.question[:40]}…", "status": "done"},
+        {"from": ceo_name, "to": "운영팀", "message": "데이터 수집 및 현황 파악", "status": "done"},
+        {"from": "운영팀", "to": ceo_name, "message": "보고 완료", "status": "done"},
+        {"from": ceo_name, "to": "회장", "message": "최종 보고 전달", "status": "done"},
+    ]
+
+    return {
+        "company": {"id": company.id, "name": company.name, "industry": company.industry},
+        "ceo_name": ceo_name,
+        "delegation": delegation,
+        "answer": answer,
+    }
 
 
 @router.delete("/sessions/{session_id}")

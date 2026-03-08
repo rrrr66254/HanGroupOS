@@ -8,8 +8,8 @@ import {
 import { useAppStore } from '../store/useStore'
 
 const NAV = [
-  { to: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
   { to: '/chairman', icon: MessageSquare, label: 'AI 회장', highlight: true },
+  { to: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
   { to: '/companies', icon: Building2, label: '계열사' },
   { to: '/approvals', icon: CheckSquare, label: '승인함' },
   { to: '/meetings', icon: Users, label: '회의실' },
