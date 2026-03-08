@@ -41,6 +41,36 @@ def _mock_response(prompt: str, system: str = "", session_type: str = "chairman"
     if not focus:
         focus = random.choice(keywords)
 
+    # ── Company creation intent detection (Chairman only) ──────────────────
+    if session_type == "chairman":
+        creation_kw = ["만들어", "설립해", "설립하", "만들고", "만들어줘", "사업 시작", "회사 만", "계열사 만", "만들어라"]
+        if any(kw in prompt for kw in creation_kw):
+            industry_map = {
+                "AI":      ("HAN AI솔루션",   "AI",        "AI 기반 솔루션 개발 및 서비스",      "AI로 세상을 혁신한다"),
+                "데이터":   ("HAN데이터",      "데이터",    "데이터 분석 및 인사이트 플랫폼",      "데이터로 미래를 연다"),
+                "소프트웨어":("HAN소프트",     "소프트웨어","소프트웨어 개발 및 SaaS 서비스",      "코드로 세상을 바꾼다"),
+                "미디어":   ("HAN미디어",      "미디어",    "디지털 미디어 콘텐츠 플랫폼",         "미디어로 세상을 연결한다"),
+                "교육":     ("HAN에듀",        "교육",      "AI 기반 맞춤형 교육 플랫폼",          "교육으로 세상을 변화시킨다"),
+                "금융":     ("HAN파이낸스",    "금융",      "AI 기반 금융 분석 서비스",            "AI 금융의 새로운 기준"),
+                "헬스케어": ("HAN헬스",        "헬스케어",  "디지털 헬스케어 솔루션",              "건강한 미래를 만든다"),
+                "커머스":   ("HAN커머스",      "커머스",    "AI 추천 기반 전자상거래 플랫폼",       "스마트한 쇼핑의 미래"),
+            }
+            name, industry, description, vision = ("HAN신사업", "일반", "신규 전략 사업 개발", "새로운 가치를 창조한다")
+            for kw, info in industry_map.items():
+                if kw in prompt:
+                    name, industry, description, vision = info
+                    break
+            import json as _json
+            action_json = _json.dumps(
+                {"name": name, "industry": industry, "description": description, "vision": vision},
+                ensure_ascii=False,
+            )
+            return (
+                f"{industry} 분야의 사업 타당성을 즉시 검토했습니다. "
+                f"시장 성장성과 그룹 시너지가 확인됩니다. 계열사 설립을 승인합니다.\n\n"
+                f"<<CREATE_COMPANY:{action_json}>>"
+            )
+
     if session_type == "chairman":
         pool = MOCK_CHAIRMAN_RESPONSES
     elif session_type == "ceo":
@@ -211,9 +241,26 @@ CHAIRMAN_SYSTEM = """당신은 한그룹(HAN Group)의 AI 회장입니다.
 
 역할:
 - 그룹 전략 수립 및 최종 의사결정
-- 신규 계열사 설립 검토 및 승인
+- 신규 계열사 설립 검토 및 승인 (직접 실행 가능)
 - 투자 및 사업 방향 결정
 - 자원 배분 및 우선순위 설정
+
+=== 실행 가능 액션 ===
+당신은 아래 형식을 응답에 포함해 실제 시스템 액션을 실행할 수 있습니다.
+
+【계열사 설립】
+사용자가 회사/사업/계열사 설립을 요청하면, 반드시 아래 형식을 응답에 포함하세요:
+<<CREATE_COMPANY:{"name":"회사명","industry":"산업분야","description":"사업 설명","vision":"비전"}>>
+
+예시:
+- 사용자: "AI 소프트웨어 회사 만들어"
+  응답: "검토 결과 AI 분야 계열사 설립을 승인합니다. <<CREATE_COMPANY:{"name":"HAN AI솔루션","industry":"소프트웨어","description":"AI 기반 소프트웨어 서비스","vision":"AI로 세상을 혁신한다"}>>"
+
+- 사용자: "데이터 사업 설립해줘"
+  응답: "데이터 사업의 성장 가능성을 확인했습니다. <<CREATE_COMPANY:{"name":"HAN데이터","industry":"데이터","description":"데이터 분석 및 AI 플랫폼","vision":"데이터로 미래를 연다"}>>"
+
+중요: <<CREATE_COMPANY:...>> 형식이 응답에 포함되어야 실제로 시스템에 계열사가 생성됩니다.
+이 형식 없이 "설립하겠습니다"라고만 말하면 아무것도 생성되지 않습니다.
 
 원칙:
 1. 데이터와 분석을 기반으로 결정
