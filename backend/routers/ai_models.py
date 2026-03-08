@@ -187,3 +187,43 @@ def providers_health(
             "model": c.model_override or "default",
         }
     return result
+
+
+@router.get("/ollama/status")
+def ollama_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Check if Ollama is configured and reachable."""
+    import httpx
+    from core.config import settings
+
+    # Prefer DB config over env
+    config = db.query(ProviderConfig).filter(
+        ProviderConfig.user_id == current_user.id,
+        ProviderConfig.provider == "ollama",
+        ProviderConfig.is_active == True,
+    ).first()
+
+    base_url = (config.base_url if config and config.base_url else settings.OLLAMA_BASE_URL) or ""
+    model = (config.model_override if config and config.model_override else settings.OLLAMA_MODEL) or "qwen2.5"
+
+    reachable = False
+    models_available: list = []
+    if base_url:
+        try:
+            r = httpx.get(f"{base_url}/api/tags", timeout=3.0)
+            if r.status_code == 200:
+                reachable = True
+                models_available = [m["name"] for m in r.json().get("models", [])]
+        except Exception:
+            pass
+
+    return {
+        "base_url": base_url,
+        "model": model,
+        "has_db_config": config is not None,
+        "reachable": reachable,
+        "models_available": models_available,
+        "needs_setup": not base_url or not reachable,
+    }

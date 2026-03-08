@@ -136,6 +136,7 @@ export const modelsApi = {
   saveProvider: (data: object) => api.post('/models/providers', data),
   deleteProvider: (id: number) => api.delete(`/models/providers/${id}`),
   health: () => api.get('/models/providers/health'),
+  ollamaStatus: () => api.get('/models/ollama/status'),
 }
 
 // ── Memory ────────────────────────────────────────────────────────────────────

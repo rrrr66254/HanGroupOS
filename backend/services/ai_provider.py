@@ -95,8 +95,10 @@ class AIProvider:
         self.model = model or self._get_default_model()
         self.base_url = base_url or ""
 
-        if not self.api_key and self.provider != "mock" and self.provider != "ollama":
-            self.provider = "mock"
+        # Non-ollama/mock providers require an API key; fall back to ollama
+        if not self.api_key and self.provider not in ("ollama", "mock"):
+            self.provider = "ollama"
+            self.model = settings.OLLAMA_MODEL
 
     def _get_default_key(self) -> str:
         mapping = {
@@ -139,11 +141,16 @@ class AIProvider:
             elif self.provider == "ollama":
                 return self._call_ollama(messages, system, max_tokens)
         except Exception as e:
-            return f"[AI 응답 오류: {str(e)}] Mock 모드로 전환합니다.\n\n" + _mock_response(
-                messages[-1]["content"] if messages else "", session_type=session_type
-            )
+            err = str(e)
+            if "ollama" in self.provider or "Connection" in err or "connect" in err.lower():
+                return (
+                    f"⚠️ Ollama 연결 실패: {err}\n\n"
+                    "Ollama가 실행 중인지 확인하고 관리자 > AI Provider 설정에서 Base URL을 설정해주세요.\n"
+                    "예: http://localhost:11434"
+                )
+            return f"⚠️ AI 응답 오류: {err}"
 
-        return _mock_response("", session_type=session_type)
+        return "⚠️ 지원하지 않는 AI 프로바이더입니다."
 
     def _call_anthropic(
         self, messages: List[Dict], system: str, max_tokens: int

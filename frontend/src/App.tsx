@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './store/useStore'
 import Layout from './components/Layout'
+import OllamaSetupNotice from './components/OllamaSetupNotice'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Chairman from './pages/Chairman'
@@ -17,7 +18,12 @@ import Admin from './pages/Admin'
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
   if (!token) return <Navigate to="/login" replace />
-  return <>{children}</>
+  return (
+    <>
+      {children}
+      <OllamaSetupNotice />
+    </>
+  )
 }
 
 export default function App() {
