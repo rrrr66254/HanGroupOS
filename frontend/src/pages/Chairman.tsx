@@ -4,11 +4,12 @@ import {
   Send, Loader2, ArrowRight, CheckCircle, Building2,
   Eye, X, Plus, ChevronRight, WifiOff, Wifi, Settings,
   MessageSquare, Zap, AlertCircle, BarChart2, Users,
-  Clock, Trophy, FileText, Coffee, BookOpen, Vote,
+  Clock, Trophy, FileText, Coffee, BookOpen, Vote, Square,
 } from 'lucide-react'
 import { chatApi, orgApi, companiesApi, modelsApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
 import { useProviderHealth } from '../components/ProviderStatusBanner'
+import MarkdownMessage from '../components/MarkdownMessage'
 import type { ChatSession, ChatMessage } from '../types'
 import { format } from 'date-fns'
 
@@ -213,6 +214,11 @@ export default function Chairman() {
   const [ceoChatInput, setCeoChatInput] = useState('')
   const [ceoChatLoading, setCeoChatLoading] = useState(false)
   const ceoChatEndRef = useRef<HTMLDivElement>(null)
+  const [committees, setCommittees] = useState<OrgNode[]>([])
+
+  // Abort controllers for cancellation
+  const abortRef = useRef<AbortController | null>(null)
+  const ceoAbortRef = useRef<AbortController | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const delegTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -256,7 +262,9 @@ export default function Chairman() {
     orgApi.nodes().then((r) => {
       const nodes = (r.data as OrgNode[]).filter((n) => n.company_id === null)
       const ch = nodes.find((n) => n.level === 'chairman') || nodes[0]
+      const comms = nodes.filter((n) => n.level === 'committee')
       setChairman(ch)
+      setCommittees(comms)
       if (ch) initSession(ch)
     })
     loadCompanies()
@@ -544,23 +552,26 @@ export default function Chairman() {
   }
 
   // ── CEO direct chat ───────────────────────────────────────────────────────
-  const openCeoChat = async (company: Company) => {
+  const openCeoChat = async (company: Company, sessionType: 'ceo' | 'committee' = 'ceo') => {
     setCeoChatCompany(company)
     setCeoChatMessages([])
     setCeoChatSession(null)
     try {
-      const res = await chatApi.sessions('ceo')
+      const res = await chatApi.sessions(sessionType)
       const sessions = res.data as ChatSession[]
-      const existing = sessions.find((s) => s.company_id === company.id)
+      const existing = sessions.find((s) =>
+        sessionType === 'ceo' ? s.company_id === company.id : s.title === `${company.name} 대화`
+      )
       if (existing) {
         setCeoChatSession(existing)
         const msgs = await chatApi.messages(existing.id)
         setCeoChatMessages(msgs.data)
       } else {
         const newS = await chatApi.createSession({
-          session_type: 'ceo',
-          title: `${company.name} CEO 대화`,
-          company_id: company.id,
+          session_type: sessionType,
+          title: `${company.name} ${sessionType === 'ceo' ? 'CEO' : ''} 대화`,
+          company_id: sessionType === 'ceo' ? company.id : undefined,
+          agent_name: company.name,
         })
         setCeoChatSession(newS.data as ChatSession)
       }
@@ -618,12 +629,15 @@ export default function Chairman() {
     }
     setCeoChatMessages((prev) => [...prev, streamMsg])
 
+    ceoAbortRef.current = new AbortController()
+
     try {
       const token = useAuthStore.getState().token
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ session_id: ceoChatSession.id, content, provider_override: editProvider, model_override: editModel }),
+        signal: ceoAbortRef.current.signal,
       })
       if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
 
@@ -657,9 +671,16 @@ export default function Chairman() {
           } catch { /* skip */ }
         }
       }
-    } catch {
-      setCeoChatMessages((prev) => prev.filter((m) => m.id !== streamMsgId))
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        setCeoChatMessages((prev) =>
+          prev.map((m) => m.id === streamMsgId && m.content === '' ? { ...m, content: '_(취소됨)_' } : m)
+        )
+      } else {
+        setCeoChatMessages((prev) => prev.filter((m) => m.id !== streamMsgId))
+      }
     } finally {
+      ceoAbortRef.current = null
       setCeoChatLoading(false)
     }
   }
@@ -764,12 +785,16 @@ export default function Chairman() {
     }
     setMessages((prev) => [...prev, streamMsg])
 
+    // Create abort controller for this request
+    abortRef.current = new AbortController()
+
     try {
       const token = useAuthStore.getState().token
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ session_id: session.id, content, provider_override: editProvider, model_override: editModel }),
+        signal: abortRef.current.signal,
       })
       if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
 
@@ -801,7 +826,6 @@ export default function Chairman() {
 
             if (evt.done) {
               if (evt.type === 'preview' && evt.company_data) {
-                // Show preview card — don't execute yet
                 setPreviewCompany(evt.company_data as PreviewCompany)
                 setPanelMode('preview')
                 setMessages((prev) =>
@@ -831,11 +855,28 @@ export default function Chairman() {
           } catch { /* skip */ }
         }
       }
-    } catch {
-      setMessages((prev) => prev.filter((m) => m.id !== streamMsgId))
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        // User cancelled — keep partial content
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === streamMsgId && m.content === ''
+              ? { ...m, content: '_(취소됨)_' }
+              : m
+          )
+        )
+      } else {
+        setMessages((prev) => prev.filter((m) => m.id !== streamMsgId))
+      }
     } finally {
+      abortRef.current = null
       setLoading(false)
     }
+  }
+
+  const cancelMessage = () => {
+    abortRef.current?.abort()
+    ceoAbortRef.current?.abort()
   }
 
   const showDelegation = (company: Company, question: string) => {
@@ -875,8 +916,72 @@ export default function Chairman() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)] animate-fade-in overflow-hidden">
-      {/* ── Main Chat ────────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      {/* ── Left Exec Sidebar ─────────────────────────────────────────────── */}
+      <div className="w-52 flex-shrink-0 flex flex-col border-r border-bg-border bg-bg-card overflow-y-auto">
+        <div className="px-3 py-3 border-b border-bg-border flex-shrink-0">
+          <div className="text-[10px] text-slate-500 uppercase tracking-widest font-mono">임원과의 대화</div>
+        </div>
+        {/* Chairman */}
+        {chairman && (
+          <button
+            onClick={() => { if (ceoChatCompany) closeCeoChat() }}
+            className={`flex items-center gap-2 px-3 py-2.5 text-left w-full hover:bg-bg-elevated transition-colors ${!ceoChatCompany ? 'bg-indigo-500/10 border-l-2 border-indigo-400' : ''}`}
+          >
+            <div className="w-7 h-7 rounded-lg bg-red-500/20 flex items-center justify-center text-sm flex-shrink-0">👔</div>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium text-slate-200 truncate">{chairman.name}</div>
+              <div className="text-[10px] text-slate-500 truncate">그룹 회장</div>
+            </div>
+          </button>
+        )}
+        {/* Committees */}
+        {committees.length > 0 && (
+          <>
+            <div className="px-3 py-1.5 border-b border-bg-border/30">
+              <div className="text-[9px] text-slate-600 uppercase tracking-widest font-mono">위원회</div>
+            </div>
+            {committees.map((node) => (
+              <button
+                key={node.id}
+                onClick={() => openCeoChat({ id: -(node.id), name: node.name, industry: node.role, description: node.description || '', status: 'active', vision: '' }, 'committee')}
+                className={`flex items-center gap-2 px-3 py-2.5 text-left w-full hover:bg-bg-elevated transition-colors ${ceoChatCompany?.id === -(node.id) ? 'bg-indigo-500/10 border-l-2 border-indigo-400' : ''}`}
+              >
+                <div className="w-7 h-7 rounded-lg bg-purple-500/20 flex items-center justify-center text-sm flex-shrink-0">🏛️</div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-medium text-slate-200 truncate">{node.name}</div>
+                  <div className="text-[10px] text-slate-500 truncate">{node.role}</div>
+                </div>
+              </button>
+            ))}
+          </>
+        )}
+        {/* Company CEOs */}
+        {companies.length > 0 && (
+          <>
+            <div className="px-3 py-1.5 border-b border-bg-border/30 mt-auto-0">
+              <div className="text-[9px] text-slate-600 uppercase tracking-widest font-mono">계열사 CEO</div>
+            </div>
+            {companies.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => openCeoChat(c)}
+                className={`flex items-center gap-2 px-3 py-2.5 text-left w-full hover:bg-bg-elevated transition-colors ${ceoChatCompany?.id === c.id ? 'bg-indigo-500/10 border-l-2 border-indigo-400' : ''}`}
+              >
+                <div className="w-7 h-7 rounded-lg bg-indigo-500/20 flex items-center justify-center text-sm flex-shrink-0">🤵</div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-medium text-slate-200 truncate">{c.name}</div>
+                  <div className="text-[10px] text-slate-500 truncate">{c.industry}</div>
+                </div>
+              </button>
+            ))}
+          </>
+        )}
+      </div>
+
+      {/* ── Main Chat (Chairman or CEO) ──────────────────────────────────────── */}
+      {!ceoChatCompany ? (
+        /* Chairman chat - existing code below */
+        <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-3 border-b border-bg-border flex-shrink-0">
           <div
@@ -1124,13 +1229,13 @@ export default function Chairman() {
                       <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                       <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
+                  ) : msg.role === 'user' ? (
+                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{msg.content}</pre>
                   ) : (
-                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                      {msg.content}
-                      {msg.role === 'assistant' && loading && msg.content !== '' && (
-                        <span className="inline-block w-0.5 h-4 bg-slate-400 ml-0.5 align-middle" style={{ animation: 'blink 1s step-end infinite' }} />
-                      )}
-                    </pre>
+                    <MarkdownMessage
+                      content={msg.content}
+                      streaming={loading && msg.content !== ''}
+                    />
                   )}
                 </div>
               </div>
@@ -1163,16 +1268,117 @@ export default function Chairman() {
               placeholder="회장님께 지시사항을 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈)"
               disabled={!session || loading}
             />
-            <button
-              onClick={sendMessage}
-              disabled={!input.trim() || !session || loading}
-              className="btn-primary px-4 flex-shrink-0 flex items-center gap-1.5"
-            >
-              {loading ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-            </button>
+            {loading ? (
+              <button
+                onClick={cancelMessage}
+                className="px-4 flex-shrink-0 flex items-center gap-1.5 rounded-lg text-sm font-medium"
+                style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}
+                title="생성 취소"
+              >
+                <Square size={14} />
+              </button>
+            ) : (
+              <button
+                onClick={sendMessage}
+                disabled={!input.trim() || !session}
+                className="btn-primary px-4 flex-shrink-0 flex items-center gap-1.5"
+              >
+                <Send size={15} />
+              </button>
+            )}
           </div>
         </div>
       </div>
+    ) : (
+      /* ── CEO / Committee Chat (full height, replaces modal) ────────────────── */
+      <div className="flex-1 flex flex-col overflow-hidden" style={{ background: 'linear-gradient(160deg, #0f172a 0%, #1a1535 100%)' }}>
+        {/* CEO chat header */}
+        <div className="flex items-center gap-3 px-5 py-3 border-b border-bg-border flex-shrink-0">
+          <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+            🤵
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-bold text-slate-100">{ceoChatCompany.name} {ceoChatCompany.id < 0 ? '' : 'CEO'}</div>
+            <div className="text-[10px] text-indigo-400">{ceoChatCompany.industry} · 직접 대화</div>
+          </div>
+          <button onClick={closeCeoChat} className="btn-ghost gap-1.5 text-xs text-slate-500 hover:text-slate-300">
+            <X size={13} />회장으로 돌아가기
+          </button>
+        </div>
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {ceoChatMessages.length === 0 && !ceoChatLoading && (
+            <div className="flex flex-col items-center justify-center h-full gap-5 text-slate-600">
+              <div style={{ fontSize: 60 }}>🤵</div>
+              <div className="text-center space-y-1">
+                <div className="text-base font-semibold text-slate-300">{ceoChatCompany.name} {ceoChatCompany.id < 0 ? '' : 'CEO'}</div>
+                <div className="text-xs text-slate-600 max-w-xs leading-relaxed">회장님의 지시를 기다리고 있습니다</div>
+              </div>
+            </div>
+          )}
+          {ceoChatMessages.map((msg) => (
+            <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-sm font-bold" style={{ background: msg.role === 'user' ? '#334155' : 'rgba(99,102,241,0.25)', color: 'white' }}>
+                {msg.role === 'user' ? '🫵' : '🤵'}
+              </div>
+              <div className={`max-w-[72%] space-y-1 flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                <div className="text-[10px] text-slate-600">{msg.sender_name} · {format(new Date(msg.created_at), 'HH:mm')}</div>
+                {msg.role === 'assistant' && thinkingMap[msg.id] && (
+                  <div className="w-full rounded-lg overflow-hidden" style={{ border: '1px solid rgba(99,102,241,0.25)', background: 'rgba(99,102,241,0.04)' }}>
+                    <button onClick={() => setExpandedThinking((prev) => { const next = new Set(prev); next.has(msg.id) ? next.delete(msg.id) : next.add(msg.id); return next })} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left">
+                      <span className="text-[9px] text-indigo-400 font-medium">🧠 생각 과정</span>
+                      <span className="text-[8px] text-slate-600 ml-auto">{expandedThinking.has(msg.id) ? '접기 ▲' : '펼치기 ▼'}</span>
+                    </button>
+                    {expandedThinking.has(msg.id) && (
+                      <div className="px-2.5 pb-2.5">
+                        <pre className="whitespace-pre-wrap font-sans text-[10px] leading-relaxed text-slate-400">{thinkingMap[msg.id]}</pre>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className={msg.role === 'user' ? 'chat-user' : 'chat-ai'}>
+                  {msg.role === 'assistant' && ceoChatLoading && msg.content === '' ? (
+                    <div className="flex items-center gap-1.5 py-0.5">
+                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  ) : msg.role === 'user' ? (
+                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{msg.content}</pre>
+                  ) : (
+                    <MarkdownMessage content={msg.content} streaming={ceoChatLoading && msg.content !== ''} />
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+          <div ref={ceoChatEndRef} />
+        </div>
+        {/* Input */}
+        <div className="p-4 flex-shrink-0 border-t border-bg-border">
+          <div className="flex gap-2 items-end">
+            <textarea
+              value={ceoChatInput}
+              onChange={(e) => setCeoChatInput(e.target.value)}
+              onKeyDown={handleCeoKey}
+              placeholder={`${ceoChatCompany.name}에게 지시하세요...`}
+              className="input flex-1 resize-none text-sm leading-relaxed"
+              rows={2}
+              disabled={ceoChatLoading}
+            />
+            {ceoChatLoading ? (
+              <button onClick={cancelMessage} style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '8px 12px', cursor: 'pointer' }}>
+                <Square size={14} />
+              </button>
+            ) : (
+              <button onClick={sendCeoMessage} disabled={!ceoChatInput.trim() || !ceoChatSession} className="btn-primary px-4 flex-shrink-0 flex items-center gap-1.5">
+                <Send size={15} />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
 
       {/* ── Right Live Panel ─────────────────────────────────────────────────── */}
       <div className="w-72 flex-shrink-0 flex flex-col border-l border-bg-border bg-bg-card overflow-hidden">
@@ -1742,13 +1948,10 @@ export default function Chairman() {
                         <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                         <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                       </div>
+                    ) : msg.role === 'user' ? (
+                      <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed">{msg.content}</pre>
                     ) : (
-                      <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed">
-                        {msg.content}
-                        {msg.role === 'assistant' && ceoChatLoading && msg.content !== '' && (
-                          <span className="inline-block w-0.5 h-3.5 bg-slate-400 ml-0.5 align-middle" style={{ animation: 'blink 1s step-end infinite' }} />
-                        )}
-                      </pre>
+                      <MarkdownMessage content={msg.content} streaming={ceoChatLoading && msg.content !== ''} />
                     )}
                     </div>
                   </div>
@@ -1769,13 +1972,24 @@ export default function Chairman() {
                   placeholder={`${ceoChatCompany.name} CEO에게 지시… (Enter 전송)`}
                   disabled={!ceoChatSession || ceoChatLoading}
                 />
-                <button
-                  onClick={sendCeoMessage}
-                  disabled={!ceoChatInput.trim() || !ceoChatSession || ceoChatLoading}
-                  className="btn-primary px-3 flex-shrink-0 flex items-center"
-                >
-                  {ceoChatLoading ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                </button>
+                {ceoChatLoading ? (
+                  <button
+                    onClick={cancelMessage}
+                    className="px-3 flex-shrink-0 flex items-center rounded-lg"
+                    style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}
+                    title="취소"
+                  >
+                    <Square size={13} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={sendCeoMessage}
+                    disabled={!ceoChatInput.trim() || !ceoChatSession}
+                    className="btn-primary px-3 flex-shrink-0 flex items-center"
+                  >
+                    <Send size={13} />
+                  </button>
+                )}
               </div>
             </div>
           </div>

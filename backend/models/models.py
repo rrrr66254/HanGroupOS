@@ -364,3 +364,21 @@ class SiteSubmission(Base):
     form_data = Column(JSON, default={})                          # submitted form fields
     source = Column(String(100), default="contact")               # contact | newsletter | inquiry
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TerminalRequest(Base):
+    """CEO가 admin 승인 후 실행할 터미널 명령 요청."""
+    __tablename__ = "terminal_requests"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    org_node_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=True)
+    requested_by_name = Column(String(100), default="")      # CEO name
+    command = Column(Text, nullable=False)                   # shell command to run
+    reason = Column(Text, default="")                        # why it's needed
+    status = Column(String(20), default="pending")           # pending | approved | rejected | executed
+    approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    output = Column(Text, default="")                        # stdout/stderr after execution
+    exit_code = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    decided_at = Column(DateTime, nullable=True)
+    executed_at = Column(DateTime, nullable=True)

@@ -243,6 +243,16 @@ export const synergyApi = {
     api.post('/strategy/synergy', { company_ids: companyIds }),
 }
 
+// ── Terminal ──────────────────────────────────────────────────────────────────
+export const terminalApi = {
+  list: (status?: string, companyId?: number) =>
+    api.get('/terminal/requests', { params: { status, company_id: companyId } }),
+  request: (data: object) => api.post('/terminal/request', data),
+  decide: (id: number, action: 'approve' | 'reject', note?: string) =>
+    api.post(`/terminal/requests/${id}/decide`, { action, note }),
+  execute: (id: number) => api.post(`/terminal/requests/${id}/execute`),
+}
+
 // ── Agent (personality + direct chat) ────────────────────────────────────────
 export const agentApi = {
   updatePersonality: (nodeId: number, personality: object) =>

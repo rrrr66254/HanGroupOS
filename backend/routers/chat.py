@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from core.database import get_db, SessionLocal
 from core.security import get_current_user
-from models.models import ChatSession, ChatMessage, User, AISuggestion, Company, OrgNode, StrategyItem
+from models.models import ChatSession, ChatMessage, User, AISuggestion, Company, OrgNode, StrategyItem, TerminalRequest
 from schemas.schemas import (
     ChatSessionCreate, ChatSessionOut,
     ChatMessageOut, ChatRequest, CompanyQueryRequest,
@@ -50,6 +50,30 @@ def _execute_actions(ai_response: str, db: Session, user_id: int) -> tuple:
 
     clean = pattern.sub("", ai_response).strip()
     return clean, results
+
+def _process_terminal_requests(content: str, db, company_id, user_id: int) -> tuple:
+    """Parse <<TERMINAL_REQUEST:...>> blocks, create DB records, return (clean_text, req_ids)."""
+    req_ids = []
+    pattern = re.compile(r'<<TERMINAL_REQUEST:(.*?)>>', re.DOTALL)
+    for match in pattern.finditer(content):
+        raw = match.group(1).strip()
+        try:
+            data = json.loads(raw)
+            tr = TerminalRequest(
+                company_id=company_id,
+                requested_by_name="AI CEO",
+                command=data.get("cmd", "").strip(),
+                reason=data.get("reason", ""),
+                status="pending",
+            )
+            db.add(tr)
+            db.flush()
+            req_ids.append(tr.id)
+        except Exception:
+            pass
+    clean = pattern.sub("", content).strip()
+    return clean, req_ids
+
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -228,6 +252,7 @@ def stream_message(
 
     # Capture values needed inside generator (DB session will be closed by then)
     session_id = req.session_id
+    company_id = session.company_id
     user_id = current_user.id
     prov = provider
     sys_prompt = system_prompt
@@ -323,8 +348,17 @@ def stream_message(
 
         # Save complete AI message (new DB session since original is closed)
         with SessionLocal() as new_db:
-            clean, action_results = _execute_actions(full_content, new_db, user_id)
-            final = clean + "".join(action_results)
+            # Handle terminal requests first
+            content_after_terminal, terminal_req_ids = _process_terminal_requests(full_content, new_db, company_id, user_id)
+            # Handle company creation
+            clean, action_results = _execute_actions(content_after_terminal, new_db, user_id)
+            # Append terminal request notifications
+            terminal_notes = ""
+            for rid in terminal_req_ids:
+                tr = new_db.query(TerminalRequest).filter(TerminalRequest.id == rid).first()
+                if tr:
+                    terminal_notes += f"\n\n⏳ **터미널 명령 요청 제출됨** (ID #{tr.id})\n`{tr.command}`\n사유: {tr.reason}\n관리자 승인 대기 중..."
+            final = clean + "".join(action_results) + terminal_notes
             ai_msg = ChatMessage(
                 session_id=session_id,
                 role="assistant",
@@ -334,7 +368,8 @@ def stream_message(
             new_db.add(ai_msg)
             new_db.commit()
             new_db.refresh(ai_msg)
-            yield f"data: {json.dumps({'chunk': '', 'done': True, 'message_id': ai_msg.id, 'final_content': final}, ensure_ascii=False)}\n\n"
+            extra = {"terminal_requests": terminal_req_ids} if terminal_req_ids else {}
+            yield f"data: {json.dumps({'chunk': '', 'done': True, 'message_id': ai_msg.id, 'final_content': final, **extra}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         generate(),
