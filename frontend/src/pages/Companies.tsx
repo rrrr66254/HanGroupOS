@@ -341,8 +341,8 @@ function AiEditPanel({ companyId }: { companyId: number }) {
                 const isSaved = savedIds.has(node.id)
 
                 return (
+                  <div key={node.id}>
                   <div
-                    key={node.id}
                     className="flex items-center gap-2 p-2.5 rounded-lg transition-all"
                     style={{
                       background: isDirty ? 'rgba(99,102,241,0.05)' : 'rgba(255,255,255,0.02)',
@@ -421,7 +421,7 @@ function AiEditPanel({ companyId }: { companyId: number }) {
                       {testResult.response}
                     </div>
                   )}
-                </div>
+                  </div>
               )
             })}
           </div>

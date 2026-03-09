@@ -230,6 +230,7 @@ class ChatSessionOut(BaseModel):
 
 
 class ChatMessageCreate(BaseModel):
+    model_config = {"protected_namespaces": ()}
     content: str
     provider_override: Optional[str] = None
     model_override: Optional[str] = None
@@ -247,6 +248,7 @@ class ChatMessageOut(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    model_config = {"protected_namespaces": ()}
     session_id: int
     content: str
     provider_override: Optional[str] = None
@@ -381,10 +383,11 @@ class ModelCatalogOut(BaseModel):
     context_window: int
     strengths: List[str]
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "protected_namespaces": ()}
 
 
 class ModelAssignRequest(BaseModel):
+    model_config = {"protected_namespaces": ()}
     org_role: str
     model_catalog_id: int
     company_id: Optional[int] = None
@@ -502,6 +505,7 @@ class StrategyItemOut(BaseModel):
 
 # ── Provider Config ───────────────────────────────────────────────────────────
 class ProviderConfigCreate(BaseModel):
+    model_config = {"protected_namespaces": ()}
     provider: str
     api_key: str = ""
     model_override: str = ""
@@ -516,7 +520,7 @@ class ProviderConfigOut(BaseModel):
     base_url: str
     created_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "protected_namespaces": ()}
 
 
 # ── Agent Activity ────────────────────────────────────────────────────────────
