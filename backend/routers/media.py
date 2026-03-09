@@ -19,6 +19,9 @@ from schemas.schemas import (
     MediaPostOut,
 )
 from services.media_publisher import MediaPublisher, PLATFORM_INFO
+from services.platform_guides import (
+    GUIDES, get_guide, get_all_guides_summary, get_quick_checklist, OAUTH_GUIDE
+)
 
 router = APIRouter(prefix="/api/media", tags=["media-publishing"])
 
@@ -87,6 +90,66 @@ def list_platforms():
     지원하는 미디어 플랫폼 목록과 각 플랫폼에서 필요한 자격증명 안내를 반환합니다.
     """
     return {"platforms": PLATFORM_INFO}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 플랫폼 설정 튜토리얼 가이드
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/guides", summary="전체 플랫폼 설정 가이드 요약")
+def list_guides(_: User = Depends(get_current_user)):
+    """
+    모든 지원 플랫폼의 설정 가이드 요약을 반환합니다.
+    AI가 할 수 있는 것과 사용자가 직접 해야 하는 것을 구분합니다.
+    """
+    return {
+        "guides": get_all_guides_summary(),
+        "oauth_guide": OAUTH_GUIDE,
+        "note": "회원가입, 계정 생성, OAuth 인증은 사용자가 브라우저에서 직접 진행해야 합니다.",
+    }
+
+
+@router.get("/guides/{platform}", summary="특정 플랫폼 단계별 설정 가이드")
+def get_platform_guide(
+    platform: str,
+    _: User = Depends(get_current_user),
+):
+    """
+    특정 플랫폼의 상세 단계별 설정 가이드를 반환합니다.
+    platform: tistory | wordpress | blogger | youtube | serpapi | newsapi
+    """
+    guide = get_guide(platform)
+    if not guide:
+        raise HTTPException(
+            404,
+            detail={
+                "message": f"'{platform}' 플랫폼 가이드를 찾을 수 없습니다.",
+                "available": list(GUIDES.keys()),
+            }
+        )
+    return {
+        "platform": platform,
+        "guide": guide,
+        "checklist": get_quick_checklist(platform),
+    }
+
+
+@router.get("/guides/{platform}/checklist", summary="플랫폼 설정 체크리스트")
+def get_platform_checklist(
+    platform: str,
+    _: User = Depends(get_current_user),
+):
+    """설정에 필요한 단계를 체크리스트 형태로 반환합니다."""
+    guide = get_guide(platform)
+    if not guide:
+        raise HTTPException(404, f"'{platform}' 가이드를 찾을 수 없습니다.")
+    return {
+        "platform": platform,
+        "name": guide["name"],
+        "checklist": get_quick_checklist(platform),
+        "ai_can_do": guide.get("ai_can_do", []),
+        "user_must_do": guide.get("user_must_do", []),
+    }
 
 
 @router.get("/platforms/status", summary="플랫폼별 설정 완료 여부")
