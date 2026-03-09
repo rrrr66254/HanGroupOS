@@ -382,3 +382,55 @@ class TerminalRequest(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     decided_at = Column(DateTime, nullable=True)
     executed_at = Column(DateTime, nullable=True)
+
+
+# ── External API Keys ─────────────────────────────────────────────────────────
+class ExternalApiKey(Base):
+    """외부 서비스 API 키 및 인증 정보 관리."""
+    __tablename__ = "external_api_keys"
+    id = Column(Integer, primary_key=True, index=True)
+    service = Column(String(50), nullable=False, index=True)
+    # serpapi | newsapi | comtrade | wordpress | tistory | blogger | youtube
+    label = Column(String(100), default="")          # 사용자 지정 이름
+    api_key = Column(Text, default="")               # API key / access token
+    extra_config = Column(JSON, default={})          # url, username, blog_id 등 추가 설정
+    is_active = Column(Boolean, default=True)
+    last_used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── Collected Data ────────────────────────────────────────────────────────────
+class CollectedData(Base):
+    """인터넷에서 수집한 데이터 저장."""
+    __tablename__ = "collected_data"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    data_type = Column(String(50), nullable=False, index=True)
+    # web_search | news | rss | scraped | trade | custom
+    source = Column(String(200), default="")         # URL or API name
+    query = Column(String(500), default="")          # 검색어 또는 요청 파라미터
+    title = Column(String(500), default="")
+    content = Column(Text, default="")               # 원본 텍스트
+    structured = Column(JSON, default={})            # 구조화된 데이터 (articles, results 등)
+    tags = Column(JSON, default=[])
+    status = Column(String(20), default="raw")       # raw | processed | analyzed
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ── Media Posts ───────────────────────────────────────────────────────────────
+class MediaPost(Base):
+    """발행된 블로그 포스트 및 YouTube 영상 트래킹."""
+    __tablename__ = "media_posts"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    platform = Column(String(50), nullable=False, index=True)
+    # wordpress | tistory | blogger | youtube
+    title = Column(String(500), nullable=False)
+    content = Column(Text, default="")               # 본문 (블로그) 또는 설명 (유튜브)
+    external_id = Column(String(200), default="")    # 플랫폼 내 ID
+    external_url = Column(String(500), default="")   # 발행된 URL
+    status = Column(String(20), default="draft")     # draft | published | failed
+    platform_meta = Column(JSON, default={})         # 플랫폼별 추가 정보
+    published_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

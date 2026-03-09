@@ -555,3 +555,154 @@ class MergerSimRequest(BaseModel):
     company_a_id: int
     company_b_id: int
     merger_type: str = "합병"   # 합병 | 인수 | 전략적 제휴
+
+
+# ── External API Keys ──────────────────────────────────────────────────────────
+class ExternalApiKeyCreate(BaseModel):
+    service: str                        # serpapi | newsapi | comtrade | wordpress | tistory | blogger | youtube
+    label: str = ""
+    api_key: str = ""
+    extra_config: Dict[str, Any] = {}   # url, username, blog_id 등 추가 설정
+
+
+class ExternalApiKeyUpdate(BaseModel):
+    label: Optional[str] = None
+    api_key: Optional[str] = None
+    extra_config: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+
+
+class ExternalApiKeyOut(BaseModel):
+    id: int
+    service: str
+    label: str
+    is_active: bool
+    extra_config: Dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+    # api_key는 보안상 노출하지 않음
+
+    model_config = {"from_attributes": True}
+
+
+# ── Data Collection ────────────────────────────────────────────────────────────
+class WebSearchRequest(BaseModel):
+    query: str
+    num_results: int = 10
+    country: str = "kr"
+    language: str = "ko"
+    save_to_db: bool = True
+    company_id: Optional[int] = None
+
+
+class NewsSearchRequest(BaseModel):
+    query: str
+    language: str = "ko"
+    days_back: int = 7
+    save_to_db: bool = True
+    company_id: Optional[int] = None
+
+
+class ScrapeRequest(BaseModel):
+    url: str
+    save_to_db: bool = True
+    company_id: Optional[int] = None
+
+
+class RssFetchRequest(BaseModel):
+    feed_url: str
+    save_to_db: bool = True
+    company_id: Optional[int] = None
+
+
+class ComtradeRequest(BaseModel):
+    reporter_code: str              # 410=한국
+    partner_code: str = "0"         # 0=전세계
+    commodity_code: str = "TOTAL"
+    year: str = "2023"
+    trade_flow: str = "X"           # X=수출, M=수입
+    save_to_db: bool = True
+    company_id: Optional[int] = None
+
+
+class CollectedDataOut(BaseModel):
+    id: int
+    company_id: Optional[int]
+    data_type: str
+    source: str
+    query: str
+    title: str
+    content: str
+    structured: Dict[str, Any]
+    tags: List[str]
+    status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ── Media Publishing ───────────────────────────────────────────────────────────
+class WordpressPublishRequest(BaseModel):
+    title: str
+    content: str
+    status: str = "publish"         # publish | draft | private
+    tags: List[str] = []
+    categories: List[int] = []
+    excerpt: str = ""
+    company_id: Optional[int] = None
+
+
+class TistoryPublishRequest(BaseModel):
+    title: str
+    content: str
+    visibility: int = 3             # 0=비공개, 3=공개
+    category_id: int = 0
+    tag: str = ""
+    company_id: Optional[int] = None
+
+
+class BloggerPublishRequest(BaseModel):
+    title: str
+    content: str
+    labels: List[str] = []
+    is_draft: bool = False
+    company_id: Optional[int] = None
+
+
+class YouTubeUploadRequest(BaseModel):
+    video_path: str                 # 서버 내 파일 경로
+    title: str
+    description: str = ""
+    tags: List[str] = []
+    category_id: str = "22"
+    privacy: str = "private"        # private | unlisted | public
+    language: str = "ko"
+    company_id: Optional[int] = None
+
+
+class YouTubeAuthRequest(BaseModel):
+    client_id: str
+    redirect_uri: str = "urn:ietf:wg:oauth:2.0:oob"
+
+
+class YouTubeTokenExchangeRequest(BaseModel):
+    code: str
+    client_id: str
+    client_secret: str
+    redirect_uri: str = "urn:ietf:wg:oauth:2.0:oob"
+
+
+class MediaPostOut(BaseModel):
+    id: int
+    company_id: Optional[int]
+    platform: str
+    title: str
+    content: str
+    external_id: str
+    external_url: str
+    status: str
+    platform_meta: Dict[str, Any]
+    published_at: Optional[datetime]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
