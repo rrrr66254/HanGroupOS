@@ -204,6 +204,8 @@ function AiEditPanel({ companyId }: { companyId: number }) {
   const [bulkBudget, setBulkBudget] = useState<Budget>('any')
   const [bulkApplying, setBulkApplying] = useState(false)
   const [savedIds, setSavedIds] = useState<Set<number>>(new Set())
+  const [testing, setTesting] = useState<number | null>(null)
+  const [testResult, setTestResult] = useState<{ nodeId: number; response: string; provider: string; model: string } | null>(null)
 
   useEffect(() => {
     orgApi.nodes(companyId).then((r) => setNodes(r.data))
@@ -253,6 +255,20 @@ function AiEditPanel({ companyId }: { companyId: number }) {
       setEditing({})
     } finally {
       setBulkApplying(false)
+    }
+  }
+
+  const handleTest = async (node: OrgNode) => {
+    setTesting(node.id)
+    setTestResult(null)
+    try {
+      const res = await orgApi.testNode(node.id)
+      const d = res.data as { response: string; provider: string; model: string }
+      setTestResult({ nodeId: node.id, response: d.response, provider: d.provider, model: d.model })
+    } catch {
+      setTestResult({ nodeId: node.id, response: '❌ 테스트 실패 — AI 연결을 확인하세요.', provider: '', model: '' })
+    } finally {
+      setTesting(null)
     }
   }
 
@@ -358,6 +374,7 @@ function AiEditPanel({ companyId }: { companyId: number }) {
                     <button
                       onClick={() => handleSave(node)}
                       disabled={!isDirty || saving === node.id}
+                      title="저장"
                       className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all flex-shrink-0 ${
                         isSaved
                           ? 'bg-emerald-500/20 text-emerald-400'
@@ -368,15 +385,45 @@ function AiEditPanel({ companyId }: { companyId: number }) {
                     >
                       {saving === node.id
                         ? <RefreshCw size={11} className="animate-spin" />
-                        : isSaved
-                        ? <Check size={11} />
                         : <Check size={11} />
                       }
                     </button>
+                    {/* Test button */}
+                    <button
+                      onClick={() => handleTest(node)}
+                      disabled={testing === node.id}
+                      title="AI 응답 테스트"
+                      className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-slate-600 hover:text-amber-400 hover:bg-amber-400/10 transition-all"
+                    >
+                      {testing === node.id
+                        ? <RefreshCw size={11} className="animate-spin text-amber-400" />
+                        : <Zap size={11} />
+                      }
+                    </button>
                   </div>
-                )
-              })}
-            </div>
+
+                  {/* Test result inline */}
+                  {testResult?.nodeId === node.id && (
+                    <div
+                      className="mt-2 rounded-lg p-2.5 text-[10px] leading-relaxed text-slate-300"
+                      style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)' }}
+                    >
+                      <div className="flex items-center gap-1 mb-1 text-[9px] text-amber-500 font-medium">
+                        <Zap size={8} />
+                        {testResult.provider} / {testResult.model}
+                        <button
+                          onClick={() => setTestResult(null)}
+                          className="ml-auto text-slate-700 hover:text-slate-400"
+                        >
+                          <X size={9} />
+                        </button>
+                      </div>
+                      {testResult.response}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )
       })}

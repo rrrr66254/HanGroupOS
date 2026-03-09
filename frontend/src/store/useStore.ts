@@ -24,13 +24,19 @@ export const useAuthStore = create<AuthState>()(
 interface AppState {
   selectedCompany: Company | null
   sidebarOpen: boolean
+  newEventCount: number
   setSelectedCompany: (company: Company | null) => void
   toggleSidebar: () => void
+  setNewEventCount: (n: number) => void
+  clearNewEvents: () => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
   selectedCompany: null,
   sidebarOpen: true,
+  newEventCount: 0,
   setSelectedCompany: (company) => set({ selectedCompany: company }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+  setNewEventCount: (n) => set({ newEventCount: n }),
+  clearNewEvents: () => set({ newEventCount: 0 }),
 }))

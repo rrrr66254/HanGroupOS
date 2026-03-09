@@ -476,6 +476,7 @@ class StrategyItemUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     progress: Optional[int] = None
+    company_id: Optional[int] = None
 
 
 class StrategyItemOut(BaseModel):

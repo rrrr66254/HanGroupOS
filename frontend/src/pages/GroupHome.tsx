@@ -6,6 +6,7 @@ import {
   TrendingUp, Users, Star, Wifi,
 } from 'lucide-react'
 import { chatApi, companiesApi } from '../api/client'
+import { useAppStore } from '../store/useStore'
 import { format } from 'date-fns'
 
 const POLL_INTERVAL = 30 // seconds
@@ -91,7 +92,13 @@ export default function GroupHome() {
     }
   }
 
+  const clearNewEvents = useAppStore((s) => s.clearNewEvents)
+
   useEffect(() => {
+    // Mark all events as seen when the user visits this page
+    clearNewEvents()
+    localStorage.setItem('han_last_seen_event', new Date().toISOString())
+
     loadAll()
     loadActions()
     startPolling()

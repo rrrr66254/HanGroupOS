@@ -60,6 +60,7 @@ export const orgApi = {
   createNode: (data: object) => api.post('/org/nodes', data),
   updateNode: (id: number, data: object) => api.patch(`/org/nodes/${id}`, data),
   deleteNode: (id: number) => api.delete(`/org/nodes/${id}`),
+  testNode: (id: number) => api.post(`/org/nodes/${id}/test`),
   graph: (companyId?: number) =>
     api.get('/org/graph', { params: { company_id: companyId } }),
   groupTree: () => api.get('/org/group-tree'),

@@ -4,6 +4,7 @@ from typing import List, Optional
 from core.database import get_db
 from core.security import get_current_user
 from models.models import OrgNode, OrgTemplate, OrgPatch, OrgProposal, User, Company
+from services.ai_provider import get_provider_from_db
 from schemas.schemas import (
     OrgNodeCreate, OrgNodeOut,
     OrgTemplateCreate, OrgTemplateOut,
@@ -55,6 +56,43 @@ def update_node(
     db.commit()
     db.refresh(node)
     return node
+
+
+@router.post("/nodes/{node_id}/test")
+def test_node(
+    node_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Send a one-shot test message using the node's configured AI provider/model."""
+    node = db.query(OrgNode).filter(OrgNode.id == node_id).first()
+    if not node:
+        raise HTTPException(404, "Node not found")
+
+    # Use the user's configured provider but override with node's model
+    provider = get_provider_from_db(db, current_user.id)
+    # Override model to match node's assignment
+    provider.provider = node.ai_provider if node.ai_provider not in ("mock", "") else provider.provider
+    provider.model = node.ai_model if node.ai_model else provider.model
+
+    system = (
+        f"당신은 {node.name}입니다. {node.role} 역할을 맡고 있습니다. "
+        f"한 문장으로 짧고 명확하게 자기소개를 하세요."
+    )
+    response = provider.chat(
+        [{"role": "user", "content": "안녕하세요! 간단히 자기소개 해주세요."}],
+        system=system,
+        session_type="ceo",
+        max_tokens=200,
+    )
+    return {
+        "node_id": node.id,
+        "name": node.name,
+        "role": node.role,
+        "provider": provider.provider,
+        "model": provider.model,
+        "response": response,
+    }
 
 
 @router.delete("/nodes/{node_id}")

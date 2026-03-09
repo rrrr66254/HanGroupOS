@@ -43,12 +43,13 @@ function ProgressBar({ value, color }: { value: number; color?: string }) {
 
 // ── Strategy card ──────────────────────────────────────────────────────────
 function StrategyCard({
-  item, onProgressChange, onDelete, laneColor,
+  item, onProgressChange, onDelete, laneColor, onDragStart,
 }: {
   item: StrategyItem
   onProgressChange: (id: number, v: number) => void
   onDelete: (id: number) => void
   laneColor: string
+  onDragStart: (e: React.DragEvent, itemId: number) => void
 }) {
   const typeMeta = ITEM_TYPE_META[item.item_type] ?? ITEM_TYPE_META.objective
   const priorityMeta = PRIORITY_META[item.priority] ?? PRIORITY_META.medium
@@ -56,7 +57,9 @@ function StrategyCard({
 
   return (
     <div
-      className="rounded-xl p-3 group relative transition-all hover:brightness-110"
+      draggable
+      onDragStart={(e) => onDragStart(e, item.id)}
+      className="rounded-xl p-3 group relative transition-all hover:brightness-110 cursor-grab active:cursor-grabbing select-none"
       style={{ background: typeMeta.bg, border: `1px solid ${typeMeta.color}25` }}
     >
       {/* Type + priority badges */}
@@ -110,26 +113,34 @@ function StrategyCard({
 
 // ── Lane (one per company) ─────────────────────────────────────────────────
 function CompanyLane({
-  company, items, color, onProgressChange, onDelete,
+  company, items, color, onProgressChange, onDelete, onDragStart, onDrop,
 }: {
   company: { id: number | null; name: string }
   items: StrategyItem[]
   color: string
   onProgressChange: (id: number, v: number) => void
   onDelete: (id: number) => void
+  onDragStart: (e: React.DragEvent, itemId: number) => void
+  onDrop: (targetCompanyId: number | null) => void
 }) {
+  const [isDragOver, setIsDragOver] = useState(false)
+
   const totalProgress = items.length
     ? Math.round(items.reduce((s, i) => s + i.progress, 0) / items.length)
     : 0
 
   return (
     <div
-      className="flex-shrink-0 flex flex-col rounded-xl overflow-hidden"
+      className="flex-shrink-0 flex flex-col rounded-xl overflow-hidden transition-all"
       style={{
         width: 220,
-        background: `${color}06`,
-        border: `1px solid ${color}20`,
+        background: isDragOver ? `${color}18` : `${color}06`,
+        border: `1px solid ${isDragOver ? color : `${color}20`}`,
+        boxShadow: isDragOver ? `0 0 0 2px ${color}30` : 'none',
       }}
+      onDragOver={(e) => { e.preventDefault(); setIsDragOver(true) }}
+      onDragLeave={() => setIsDragOver(false)}
+      onDrop={(e) => { e.preventDefault(); setIsDragOver(false); onDrop(company.id) }}
     >
       {/* Lane header */}
       <div
@@ -153,9 +164,17 @@ function CompanyLane({
         </div>
       </div>
 
-      {/* Cards */}
+      {/* Cards + drop target */}
       <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[120px]">
-        {items.length === 0 ? (
+        {isDragOver && items.length === 0 && (
+          <div
+            className="rounded-lg border-2 border-dashed py-6 text-center text-[9px]"
+            style={{ borderColor: color, color }}
+          >
+            여기에 놓기
+          </div>
+        )}
+        {items.length === 0 && !isDragOver ? (
           <div className="text-[10px] text-slate-700 text-center py-6">전략 없음</div>
         ) : (
           items.map((item) => (
@@ -165,6 +184,7 @@ function CompanyLane({
               laneColor={color}
               onProgressChange={onProgressChange}
               onDelete={onDelete}
+              onDragStart={onDragStart}
             />
           ))
         )}
@@ -228,6 +248,26 @@ export default function Strategy() {
     } finally {
       setEvaluating(false)
     }
+  }
+
+  // ── Drag & drop ──────────────────────────────────────────────────────────
+  const dragItemId = useState<number | null>(null)
+  const [dragId, setDragId] = dragItemId
+
+  const handleDragStart = (e: React.DragEvent, itemId: number) => {
+    setDragId(itemId)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(itemId))
+  }
+
+  const handleDrop = async (targetCompanyId: number | null) => {
+    if (dragId === null) return
+    const item = items.find((i) => i.id === dragId)
+    if (!item || item.company_id === targetCompanyId) { setDragId(null); return }
+    // Optimistic update
+    setItems((prev) => prev.map((i) => i.id === dragId ? { ...i, company_id: targetCompanyId } : i))
+    setDragId(null)
+    await strategyApi.updateItem(dragId, { company_id: targetCompanyId })
   }
 
   const filteredItems = companyFilter
@@ -321,6 +361,8 @@ export default function Strategy() {
                           color="#e24c4b"
                           onProgressChange={updateProgress}
                           onDelete={deleteItem}
+                          onDragStart={handleDragStart}
+                          onDrop={handleDrop}
                         />
                       )
                     }
@@ -341,6 +383,8 @@ export default function Strategy() {
                           color={color}
                           onProgressChange={updateProgress}
                           onDelete={deleteItem}
+                          onDragStart={handleDragStart}
+                          onDrop={handleDrop}
                         />
                       )
                     })

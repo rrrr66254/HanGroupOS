@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, MessageSquare, Building2, CheckSquare,
   Users, TrendingUp, Map, FlaskConical, Monitor,
-  Brain, Settings, ChevronLeft, ChevronRight, Zap, Home,
+  Brain, Settings, ChevronLeft, ChevronRight, Zap, Home, Bell,
 } from 'lucide-react'
 import { useAppStore } from '../store/useStore'
 
@@ -23,7 +23,7 @@ const NAV = [
 ]
 
 export default function Sidebar() {
-  const { sidebarOpen, toggleSidebar } = useAppStore()
+  const { sidebarOpen, toggleSidebar, newEventCount } = useAppStore()
   const [logoError, setLogoError] = useState(false)
 
   return (
@@ -74,22 +74,43 @@ export default function Sidebar() {
               }`
             }
           >
-            {({ isActive }) => (
-              <>
-                <Icon
-                  size={18}
-                  className={`flex-shrink-0 ${isActive ? 'text-brand-light' : highlight ? 'text-accent' : ''}`}
-                />
-                {sidebarOpen && (
-                  <span className="truncate animate-fade-in">{label}</span>
-                )}
-                {!sidebarOpen && (
-                  <div className="absolute left-full ml-3 px-2 py-1 bg-bg-elevated border border-bg-border rounded-md text-xs text-slate-200 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
-                    {label}
+            {({ isActive }) => {
+              const showBadge = to === '/group-home' && newEventCount > 0
+              return (
+                <>
+                  <div className="relative flex-shrink-0">
+                    <Icon
+                      size={18}
+                      className={isActive ? 'text-brand-light' : highlight ? 'text-accent' : ''}
+                    />
+                    {showBadge && !sidebarOpen && (
+                      <span
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
+                        style={{ background: '#ef4444', color: 'white' }}
+                      >
+                        {newEventCount > 9 ? '9+' : newEventCount}
+                      </span>
+                    )}
                   </div>
-                )}
-              </>
-            )}
+                  {sidebarOpen && (
+                    <span className="truncate animate-fade-in flex-1">{label}</span>
+                  )}
+                  {sidebarOpen && showBadge && (
+                    <span
+                      className="ml-auto flex-shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-0.5"
+                      style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}
+                    >
+                      <Bell size={8} />{newEventCount}
+                    </span>
+                  )}
+                  {!sidebarOpen && (
+                    <div className="absolute left-full ml-3 px-2 py-1 bg-bg-elevated border border-bg-border rounded-md text-xs text-slate-200 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                      {label}{showBadge ? ` (${newEventCount})` : ''}
+                    </div>
+                  )}
+                </>
+              )
+            }}
           </NavLink>
         ))}
       </nav>
