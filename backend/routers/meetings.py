@@ -159,3 +159,96 @@ def delete_meeting(
     db.delete(meeting)
     db.commit()
     return {"ok": True}
+
+
+# ── AI 회의록 자동 정리 + 액션 아이템 추출 ────────────────────────────────────
+@router.post("/{meeting_id}/summarize")
+def summarize_meeting(
+    meeting_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """AI가 회의 전체 내용을 요약하고 참가자별 액션 아이템을 추출합니다."""
+    from models.models import ApprovalRequest
+    import json, re
+
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(404, "Meeting not found")
+
+    history = (
+        db.query(MeetingMessage)
+        .filter(MeetingMessage.meeting_id == meeting_id)
+        .order_by(MeetingMessage.created_at)
+        .all()
+    )
+    if not history:
+        raise HTTPException(400, "회의 내용이 없습니다.")
+
+    transcript = "\n".join(
+        f"[{m.sender}({m.sender_role})]: {m.content}" for m in history
+    )
+
+    prompt = f"""다음 회의록을 분석하여 JSON으로 반환하세요.
+회의 제목: {meeting.title}
+회의 설명: {meeting.description or ''}
+
+=== 회의 내용 ===
+{transcript}
+
+=== 출력 형식 ===
+{{
+  "summary": "회의 전체 요약 (3-5문장)",
+  "key_decisions": ["결정 사항 1", "결정 사항 2"],
+  "action_items": [
+    {{
+      "assignee": "담당자 이름",
+      "task": "액션 아이템 내용",
+      "priority": "high|medium|low"
+    }}
+  ],
+  "next_steps": "다음 단계 제안"
+}}"""
+
+    provider = get_provider_from_db(db, current_user.id)
+    raw = provider.chat(
+        [{"role": "user", "content": prompt}],
+        system="당신은 회의록 분석 전문가입니다. 반드시 JSON만 반환하세요.",
+        session_type="general",
+    )
+
+    default = {
+        "summary": f"'{meeting.title}' 회의가 진행되었습니다. AI 분석에 실패했습니다.",
+        "key_decisions": [],
+        "action_items": [],
+        "next_steps": "추가 논의 필요",
+    }
+    try:
+        m = re.search(r"\{[\s\S]*\}", raw)
+        result = json.loads(m.group()) if m else default
+    except Exception:
+        result = default
+
+    # 액션 아이템을 승인함에 자동 등록
+    created_approvals = []
+    for item in result.get("action_items", []):
+        approval = ApprovalRequest(
+            title=f"[회의 액션] {item.get('task', '')}",
+            description=f"회의 '{meeting.title}'에서 추출된 액션 아이템\n담당: {item.get('assignee', '미정')}",
+            request_type="meeting_action",
+            requester="AI 회의록 시스템",
+            company_id=meeting.company_id,
+            meta={
+                "meeting_id": meeting_id,
+                "meeting_title": meeting.title,
+                "assignee": item.get("assignee"),
+                "priority": item.get("priority", "medium"),
+                "from_summary": True,
+            },
+        )
+        db.add(approval)
+        db.flush()
+        created_approvals.append({"task": item.get("task"), "assignee": item.get("assignee")})
+
+    db.commit()
+    return {**result, "approvals_created": len(created_approvals)}

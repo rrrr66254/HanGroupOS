@@ -126,6 +126,7 @@ export const meetingsApi = {
     }),
   close: (id: number) => api.post(`/meetings/${id}/close`),
   delete: (id: number) => api.delete(`/meetings/${id}`),
+  summarize: (id: number) => api.post(`/meetings/${id}/summarize`),
 }
 
 // ── Market ────────────────────────────────────────────────────────────────────
@@ -215,6 +216,12 @@ export const workApi = {
     api.post(`/work/weekly-report/${companyId}`),
 }
 
+// ── Talent ────────────────────────────────────────────────────────────────────
+export const talentApi = {
+  match: (companyIds: number[]) =>
+    api.post('/strategy/talent', { company_ids: companyIds }),
+}
+
 // ── Sites ─────────────────────────────────────────────────────────────────────
 export const sitesApi = {
   list: (status?: string) => api.get('/sites', { params: { status } }),
@@ -227,6 +234,7 @@ export const sitesApi = {
   undeploy: (siteId: number) => api.post(`/sites/${siteId}/undeploy`),
   submissions: (siteId: number) => api.get(`/sites/${siteId}/submissions`),
   evaluate: () => api.post('/sites/evaluate'),
+  generateIR: (companyId: number) => api.post(`/sites/ir/${companyId}`),
 }
 
 // ── Synergy ───────────────────────────────────────────────────────────────────

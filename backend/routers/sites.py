@@ -195,3 +195,17 @@ def _site_dict(s: CompanySite, company_name: str = None):
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "deployed_at": s.deployed_at.isoformat() if s.deployed_at else None,
     }
+
+
+# ── API: generate IR presentation ─────────────────────────────────────────────
+@router.post("/api/sites/ir/{company_id}")
+def generate_ir(
+    company_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from services.ir_service import generate_ir_report
+    html = generate_ir_report(db, company_id, current_user.id)
+    if not html:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return {"html": html, "company_id": company_id}

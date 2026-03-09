@@ -1,8 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Users, Plus, X, Send, Bot } from 'lucide-react'
+import { Users, Plus, X, Send, Bot, FileText, Loader2, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import { meetingsApi, companiesApi } from '../api/client'
 import type { Meeting, MeetingMessage, Company } from '../types'
 import { format } from 'date-fns'
+
+interface MeetingSummary {
+  summary: string
+  key_decisions: string[]
+  action_items: { assignee: string; task: string; priority: string }[]
+  next_steps: string
+  approvals_created: number
+}
 
 export default function Meetings() {
   const [meetings, setMeetings] = useState<Meeting[]>([])
@@ -14,6 +22,9 @@ export default function Meetings() {
   const [msgInput, setMsgInput] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [senderName, setSenderName] = useState('Human Founder')
+  const [summarizing, setSummarizing] = useState(false)
+  const [summary, setSummary] = useState<MeetingSummary | null>(null)
+  const [summaryOpen, setSummaryOpen] = useState(false)
 
   useEffect(() => {
     meetingsApi.list().then((r) => setMeetings(r.data))
@@ -65,6 +76,17 @@ export default function Meetings() {
     setMeetings((prev) => prev.map((m) => m.id === selected.id ? { ...m, status: 'closed' } : m))
   }
 
+  const summarizeMeeting = async () => {
+    if (!selected) return
+    setSummarizing(true)
+    setSummary(null)
+    setSummaryOpen(true)
+    try {
+      const r = await meetingsApi.summarize(selected.id)
+      setSummary(r.data as MeetingSummary)
+    } catch { /* ignore */ } finally { setSummarizing(false) }
+  }
+
   return (
     <div className="flex h-[calc(100vh-8rem)] gap-4 animate-fade-in">
       {/* Left: Meeting list */}
@@ -108,11 +130,22 @@ export default function Meetings() {
                 <div className="text-sm font-semibold text-slate-100">{selected.title}</div>
                 <div className="text-[10px] text-slate-500 mt-0.5">{selected.description}</div>
               </div>
-              {selected.status === 'open' && (
-                <button onClick={closeMeeting} className="text-xs text-slate-500 hover:text-danger border border-bg-border rounded-lg px-2 py-1">
-                  회의 종료
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={summarizeMeeting}
+                  disabled={summarizing || messages.length === 0}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-all"
+                  style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', color: '#a5b4fc' }}
+                >
+                  {summarizing ? <Loader2 size={11} className="animate-spin" /> : <FileText size={11} />}
+                  회의록 생성
                 </button>
-              )}
+                {selected.status === 'open' && (
+                  <button onClick={closeMeeting} className="text-xs text-slate-500 hover:text-danger border border-bg-border rounded-lg px-2 py-1">
+                    회의 종료
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Messages */}
@@ -150,6 +183,65 @@ export default function Meetings() {
                 </div>
               )}
             </div>
+
+            {/* Summary Panel */}
+            {summaryOpen && (
+              <div className="border-t border-bg-border" style={{ background: 'rgba(99,102,241,0.04)' }}>
+                <button
+                  onClick={() => setSummaryOpen((v) => !v)}
+                  className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-slate-300 hover:bg-white/[0.02]"
+                >
+                  <div className="flex items-center gap-2">
+                    <FileText size={12} className="text-brand-light" />
+                    AI 회의록
+                    {summary && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-brand/20 text-brand-light">{summary.approvals_created}개 액션 등록</span>}
+                  </div>
+                  {summaryOpen ? <ChevronDown size={12} className="text-slate-500" /> : <ChevronUp size={12} className="text-slate-500" />}
+                </button>
+                {summarizing && (
+                  <div className="px-4 pb-3 flex items-center gap-2 text-xs text-slate-500">
+                    <Loader2 size={12} className="animate-spin" /> AI가 회의록을 작성하고 있습니다…
+                  </div>
+                )}
+                {summary && (
+                  <div className="px-4 pb-4 space-y-3">
+                    <p className="text-xs text-slate-300 leading-relaxed">{summary.summary}</p>
+                    {summary.key_decisions.length > 0 && (
+                      <div>
+                        <div className="text-[10px] font-semibold text-slate-500 mb-1">결정 사항</div>
+                        <ul className="space-y-0.5">
+                          {summary.key_decisions.map((d, i) => (
+                            <li key={i} className="text-[11px] text-slate-400 flex gap-1.5">
+                              <span className="text-brand-light flex-shrink-0">✓</span>{d}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {summary.action_items.length > 0 && (
+                      <div>
+                        <div className="text-[10px] font-semibold text-slate-500 mb-1">액션 아이템 (승인함 자동 등록됨)</div>
+                        <div className="space-y-1">
+                          {summary.action_items.map((a, i) => (
+                            <div key={i} className="flex items-center gap-2 text-[11px]">
+                              <CheckCircle size={9} className="text-emerald-500 flex-shrink-0" />
+                              <span className="text-slate-400">{a.assignee}</span>
+                              <span className="text-slate-600">—</span>
+                              <span className="text-slate-300">{a.task}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {summary.next_steps && (
+                      <div className="text-[10px] text-slate-500 pt-1 border-t border-white/[0.05]">
+                        다음 단계: <span className="text-slate-400">{summary.next_steps}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Input */}
             {selected.status === 'open' && (

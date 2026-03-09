@@ -21,6 +21,8 @@ import WeeklyReport from './pages/WeeklyReport'
 import SiteBuilder from './pages/SiteBuilder'
 import SiteEvaluator from './pages/SiteEvaluator'
 import Synergy from './pages/Synergy'
+import IRReport from './pages/IRReport'
+import TalentMatch from './pages/TalentMatch'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -74,6 +76,8 @@ export default function App() {
           <Route path="site-builder" element={<SiteBuilder />} />
           <Route path="site-evaluator" element={<SiteEvaluator />} />
           <Route path="synergy" element={<Synergy />} />
+          <Route path="ir-report" element={<IRReport />} />
+          <Route path="talent-match" element={<TalentMatch />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>

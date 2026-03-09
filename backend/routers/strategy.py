@@ -354,3 +354,76 @@ def analyze_synergy(
         result = default
 
     return result
+
+
+# ── AI 인재 추천 시스템 ─────────────────────────────────────────────────────────
+@router.post("/talent")
+def talent_match(
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """AI가 계열사 간 인재 이동/협업 기회를 분석합니다."""
+    from models.models import OrgNode
+    import json, re as _re
+
+    company_ids = body.get("company_ids") or []
+    q = db.query(OrgNode).filter(OrgNode.company_id != None)
+    if company_ids:
+        q = q.filter(OrgNode.company_id.in_(company_ids))
+    nodes = q.all()
+
+    if not nodes:
+        return {"recommendations": [], "summary": "분석할 조직원이 없습니다."}
+
+    # Build per-company member list
+    company_map: dict = {}
+    for n in nodes:
+        cid = str(n.company_id)
+        if cid not in company_map:
+            c = db.query(Company).filter(Company.id == n.company_id).first()
+            company_map[cid] = {"name": c.name if c else f"회사{cid}", "members": []}
+        company_map[cid]["members"].append(
+            f"{n.name}({n.role}, {n.level}, {n.description or ''})"
+        )
+
+    company_list = "\n".join(
+        f"[{v['name']}]: {', '.join(v['members'][:8])}"
+        for v in company_map.values()
+    )
+
+    prompt = f"""계열사별 조직원 현황:
+{company_list}
+
+위 조직원들 간 최적의 인재 이동·협업 추천을 JSON으로 제안하세요.
+{{
+  "summary": "전체 인재 현황 분석 요약",
+  "recommendations": [
+    {{
+      "type": "파견|협업|멘토링|팀빌딩",
+      "person": "추천 인재 이름",
+      "from_company": "현재 소속",
+      "to_company": "추천 이동/협업 대상",
+      "reason": "추천 이유 (2-3문장)",
+      "benefit": "기대 효과",
+      "priority": "high|medium|low"
+    }}
+  ]
+}}
+최소 3개, 최대 6개를 제안하세요."""
+
+    provider = get_provider_from_db(db, current_user.id)
+    raw = provider.chat(
+        [{"role": "user", "content": prompt}],
+        system="당신은 그룹 인재 전략 전문가입니다. JSON만 반환하세요.",
+        session_type="general",
+    )
+
+    default = {"summary": "AI 분석 실패. API 키를 확인하세요.", "recommendations": []}
+    try:
+        m = _re.search(r"\{[\s\S]*\}", raw)
+        result = json.loads(m.group()) if m else default
+    except Exception:
+        result = default
+
+    return result
