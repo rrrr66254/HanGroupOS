@@ -271,16 +271,20 @@ def stream_message(
                 import anthropic as _anthropic
 
                 client = _anthropic.Anthropic(api_key=prov.api_key)
-                with client.messages.stream(
-                    model=prov.model,
-                    max_tokens=16000,
-                    thinking={"type": "enabled", "budget_tokens": 8000},
-                    system=sys_prompt or "You are an AI executive assistant for HAN Group.",
-                    messages=msgs,
-                ) as stream:
+                # extended thinking is only supported on claude-3-7-sonnet models
+                supports_thinking = prov.model and "claude-3-7-sonnet" in prov.model
+                stream_kwargs: dict = {
+                    "model": prov.model,
+                    "max_tokens": 16000 if supports_thinking else 4096,
+                    "system": sys_prompt or "You are an AI executive assistant for HAN Group.",
+                    "messages": msgs,
+                }
+                if supports_thinking:
+                    stream_kwargs["thinking"] = {"type": "enabled", "budget_tokens": 8000}
+                with client.messages.stream(**stream_kwargs) as stream:
                     for event in stream:
                         if event.type == "content_block_delta":
-                            if event.delta.type == "thinking_delta":
+                            if supports_thinking and event.delta.type == "thinking_delta":
                                 yield f"data: {json.dumps({'thinking_chunk': event.delta.thinking, 'done': False}, ensure_ascii=False)}\n\n"
                             elif event.delta.type == "text_delta":
                                 full_content += event.delta.text

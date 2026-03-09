@@ -47,6 +47,23 @@ def health():
 def startup():
     init_db()
     _seed_data()
+    _check_ollama()
+
+
+def _check_ollama():
+    """Check Ollama connectivity on startup and log the result."""
+    import httpx
+
+    base_url = settings.OLLAMA_BASE_URL or "http://localhost:11434"
+    try:
+        r = httpx.get(f"{base_url}/api/tags", timeout=3.0)
+        if r.status_code == 200:
+            models = [m["name"] for m in r.json().get("models", [])]
+            print(f"✓ Ollama 연결 성공 ({base_url}) — 사용 가능 모델: {', '.join(models) if models else '없음'}")
+        else:
+            print(f"⚠️  Ollama 응답 오류 (HTTP {r.status_code}) — 기본 제공자로 Ollama 사용 불가")
+    except Exception:
+        print(f"⚠️  Ollama 미연결 ({base_url}) — Ollama가 실행 중이지 않습니다. `ollama serve` 로 실행하세요.")
 
 
 def _seed_data():

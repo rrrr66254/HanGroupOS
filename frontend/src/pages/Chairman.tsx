@@ -578,6 +578,20 @@ export default function Chairman() {
 
   const sendCeoMessage = async () => {
     if (!ceoChatInput.trim() || !ceoChatSession || ceoChatLoading) return
+
+    // Ollama 연결 상태 사전 확인
+    if (editProvider === 'ollama' && health?.ollama.status !== 'connected') {
+      setCeoChatMessages((prev) => [...prev, {
+        id: Date.now(),
+        session_id: ceoChatSession.id,
+        role: 'assistant',
+        content: '⚠️ **Ollama가 연결되지 않았습니다.** `ollama serve` 로 실행하거나 다른 프로바이더를 선택하세요.',
+        sender_name: '시스템',
+        created_at: new Date().toISOString(),
+      }])
+      return
+    }
+
     const content = ceoChatInput.trim()
     setCeoChatInput('')
     setCeoChatLoading(true)
@@ -609,7 +623,7 @@ export default function Chairman() {
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session_id: ceoChatSession.id, content }),
+        body: JSON.stringify({ session_id: ceoChatSession.id, content, provider_override: editProvider, model_override: editModel }),
       })
       if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
 
@@ -653,6 +667,21 @@ export default function Chairman() {
   // ── Main chairman sendMessage ──────────────────────────────────────────────
   const sendMessage = async () => {
     if (!input.trim() || !session || loading) return
+
+    // Ollama 연결 상태 사전 확인
+    if (editProvider === 'ollama' && health?.ollama.status !== 'connected') {
+      const errId = Date.now()
+      setMessages((prev) => [...prev, {
+        id: errId,
+        session_id: session.id,
+        role: 'assistant',
+        content: '⚠️ **Ollama가 연결되지 않았습니다.**\n\nOllama가 실행 중인지 확인해주세요:\n```\nollama serve\n```\n또는 상단 연결 상태 버튼을 눌러 다른 AI 프로바이더를 선택하거나 Ollama URL을 설정하세요.',
+        sender_name: '시스템',
+        created_at: new Date().toISOString(),
+      }])
+      return
+    }
+
     const content = input.trim()
     setInput('')
     setLoading(true)
@@ -740,7 +769,7 @@ export default function Chairman() {
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session_id: session.id, content }),
+        body: JSON.stringify({ session_id: session.id, content, provider_override: editProvider, model_override: editModel }),
       })
       if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
 
