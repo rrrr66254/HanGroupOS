@@ -139,6 +139,7 @@ export const simulationApi = {
   list: (companyId?: number) =>
     api.get('/simulation', { params: { company_id: companyId } }),
   get: (id: number) => api.get(`/simulation/${id}`),
+  merger: (data: object) => api.post('/simulation/merger', data),
 }
 
 // ── AI Models ─────────────────────────────────────────────────────────────────
@@ -175,6 +176,8 @@ export const strategyApi = {
   leaderboard: () => api.get('/strategy/ceo/leaderboard'),
   collaborations: () => api.get('/strategy/collaborations'),
   createCollaboration: (data: object) => api.post('/strategy/collaborations', data),
+  generate: (companyId: number, focus?: string) =>
+    api.post('/strategy/generate', { company_id: companyId, focus }),
 }
 
 // ── Knowledge / Dashboard ─────────────────────────────────────────────────────

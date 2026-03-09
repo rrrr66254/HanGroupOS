@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { useAuthStore } from './store/useStore'
+import { useEffect } from 'react'
+import { useAuthStore, useAppStore } from './store/useStore'
 import Layout from './components/Layout'
 import OllamaSetupNotice from './components/OllamaSetupNotice'
 import Login from './pages/Login'
@@ -28,6 +29,15 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const theme = useAppStore((s) => s.theme)
+  useEffect(() => {
+    if (theme === 'light') {
+      document.documentElement.classList.add('light')
+    } else {
+      document.documentElement.classList.remove('light')
+    }
+  }, [theme])
+
   return (
     <BrowserRouter>
       <Routes>

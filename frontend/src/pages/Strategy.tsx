@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Map, Plus, X, Trophy, Target, Milestone, BarChart3, LayoutGrid, List } from 'lucide-react'
+import { Map, Plus, X, Trophy, Target, Milestone, BarChart3, LayoutGrid, List, Sparkles } from 'lucide-react'
 import { strategyApi, companiesApi } from '../api/client'
 import type { StrategyItem, Company, CEOPerformance } from '../types'
 import { format } from 'date-fns'
@@ -208,6 +208,11 @@ export default function Strategy() {
   const [evalPeriod, setEvalPeriod] = useState('')
   const [tab, setTab] = useState<'map' | 'leaderboard' | 'evaluate'>('map')
   const [viewMode, setViewMode] = useState<'board' | 'list'>('board')
+  const [showGenerate, setShowGenerate] = useState(false)
+  const [genCompanyId, setGenCompanyId] = useState('')
+  const [genFocus, setGenFocus] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [genResult, setGenResult] = useState<{ generated: number; company: string } | null>(null)
 
   const load = async () => {
     // Always fetch all items; board view filters client-side for lane layout
@@ -247,6 +252,19 @@ export default function Strategy() {
       setTab('leaderboard')
     } finally {
       setEvaluating(false)
+    }
+  }
+
+  const handleGenerate = async () => {
+    if (!genCompanyId) return
+    setGenerating(true)
+    setGenResult(null)
+    try {
+      const res = await strategyApi.generate(parseInt(genCompanyId), genFocus || undefined)
+      setGenResult({ generated: res.data.generated, company: res.data.company })
+      await load()
+    } finally {
+      setGenerating(false)
     }
   }
 
@@ -331,9 +349,18 @@ export default function Strategy() {
               </button>
             </div>
 
-            <button onClick={() => setShowNew(true)} className="btn-primary flex items-center gap-2 ml-auto text-xs py-1.5">
-              <Plus size={13} /> 전략 추가
-            </button>
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={() => { setShowGenerate(true); setGenResult(null) }}
+                className="flex items-center gap-1.5 text-xs py-1.5 px-3 rounded-lg font-medium transition-colors"
+                style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.25)' }}
+              >
+                <Sparkles size={12} /> AI 자동 생성
+              </button>
+              <button onClick={() => setShowNew(true)} className="btn-primary flex items-center gap-2 text-xs py-1.5">
+                <Plus size={13} /> 전략 추가
+              </button>
+            </div>
           </div>
 
           {/* ── Board view: company lanes ── */}
@@ -535,6 +562,60 @@ export default function Strategy() {
             >
               {evaluating ? '평가 중...' : 'CEO 성과 평가 실행'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* AI Generate modal */}
+      {showGenerate && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="card w-full max-w-sm p-6 animate-slide-in">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                <Sparkles size={14} className="text-warning" /> AI 전략 자동 생성
+              </h2>
+              <button onClick={() => setShowGenerate(false)} className="text-slate-500 hover:text-slate-300"><X size={16} /></button>
+            </div>
+            {genResult ? (
+              <div className="text-center py-4 space-y-3">
+                <div className="text-3xl">✅</div>
+                <div className="text-sm font-semibold text-slate-200">
+                  {genResult.company}에 {genResult.generated}개 전략 생성 완료
+                </div>
+                <p className="text-xs text-slate-500">전략 맵에서 확인하세요.</p>
+                <button onClick={() => setShowGenerate(false)} className="btn-primary w-full mt-2">확인</button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">계열사 *</label>
+                  <select className="input" value={genCompanyId} onChange={(e) => setGenCompanyId(e.target.value)}>
+                    <option value="">선택...</option>
+                    {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">집중 영역 (선택)</label>
+                  <input
+                    className="input text-xs"
+                    value={genFocus}
+                    onChange={(e) => setGenFocus(e.target.value)}
+                    placeholder="예: 해외 시장 진출, 비용 절감..."
+                  />
+                </div>
+                <p className="text-[10px] text-slate-600">AI가 회사 비전·산업을 기반으로 목표/이니셔티브/마일스톤/KPI 5개를 자동 생성합니다.</p>
+                <div className="flex gap-2 mt-2">
+                  <button onClick={() => setShowGenerate(false)} className="flex-1 btn-ghost border border-bg-border text-xs">취소</button>
+                  <button
+                    onClick={handleGenerate}
+                    disabled={!genCompanyId || generating}
+                    className="flex-1 btn-primary flex items-center justify-center gap-1.5 text-xs"
+                  >
+                    {generating ? <><span className="animate-spin">⟳</span> 생성 중...</> : <><Sparkles size={11} /> 생성</>}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

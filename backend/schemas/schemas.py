@@ -479,6 +479,11 @@ class StrategyItemUpdate(BaseModel):
     company_id: Optional[int] = None
 
 
+class StrategyGenerateRequest(BaseModel):
+    company_id: int
+    focus: Optional[str] = None
+
+
 class StrategyItemOut(BaseModel):
     id: int
     company_id: Optional[int]
@@ -539,3 +544,10 @@ class DashboardStats(BaseModel):
     total_memories: int
     recent_simulations: int
     total_strategies: int
+
+
+# ── Merger Simulation ─────────────────────────────────────────────────────────
+class MergerSimRequest(BaseModel):
+    company_a_id: int
+    company_b_id: int
+    merger_type: str = "합병"   # 합병 | 인수 | 전략적 제휴

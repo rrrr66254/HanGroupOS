@@ -5,10 +5,10 @@ export default {
     extend: {
       colors: {
         bg: {
-          base: '#09090f',
-          card: '#111118',
-          elevated: '#16161f',
-          border: '#1e1e2e',
+          base:     'rgb(var(--bg-base) / <alpha-value>)',
+          card:     'rgb(var(--bg-card) / <alpha-value>)',
+          elevated: 'rgb(var(--bg-elevated) / <alpha-value>)',
+          border:   'rgb(var(--bg-border) / <alpha-value>)',
         },
         brand: {
           DEFAULT: '#6366f1',

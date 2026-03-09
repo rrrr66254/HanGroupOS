@@ -2,6 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Theme: Dark (default) ─────────────────────────────────────────────────── */
+:root {
+  --bg-base:     9 9 15;
+  --bg-card:     17 17 24;
+  --bg-elevated: 22 22 31;
+  --bg-border:   30 30 46;
+}
+
+/* ── Theme: Light ──────────────────────────────────────────────────────────── */
+html.light {
+  --bg-base:     248 250 252;
+  --bg-card:     255 255 255;
+  --bg-elevated: 241 245 249;
+  --bg-border:   226 232 240;
+}
+
+html.light body { color: #0f172a !important }
+html.light .text-slate-100 { color: #0f172a !important }
+html.light .text-slate-200 { color: #1e293b !important }
+html.light .text-slate-300 { color: #334155 !important }
+html.light .text-slate-400 { color: #475569 !important }
+html.light .text-slate-500 { color: #64748b !important }
+html.light .text-slate-600 { color: #94a3b8 !important }
+html.light .text-slate-700 { color: #94a3b8 !important }
+
 @layer base {
   * {
     box-sizing: border-box;

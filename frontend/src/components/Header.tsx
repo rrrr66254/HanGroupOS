@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from 'react-router-dom'
-import { LogOut, User, Bell } from 'lucide-react'
-import { useAuthStore } from '../store/useStore'
+import { LogOut, User, Bell, Sun, Moon } from 'lucide-react'
+import { useAuthStore, useAppStore } from '../store/useStore'
 
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': '대시보드',
@@ -19,6 +19,7 @@ const PAGE_TITLES: Record<string, string> = {
 export default function Header() {
   const { pathname } = useLocation()
   const { user, logout } = useAuthStore()
+  const { theme, toggleTheme } = useAppStore()
   const navigate = useNavigate()
 
   const title = PAGE_TITLES[pathname] || 'HAN Group OS'
@@ -36,6 +37,13 @@ export default function Header() {
       </div>
 
       <div className="flex items-center gap-3">
+        <button
+          onClick={toggleTheme}
+          className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-bg-elevated transition-colors"
+          title={theme === 'dark' ? '라이트 모드' : '다크 모드'}
+        >
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
         <button className="relative p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-bg-elevated transition-colors">
           <Bell size={16} />
         </button>

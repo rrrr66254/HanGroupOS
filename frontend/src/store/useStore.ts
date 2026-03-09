@@ -25,18 +25,26 @@ interface AppState {
   selectedCompany: Company | null
   sidebarOpen: boolean
   newEventCount: number
+  theme: 'dark' | 'light'
   setSelectedCompany: (company: Company | null) => void
   toggleSidebar: () => void
   setNewEventCount: (n: number) => void
   clearNewEvents: () => void
+  toggleTheme: () => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
   selectedCompany: null,
   sidebarOpen: true,
   newEventCount: 0,
+  theme: (localStorage.getItem('han-theme') as 'dark' | 'light') ?? 'dark',
   setSelectedCompany: (company) => set({ selectedCompany: company }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setNewEventCount: (n) => set({ newEventCount: n }),
   clearNewEvents: () => set({ newEventCount: 0 }),
+  toggleTheme: () => set((s) => {
+    const next = s.theme === 'dark' ? 'light' : 'dark'
+    localStorage.setItem('han-theme', next)
+    return { theme: next }
+  }),
 }))

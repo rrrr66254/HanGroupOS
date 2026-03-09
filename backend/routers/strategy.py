@@ -8,10 +8,117 @@ from schemas.schemas import (
     StrategyItemCreate, StrategyItemUpdate, StrategyItemOut,
     CEOEvaluateRequest, CEOPerformanceOut,
     CollaborationCreate, CollaborationOut,
+    StrategyGenerateRequest,
 )
 from services.ai_provider import get_provider_from_db
+import json, re
 
 router = APIRouter(prefix="/api/strategy", tags=["strategy"])
+
+
+# ── AI Auto-Generate Strategy ─────────────────────────────────────────────────
+@router.post("/generate")
+def generate_strategy(
+    req: StrategyGenerateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Ask AI to generate 5 tailored strategy items for a company and save them."""
+    company = db.query(Company).filter(Company.id == req.company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    provider = get_provider_from_db(db, current_user.id)
+
+    focus_line = f"\n집중 영역: {req.focus}" if req.focus else ""
+    prompt = f"""회사 "{company.name}" ({company.industry}) 의 구체적인 전략 계획을 수립해주세요.
+비전: {company.vision or ''}
+설명: {company.description or ''}{focus_line}
+
+아래 JSON 배열 형식으로 정확히 5개의 전략 항목을 생성하세요.
+각 타입(objective, initiative, milestone, kpi)을 최소 1개 이상 포함하고,
+회사 산업·비전에 맞게 구체적으로 작성하세요.
+
+[
+  {{
+    "title": "항목 제목 (20자 이내)",
+    "description": "상세 설명 (50자 이내)",
+    "item_type": "objective",
+    "priority": "high",
+    "due_date": "2025-Q3",
+    "progress": 0
+  }}
+]
+
+JSON 배열만 출력하고 다른 텍스트는 포함하지 마세요."""
+
+    raw = provider.chat(
+        [{"role": "user", "content": prompt}],
+        system="당신은 경영 전략 전문가입니다. JSON만 출력합니다.",
+        session_type="general",
+        max_tokens=1200,
+    )
+
+    # Extract JSON array
+    saved_items = []
+    try:
+        m = re.search(r'\[[\s\S]*?\]', raw)
+        if m:
+            data = json.loads(m.group())
+            for d in data[:6]:
+                item_type = d.get("item_type", "objective")
+                if item_type not in ("objective", "initiative", "milestone", "kpi"):
+                    item_type = "objective"
+                priority = d.get("priority", "medium")
+                if priority not in ("high", "medium", "low"):
+                    priority = "medium"
+                item = StrategyItem(
+                    company_id=req.company_id,
+                    title=str(d.get("title", ""))[:200],
+                    description=str(d.get("description", "")),
+                    item_type=item_type,
+                    priority=priority,
+                    due_date=str(d.get("due_date", "")),
+                    progress=int(d.get("progress", 0)),
+                )
+                db.add(item)
+                saved_items.append(item)
+            db.commit()
+            for it in saved_items:
+                db.refresh(it)
+    except Exception:
+        pass
+
+    # Fallback defaults if AI parse failed
+    if not saved_items:
+        defaults = [
+            ("시장 점유율 30% 달성", "objective", "high", "2025-Q4"),
+            ("AI 기반 제품 출시", "initiative", "high", "2025-Q3"),
+            ("베타 런칭 완료", "milestone", "medium", "2025-Q2"),
+            ("MAU 10만 돌파", "kpi", "medium", "2025-Q4"),
+            ("운영 비용 15% 절감", "initiative", "low", "2025-Q3"),
+        ]
+        for title, itype, priority, due in defaults:
+            item = StrategyItem(
+                company_id=req.company_id,
+                title=f"{company.name} — {title}",
+                description=f"{company.industry} 분야 핵심 전략",
+                item_type=itype,
+                priority=priority,
+                due_date=due,
+                progress=0,
+            )
+            db.add(item)
+            saved_items.append(item)
+        db.commit()
+        for it in saved_items:
+            db.refresh(it)
+
+    return {
+        "company": company.name,
+        "generated": len(saved_items),
+        "items": [StrategyItemOut.model_validate(it) for it in saved_items],
+    }
 
 
 # ── Strategy Map ──────────────────────────────────────────────────────────────
