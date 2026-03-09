@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { Loader2, MessageCircle, Send, ChevronDown, ChevronUp } from 'lucide-react'
 import { orgApi, companiesApi, agentApi, workApi } from '../api/client'
 import { useProviderHealth } from '../components/ProviderStatusBanner'
 import type { OrgNode } from '../types'
@@ -410,6 +411,15 @@ export default function LiveOffice() {
   const [triggeringWork, setTriggeringWork] = useState(false)
   const [workMsg, setWorkMsg] = useState<string | null>(null)
 
+  // P2P message state
+  const [p2pOpen, setP2pOpen] = useState(false)
+  const [p2pTarget, setP2pTarget] = useState<number | ''>('')
+  const [p2pTopic, setP2pTopic] = useState('')
+  const [p2pLoading, setP2pLoading] = useState(false)
+  const [p2pResult, setP2pResult] = useState<{ message: string; reply: string; from: string; to: string } | null>(null)
+  const [p2pHistory, setP2pHistory] = useState<Array<{ from_name: string; to_name: string; topic: string; message: string; reply: string; created_at: string }>>([])
+  const [p2pHistoryOpen, setP2pHistoryOpen] = useState(false)
+
   // Load companies list
   useEffect(() => {
     companiesApi.list().then((r) => setCompanies(r.data as Company[]))
@@ -509,6 +519,26 @@ export default function LiveOffice() {
     } catch { setSavedPersonalityMsg('오류') }
     setSavingPersonality(false)
     setTimeout(() => setSavedPersonalityMsg(null), 2000)
+  }
+
+  const handleP2pSend = async () => {
+    if (!selectedAgent || !p2pTarget || !p2pTopic.trim()) return
+    setP2pLoading(true)
+    setP2pResult(null)
+    try {
+      const res = await workApi.p2p(selectedAgent.id, p2pTarget as number, p2pTopic)
+      const data = res.data as { from_name: string; to_name: string; message: string; reply: string }
+      setP2pResult(data)
+      setP2pTopic('')
+    } catch { /* ignore */ } finally { setP2pLoading(false) }
+  }
+
+  const loadP2pHistory = async () => {
+    if (!selectedId || selectedId === 'chairman') return
+    try {
+      const res = await workApi.p2pList(selectedId as number)
+      setP2pHistory(res.data as any[])
+    } catch { /* ignore */ }
   }
 
   const handleWorkTrigger = async () => {
@@ -895,6 +925,102 @@ export default function LiveOffice() {
                 </div>
               )
             })}
+        </div>
+      )}
+
+      {/* ── P2P Message Panel ── */}
+      {selectedAgent && selData && (
+        <div className="card p-4" style={{ borderLeft: '3px solid rgba(251,191,36,0.6)' }}>
+          <button
+            className="w-full flex items-center justify-between mb-0"
+            onClick={() => { setP2pOpen((v) => !v); if (!p2pOpen) loadP2pHistory() }}
+          >
+            <div className="flex items-center gap-2">
+              <MessageCircle size={13} className="text-amber-400" />
+              <span className="text-xs font-semibold text-slate-200">에이전트 P2P 메시지</span>
+              <span className="text-[9px] text-slate-600">— {selData.name}이(가) 다른 에이전트에게 메시지 전송</span>
+            </div>
+            {p2pOpen ? <ChevronUp size={13} className="text-slate-500" /> : <ChevronDown size={13} className="text-slate-500" />}
+          </button>
+
+          {p2pOpen && (
+            <div className="mt-3 space-y-3">
+              {/* Send form */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[9px] text-slate-500 w-10 flex-shrink-0">받는 AI</span>
+                <select
+                  value={p2pTarget}
+                  onChange={(e) => setP2pTarget(Number(e.target.value))}
+                  className="text-[10px] bg-bg-base border border-bg-border rounded px-2 py-1 text-slate-300"
+                >
+                  <option value="">선택</option>
+                  {agents.filter((a) => a.id !== selectedAgent.id).map((a) => (
+                    <option key={a.id} value={a.id}>{a.name} ({a.role})</option>
+                  ))}
+                </select>
+                <input
+                  value={p2pTopic}
+                  onChange={(e) => setP2pTopic(e.target.value)}
+                  placeholder="협의 주제 입력…"
+                  className="flex-1 text-[10px] bg-bg-base border border-bg-border rounded px-2 py-1 text-slate-300"
+                  onKeyDown={(e) => e.key === 'Enter' && handleP2pSend()}
+                />
+                <button
+                  onClick={handleP2pSend}
+                  disabled={p2pLoading || !p2pTarget || !p2pTopic.trim()}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded text-[9px] font-medium"
+                  style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)' }}
+                >
+                  {p2pLoading ? <Loader2 size={10} className="animate-spin" /> : <Send size={10} />}
+                  전송
+                </button>
+              </div>
+
+              {/* Result */}
+              {p2pResult && (
+                <div className="space-y-2 rounded-lg p-3" style={{ background: 'rgba(251,191,36,0.05)', border: '1px solid rgba(251,191,36,0.15)' }}>
+                  <div>
+                    <div className="text-[9px] text-amber-400 mb-1">📤 {p2pResult.from_name}</div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">{p2pResult.message}</p>
+                  </div>
+                  <div className="border-t border-white/[0.05] pt-2">
+                    <div className="text-[9px] text-emerald-400 mb-1">📥 {p2pResult.to_name}</div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">{p2pResult.reply}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* History */}
+              {p2pHistory.length > 0 && (
+                <div>
+                  <button
+                    className="text-[9px] text-slate-500 hover:text-slate-300 flex items-center gap-1 mb-2"
+                    onClick={() => setP2pHistoryOpen((v) => !v)}
+                  >
+                    {p2pHistoryOpen ? <ChevronUp size={9} /> : <ChevronDown size={9} />}
+                    이전 메시지 {p2pHistory.length}건
+                  </button>
+                  {p2pHistoryOpen && (
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {p2pHistory.slice(0, 10).map((m, i) => (
+                        <div key={i} className="rounded-lg p-2.5 text-[10px]"
+                          style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                          <div className="flex items-center gap-1.5 mb-1 text-[9px] text-slate-500">
+                            <span className="text-amber-500">{m.from_name}</span>
+                            <span>→</span>
+                            <span className="text-emerald-500">{m.to_name}</span>
+                            <span className="ml-auto">{new Date(m.created_at).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
+                          <div className="text-slate-600 font-medium mb-1">{m.topic}</div>
+                          <p className="text-slate-500 line-clamp-2">{m.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

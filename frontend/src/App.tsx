@@ -17,6 +17,7 @@ import LiveOffice from './pages/LiveOffice'
 import Memory from './pages/Memory'
 import Admin from './pages/Admin'
 import GroupHome from './pages/GroupHome'
+import WeeklyReport from './pages/WeeklyReport'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -66,6 +67,7 @@ export default function App() {
           <Route path="live-office" element={<LiveOffice />} />
           <Route path="memory" element={<Memory />} />
           <Route path="admin" element={<Admin />} />
+          <Route path="weekly-report" element={<WeeklyReport />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>

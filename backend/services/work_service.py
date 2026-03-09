@@ -1,15 +1,16 @@
 """
-Autonomous Work Loop Service.
+Autonomous Work Loop Service + SSE Streaming + Weekly Report + Agent P2P.
 
 Work chain: specialists → team_leads → chiefs → ceo → (chairman if cross-company)
 Each agent generates a work report using their assigned AI, then summarizes up to their manager.
 """
 import uuid
-from datetime import datetime
-from typing import List, Optional, Dict, Any
+import json
+from datetime import datetime, timedelta
+from typing import List, Optional, Dict, Any, Generator
 from sqlalchemy.orm import Session
 
-from models.models import OrgNode, Company, WorkLog, CorporateMemory, ProviderConfig
+from models.models import OrgNode, Company, WorkLog, CorporateMemory, ProviderConfig, AgentMessage
 from services.ai_provider import AIProvider
 
 
@@ -355,4 +356,254 @@ def run_work_cycle(db: Session, company_id: int) -> Dict[str, Any]:
             }
             for l in all_logs
         ],
+    }
+
+
+# ── SSE Streaming Work Cycle ──────────────────────────────────────────────────
+def _sse(event_type: str, data: Dict[str, Any]) -> str:
+    payload = json.dumps({"type": event_type, **data}, ensure_ascii=False)
+    return f"data: {payload}\n\n"
+
+
+def run_work_cycle_stream(db: Session, company_id: int) -> Generator[str, None, None]:
+    """
+    Same as run_work_cycle but yields SSE events after each agent completes.
+    specialists → team_leads → chiefs → ceo
+    """
+    cycle_id = str(uuid.uuid4())[:8]
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        yield _sse("error", {"message": "Company not found"})
+        return
+
+    yield _sse("start", {"cycle_id": cycle_id, "company": company.name})
+
+    memory_context = get_relevant_memories(db, company_id)
+
+    all_nodes = db.query(OrgNode).filter(OrgNode.company_id == company_id).all()
+    nodes_by_level: Dict[str, List[OrgNode]] = {}
+    for n in all_nodes:
+        nodes_by_level.setdefault(n.level, []).append(n)
+
+    logs_by_node: Dict[int, List[WorkLog]] = {}
+    all_logs: List[WorkLog] = []
+
+    # Step 1: Specialists
+    yield _sse("phase", {"phase": "specialist", "label": "스페셜리스트 업무 수행 중"})
+    for spec in nodes_by_level.get("specialist", []):
+        yield _sse("agent_start", {"name": spec.name, "role": spec.role, "level": "specialist"})
+        log = run_specialist(db, spec, cycle_id, memory_context)
+        logs_by_node.setdefault(spec.parent_id, []).append(log)
+        all_logs.append(log)
+        yield _sse("agent_done", {
+            "id": log.id, "name": log.agent_name, "role": log.agent_role,
+            "level": "specialist", "task": log.task, "result": log.result,
+            "cycle_id": cycle_id,
+        })
+
+    # Step 2: Team Leads
+    yield _sse("phase", {"phase": "team_lead", "label": "팀장 보고서 작성 중"})
+    for tl in nodes_by_level.get("team_lead", []):
+        yield _sse("agent_start", {"name": tl.name, "role": tl.role, "level": "team_lead"})
+        child_logs = logs_by_node.get(tl.id, [])
+        log = run_team_lead(db, tl, cycle_id, child_logs, memory_context)
+        logs_by_node.setdefault(tl.parent_id, []).append(log)
+        all_logs.append(log)
+        yield _sse("agent_done", {
+            "id": log.id, "name": log.agent_name, "role": log.agent_role,
+            "level": "team_lead", "task": log.task, "result": log.result,
+            "cycle_id": cycle_id,
+        })
+
+    # Step 3: Chiefs
+    yield _sse("phase", {"phase": "chief", "label": "부문장 보고서 취합 중"})
+    for chief in nodes_by_level.get("chief", []):
+        yield _sse("agent_start", {"name": chief.name, "role": chief.role, "level": "chief"})
+        child_logs = logs_by_node.get(chief.id, [])
+        log = run_chief(db, chief, cycle_id, child_logs, memory_context)
+        logs_by_node.setdefault(chief.parent_id, []).append(log)
+        all_logs.append(log)
+        yield _sse("agent_done", {
+            "id": log.id, "name": log.agent_name, "role": log.agent_role,
+            "level": "chief", "task": log.task, "result": log.result,
+            "cycle_id": cycle_id,
+        })
+
+    # Step 4: CEO
+    yield _sse("phase", {"phase": "ceo", "label": "CEO 경영 보고서 작성 중"})
+    ceo_log = None
+    for ceo in nodes_by_level.get("ceo", []):
+        yield _sse("agent_start", {"name": ceo.name, "role": ceo.role, "level": "ceo"})
+        child_logs = logs_by_node.get(ceo.id, [])
+        log = run_ceo(db, ceo, cycle_id, child_logs, memory_context)
+        all_logs.append(log)
+        ceo_log = log
+        yield _sse("agent_done", {
+            "id": log.id, "name": log.agent_name, "role": log.agent_role,
+            "level": "ceo", "task": log.task, "result": log.result,
+            "cycle_id": cycle_id,
+        })
+
+    yield _sse("complete", {
+        "cycle_id": cycle_id,
+        "total_logs": len(all_logs),
+        "ceo_summary": ceo_log.result if ceo_log else "",
+    })
+
+
+# ── Agent P2P Message ─────────────────────────────────────────────────────────
+def run_agent_p2p(
+    db: Session,
+    from_node: OrgNode,
+    to_node: OrgNode,
+    topic: str,
+) -> AgentMessage:
+    """Have from_node send a message to to_node about a topic; to_node replies."""
+    from_personality = build_personality_context(from_node)
+    to_personality = build_personality_context(to_node)
+    memory_ctx = get_relevant_memories(db, from_node.company_id)
+
+    # from_node composes message
+    sender_system = (
+        f"당신은 {from_node.role} {from_node.name}입니다."
+        f"{from_personality}"
+        + (f"\n\n{memory_ctx}" if memory_ctx else "")
+    )
+    sender_prompt = (
+        f"{to_node.role} {to_node.name}에게 다음 주제로 업무 메시지를 작성하세요: {topic}\n"
+        f"3~5문장으로 간결하게 작성하세요."
+    )
+    sender_ai = get_node_ai_provider(db, from_node)
+    message_text = sender_ai.chat(
+        messages=[{"role": "user", "content": sender_prompt}],
+        system=sender_system,
+        max_tokens=300,
+    )
+
+    # to_node replies
+    receiver_system = (
+        f"당신은 {to_node.role} {to_node.name}입니다."
+        f"{to_personality}"
+        + (f"\n\n{memory_ctx}" if memory_ctx else "")
+    )
+    receiver_prompt = (
+        f"{from_node.role} {from_node.name}으로부터 받은 메시지:\n{message_text}\n\n"
+        f"위 메시지에 답장하세요. 3~5문장으로 간결하게 작성하세요."
+    )
+    receiver_ai = get_node_ai_provider(db, to_node)
+    reply_text = receiver_ai.chat(
+        messages=[{"role": "user", "content": receiver_prompt}],
+        system=receiver_system,
+        max_tokens=300,
+    )
+
+    msg = AgentMessage(
+        company_id=from_node.company_id,
+        from_node_id=from_node.id,
+        to_node_id=to_node.id,
+        from_name=f"{from_node.role} {from_node.name}",
+        to_name=f"{to_node.role} {to_node.name}",
+        topic=topic,
+        message=message_text,
+        reply=reply_text,
+    )
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    return msg
+
+
+# ── Weekly Report Generation ──────────────────────────────────────────────────
+WEEKLY_REPORT_SYSTEM = """당신은 한그룹 그룹전략실 AI 애널리스트입니다.
+주간 업무 데이터를 분석하여 경영진에게 보고할 종합 주간 경영보고서를 작성합니다.
+보고서는 마크다운 형식으로 작성하며, 구체적이고 실행 가능한 인사이트를 포함합니다."""
+
+
+def generate_weekly_report(db: Session, company_id: int) -> Dict[str, Any]:
+    """Aggregate last 7 days of work logs and produce AI weekly report."""
+    from services.ai_provider import AIProvider
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        return {"error": "Company not found"}
+
+    since = datetime.utcnow() - timedelta(days=7)
+    logs = (
+        db.query(WorkLog)
+        .filter(WorkLog.company_id == company_id, WorkLog.created_at >= since)
+        .order_by(WorkLog.created_at)
+        .all()
+    )
+
+    # Count cycles
+    cycle_ids = list({l.cycle_id for l in logs if l.cycle_id})
+    ceo_logs = [l for l in logs if l.level == "ceo"]
+
+    # Build summary text
+    if not logs:
+        data_text = "이번 주 업무 기록이 없습니다."
+    else:
+        ceo_summaries = "\n\n".join(
+            f"[사이클 {l.cycle_id} / {l.created_at.strftime('%m/%d %H:%M')}]\n{l.result}"
+            for l in ceo_logs
+        )
+        agent_counts = {}
+        for l in logs:
+            agent_counts[l.level] = agent_counts.get(l.level, 0) + 1
+
+        data_text = (
+            f"회사: {company.name} ({company.industry})\n"
+            f"기간: 최근 7일\n"
+            f"총 업무 사이클: {len(cycle_ids)}회\n"
+            f"총 AI 보고서: {len(logs)}건\n"
+            f"레벨별 보고: {', '.join(f'{k} {v}건' for k, v in agent_counts.items())}\n\n"
+            f"CEO 경영 보고 내역:\n{ceo_summaries if ceo_summaries else '없음'}"
+        )
+
+    # P2P messages this week
+    p2p_msgs = (
+        db.query(AgentMessage)
+        .filter(AgentMessage.company_id == company_id, AgentMessage.created_at >= since)
+        .all()
+    )
+    if p2p_msgs:
+        data_text += f"\n\n에이전트 간 협업 메시지: {len(p2p_msgs)}건"
+
+    prompt = (
+        f"다음 데이터를 바탕으로 주간 경영보고서를 작성하세요.\n\n"
+        f"{data_text}\n\n"
+        f"보고서는 다음 항목을 포함하세요:\n"
+        f"1. 주간 핵심 성과 요약\n"
+        f"2. 부문별 업무 현황\n"
+        f"3. 주요 이슈 및 리스크\n"
+        f"4. 다음 주 우선순위 액션 3가지\n"
+        f"5. 회장에게 드리는 한마디\n\n"
+        f"마크다운 형식으로 작성하세요."
+    )
+
+    # Get provider config
+    config = db.query(ProviderConfig).filter(ProviderConfig.is_active == True).first()
+    ai = AIProvider(
+        provider=config.provider if config else "ollama",
+        api_key=config.api_key if config else None,
+        model=config.model_override if config and config.model_override else None,
+        base_url=config.base_url if config else None,
+    )
+    report_md = ai.chat(
+        messages=[{"role": "user", "content": prompt}],
+        system=WEEKLY_REPORT_SYSTEM,
+        max_tokens=1500,
+    )
+
+    return {
+        "company_id": company_id,
+        "company_name": company.name,
+        "company_industry": company.industry,
+        "period_days": 7,
+        "total_cycles": len(cycle_ids),
+        "total_logs": len(logs),
+        "p2p_messages": len(p2p_msgs),
+        "report": report_md,
+        "generated_at": datetime.utcnow().isoformat(),
     }

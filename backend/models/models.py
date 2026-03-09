@@ -323,3 +323,17 @@ class WorkLog(Base):
     cycle_id = Column(String(50), nullable=True)  # UUID groups logs from same work cycle
     parent_log_id = Column(Integer, ForeignKey("work_logs.id"), nullable=True)  # chain tracing
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AgentMessage(Base):
+    __tablename__ = "agent_messages"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    from_node_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=False)
+    to_node_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=False)
+    from_name = Column(String(100), nullable=False)
+    to_name = Column(String(100), nullable=False)
+    topic = Column(String(200), nullable=False)
+    message = Column(Text, nullable=False)   # sender's message
+    reply = Column(Text, default="")         # receiver's reply
+    created_at = Column(DateTime, default=datetime.utcnow)

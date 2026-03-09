@@ -207,6 +207,12 @@ export const workApi = {
     api.get('/work/logs', { params: { company_id: companyId, cycle_id: cycleId, limit } }),
   cycles: (companyId?: number) =>
     api.get('/work/cycles', { params: { company_id: companyId } }),
+  p2p: (fromNodeId: number, toNodeId: number, topic: string) =>
+    api.post('/work/p2p', { from_node_id: fromNodeId, to_node_id: toNodeId, topic }),
+  p2pList: (companyId?: number) =>
+    api.get('/work/p2p', { params: { company_id: companyId } }),
+  weeklyReport: (companyId: number) =>
+    api.post(`/work/weekly-report/${companyId}`),
 }
 
 // ── Agent (personality + direct chat) ────────────────────────────────────────
