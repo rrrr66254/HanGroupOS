@@ -4,12 +4,11 @@ import {
   Send, Loader2, ArrowRight, CheckCircle, Building2,
   Eye, X, Plus, ChevronRight, WifiOff, Wifi, Settings,
   MessageSquare, Zap, AlertCircle, BarChart2, Users,
-  Clock, Trophy, FileText, Coffee, BookOpen, Vote, Square,
+  Clock, Trophy, FileText, Coffee, BookOpen, Vote,
 } from 'lucide-react'
 import { chatApi, orgApi, companiesApi, modelsApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
 import { useProviderHealth } from '../components/ProviderStatusBanner'
-import MarkdownMessage from '../components/MarkdownMessage'
 import type { ChatSession, ChatMessage } from '../types'
 import { format } from 'date-fns'
 
@@ -123,6 +122,20 @@ interface BoardResult {
   resolution: string
 }
 
+interface Executive {
+  key: string
+  nodeId: number
+  name: string
+  role: string
+  emoji: string
+  sessionType: 'chairman' | 'ceo' | 'committee'
+  companyId?: number
+  companyName?: string
+  color: string
+  provider?: string
+  model?: string
+}
+
 const COMPANY_TEMPLATES = [
   { emoji: '💡', name: '한인텔리전스', industry: '인공지능', description: 'AI 연구개발 및 서비스 플랫폼', vision: 'AI 기술로 산업 혁신을 이끈다', color: '#818cf8' },
   { emoji: '📱', name: '한테크', industry: '소프트웨어', description: 'B2B SaaS 및 디지털 솔루션', vision: '기술로 비즈니스를 가속한다', color: '#34d399' },
@@ -159,7 +172,9 @@ function detectCompanyQuery(text: string, companies: Company[]): Company | null 
 
 export default function Chairman() {
   const navigate = useNavigate()
-  const [chairman, setChairman] = useState<OrgNode | null>(null)
+  const [selectedExec, setSelectedExec] = useState<Executive | null>(null)
+  const [executives, setExecutives] = useState<Executive[]>([])
+  const [execsLoading, setExecsLoading] = useState(true)
   const [session, setSession] = useState<ChatSession | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -207,19 +222,6 @@ export default function Chairman() {
   const [thinkingMap, setThinkingMap] = useState<Record<number, string>>({})
   const [expandedThinking, setExpandedThinking] = useState<Set<number>>(new Set())
 
-  // CEO direct chat state
-  const [ceoChatCompany, setCeoChatCompany] = useState<Company | null>(null)
-  const [ceoChatSession, setCeoChatSession] = useState<ChatSession | null>(null)
-  const [ceoChatMessages, setCeoChatMessages] = useState<ChatMessage[]>([])
-  const [ceoChatInput, setCeoChatInput] = useState('')
-  const [ceoChatLoading, setCeoChatLoading] = useState(false)
-  const ceoChatEndRef = useRef<HTMLDivElement>(null)
-  const [committees, setCommittees] = useState<OrgNode[]>([])
-
-  // Abort controllers for cancellation
-  const abortRef = useRef<AbortController | null>(null)
-  const ceoAbortRef = useRef<AbortController | null>(null)
-
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const delegTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -235,86 +237,148 @@ export default function Chairman() {
     }
   }, [])
 
-  // Sync edit state when chairman loads
-  useEffect(() => {
-    if (!chairman) return
-    const prov = chairman.ai_provider === 'mock' ? 'ollama' : (chairman.ai_provider || 'ollama')
-    setEditProvider(prov)
-    setEditModel(chairman.ai_model || (prov === 'ollama' ? 'qwen2.5' : ''))
-  }, [chairman?.id, chairman?.ai_provider, chairman?.ai_model])
+  const selectExec = useCallback(async (exec: Executive, _execList?: Executive[]) => {
+    setSelectedExec(exec)
+    setMessages([])
+    setLoading(true)
 
-  const saveChairmanModel = async () => {
-    if (!chairman) return
-    setSavingModel(true)
+    // Sync model selector to this exec's provider/model
+    const prov = exec.provider === 'mock' ? 'ollama' : (exec.provider || 'ollama')
+    setEditProvider(prov)
+    setEditModel(exec.model || (prov === 'ollama' ? 'qwen2.5' : ''))
+
     try {
-      await orgApi.updateNode(chairman.id, {
-        name: chairman.name, role: chairman.role, level: chairman.level,
-        ai_provider: editProvider, ai_model: editModel,
-        description: chairman.description || '',
-      })
-      setChairman({ ...chairman, ai_provider: editProvider, ai_model: editModel })
+      if (exec.sessionType === 'chairman') {
+        const res = await chatApi.sessions('chairman')
+        const existing = (res.data as (ChatSession & { agent_name?: string })[]).filter(s => s.agent_name === exec.name || s.title.includes('커맨드센터'))
+        if (existing.length > 0) {
+          setSession(existing[0])
+          const msgs = await chatApi.messages(existing[0].id)
+          setMessages(msgs.data)
+        } else {
+          const newS = await chatApi.createSession({ session_type: 'chairman', title: '한그룹 커맨드센터', agent_name: exec.name })
+          setSession(newS.data as ChatSession)
+        }
+      } else if (exec.sessionType === 'ceo' && exec.companyId) {
+        const res = await chatApi.sessions('ceo')
+        const existing = (res.data as ChatSession[]).filter(s => s.company_id === exec.companyId)
+        if (existing.length > 0) {
+          setSession(existing[0])
+          const msgs = await chatApi.messages(existing[0].id)
+          setMessages(msgs.data)
+        } else {
+          const newS = await chatApi.createSession({ session_type: 'ceo', title: `${exec.companyName} CEO 대화`, company_id: exec.companyId, agent_name: exec.name })
+          setSession(newS.data as ChatSession)
+        }
+      } else {
+        // committee
+        const res = await chatApi.sessions('committee')
+        const existing = (res.data as (ChatSession & { agent_name?: string })[]).filter(s => s.agent_name === exec.name)
+        if (existing.length > 0) {
+          setSession(existing[0])
+          const msgs = await chatApi.messages(existing[0].id)
+          setMessages(msgs.data)
+        } else {
+          const newS = await chatApi.createSession({ session_type: 'committee', title: `${exec.name} 대화`, agent_name: exec.name })
+          setSession(newS.data as ChatSession)
+        }
+      }
     } catch {}
-    setSavingModel(false)
-  }
+    setLoading(false)
+  }, [])
+
+  const loadExecutives = useCallback(async () => {
+    setExecsLoading(true)
+    try {
+      const [nodesRes, companiesRes] = await Promise.all([orgApi.nodes(), companiesApi.list()])
+      const allNodes = nodesRes.data as OrgNode[]
+      const allCompanies = companiesRes.data as Company[]
+      setCompanies(allCompanies)
+
+      const execs: Executive[] = []
+
+      // Chairman
+      const chairmanNode = allNodes.find(n => n.company_id === null && n.level === 'chairman')
+      if (chairmanNode) {
+        execs.push({ key: 'chairman', nodeId: chairmanNode.id, name: chairmanNode.name, role: chairmanNode.role, emoji: '👔', sessionType: 'chairman', color: '#e24c4b', provider: chairmanNode.ai_provider, model: chairmanNode.ai_model })
+      }
+
+      // Committees
+      allNodes.filter(n => n.company_id === null && n.level === 'committee').forEach(n => {
+        execs.push({ key: `committee-${n.id}`, nodeId: n.id, name: n.name, role: n.role, emoji: '🏛️', sessionType: 'committee', color: '#8b5cf6', provider: n.ai_provider, model: n.ai_model })
+      })
+
+      // Company CEOs
+      for (const company of allCompanies) {
+        const ceoNode = allNodes.find(n => n.company_id === company.id && n.level === 'ceo')
+        execs.push({ key: `ceo-${company.id}`, nodeId: ceoNode?.id ?? 0, name: ceoNode?.name ?? `${company.name} CEO`, role: 'CEO', emoji: '🤵', sessionType: 'ceo', companyId: company.id, companyName: company.name, color: '#6366f1', provider: ceoNode?.ai_provider, model: ceoNode?.ai_model })
+      }
+
+      setExecutives(execs)
+
+      // Default: select chairman
+      const chairmanExec = execs.find(e => e.sessionType === 'chairman')
+      if (chairmanExec) {
+        await selectExec(chairmanExec, execs)
+      }
+    } finally {
+      setExecsLoading(false)
+    }
+  }, [selectExec])
 
   useEffect(() => {
     checkOllama()
-    orgApi.nodes().then((r) => {
-      const nodes = (r.data as OrgNode[]).filter((n) => n.company_id === null)
-      const ch = nodes.find((n) => n.level === 'chairman') || nodes[0]
-      const comms = nodes.filter((n) => n.level === 'committee')
-      setChairman(ch)
-      setCommittees(comms)
-      if (ch) initSession(ch)
-    })
-    loadCompanies()
+    loadExecutives()
   }, [])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  useEffect(() => {
-    ceoChatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [ceoChatMessages])
-
   useEffect(() => () => { if (delegTimerRef.current) clearInterval(delegTimerRef.current) }, [])
 
-  const loadCompanies = () => {
-    companiesApi.list().then((r) => setCompanies(r.data as Company[]))
-  }
-
-  const initSession = async (ch: OrgNode) => {
-    const res = await chatApi.sessions('chairman')
-    const existing = (res.data as ChatSession[]).filter(
-      (s) => s.agent_name === ch.name || s.title.includes('커맨드센터')
-    )
-    if (existing.length > 0) {
-      setSession(existing[0])
-      const msgs = await chatApi.messages(existing[0].id)
-      setMessages(msgs.data)
-    } else {
-      const newS = await chatApi.createSession({
-        session_type: 'chairman',
-        title: '한그룹 커맨드센터',
-        agent_name: ch.name,
-      })
-      setSession(newS.data as ChatSession)
-      setMessages([])
-    }
+  const saveExecModel = async () => {
+    if (!selectedExec || !selectedExec.nodeId) return
+    setSavingModel(true)
+    try {
+      // Fetch current node data to preserve existing fields
+      const res = await orgApi.nodes()
+      const allNodes = res.data as OrgNode[]
+      const node = allNodes.find(n => n.id === selectedExec.nodeId)
+      if (node) {
+        await orgApi.updateNode(selectedExec.nodeId, {
+          name: node.name, role: node.role, level: node.level,
+          ai_provider: editProvider, ai_model: editModel,
+          description: node.description || '',
+        })
+        setExecutives(prev => prev.map(e => e.key === selectedExec.key ? { ...e, provider: editProvider, model: editModel } : e))
+        setSelectedExec(prev => prev ? { ...prev, provider: editProvider, model: editModel } : prev)
+      }
+    } catch {}
+    setSavingModel(false)
   }
 
   const newSession = async () => {
-    if (!chairman) return
-    const newS = await chatApi.createSession({
-      session_type: 'chairman',
-      title: `커맨드센터 ${new Date().toLocaleTimeString('ko-KR')}`,
-      agent_name: chairman.name,
-    })
-    setSession(newS.data as ChatSession)
-    setMessages([])
-    setNewCompanyId(null)
-    setPreviewCompany(null)
+    if (!selectedExec) return
+    let newS: ChatSession | null = null
+    try {
+      if (selectedExec.sessionType === 'chairman') {
+        const r = await chatApi.createSession({ session_type: 'chairman', title: `커맨드센터 ${new Date().toLocaleTimeString('ko-KR')}`, agent_name: selectedExec.name })
+        newS = r.data as ChatSession
+      } else if (selectedExec.sessionType === 'ceo' && selectedExec.companyId) {
+        const r = await chatApi.createSession({ session_type: 'ceo', title: `${selectedExec.companyName} CEO 대화 ${new Date().toLocaleTimeString('ko-KR')}`, company_id: selectedExec.companyId, agent_name: selectedExec.name })
+        newS = r.data as ChatSession
+      } else {
+        const r = await chatApi.createSession({ session_type: 'committee', title: `${selectedExec.name} 대화 ${new Date().toLocaleTimeString('ko-KR')}`, agent_name: selectedExec.name })
+        newS = r.data as ChatSession
+      }
+      if (newS) {
+        setSession(newS)
+        setMessages([])
+        setNewCompanyId(null)
+        setPreviewCompany(null)
+      }
+    } catch {}
   }
 
   // ── Company preview confirm/cancel ────────────────────────────────────────
@@ -326,7 +390,8 @@ export default function Chairman() {
       const created = res.data as { id: number; name: string; industry: string }
       setNewCompanyId(created.id)
       setPreviewCompany(null)
-      loadCompanies()
+      // Reload executives to include new CEO
+      loadExecutives()
 
       // Start briefing animation
       const briefSteps: DelegationStep[] = [
@@ -551,141 +616,7 @@ export default function Chairman() {
     }
   }
 
-  // ── CEO direct chat ───────────────────────────────────────────────────────
-  const openCeoChat = async (company: Company, sessionType: 'ceo' | 'committee' = 'ceo') => {
-    setCeoChatCompany(company)
-    setCeoChatMessages([])
-    setCeoChatSession(null)
-    try {
-      const res = await chatApi.sessions(sessionType)
-      const sessions = res.data as ChatSession[]
-      const existing = sessions.find((s) =>
-        sessionType === 'ceo' ? s.company_id === company.id : s.title === `${company.name} 대화`
-      )
-      if (existing) {
-        setCeoChatSession(existing)
-        const msgs = await chatApi.messages(existing.id)
-        setCeoChatMessages(msgs.data)
-      } else {
-        const newS = await chatApi.createSession({
-          session_type: sessionType,
-          title: `${company.name} ${sessionType === 'ceo' ? 'CEO' : ''} 대화`,
-          company_id: sessionType === 'ceo' ? company.id : undefined,
-          agent_name: company.name,
-        })
-        setCeoChatSession(newS.data as ChatSession)
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  const closeCeoChat = () => {
-    setCeoChatCompany(null)
-    setCeoChatSession(null)
-    setCeoChatMessages([])
-    setCeoChatInput('')
-  }
-
-  const sendCeoMessage = async () => {
-    if (!ceoChatInput.trim() || !ceoChatSession || ceoChatLoading) return
-
-    // Ollama 연결 상태 사전 확인
-    if (editProvider === 'ollama' && health?.ollama.status !== 'connected') {
-      setCeoChatMessages((prev) => [...prev, {
-        id: Date.now(),
-        session_id: ceoChatSession.id,
-        role: 'assistant',
-        content: '⚠️ **Ollama가 연결되지 않았습니다.** `ollama serve` 로 실행하거나 다른 프로바이더를 선택하세요.',
-        sender_name: '시스템',
-        created_at: new Date().toISOString(),
-      }])
-      return
-    }
-
-    const content = ceoChatInput.trim()
-    setCeoChatInput('')
-    setCeoChatLoading(true)
-
-    const userMsgId = Date.now()
-    const tempUser: ChatMessage = {
-      id: userMsgId,
-      session_id: ceoChatSession.id,
-      role: 'user',
-      content,
-      sender_name: '회장',
-      created_at: new Date().toISOString(),
-    }
-    setCeoChatMessages((prev) => [...prev, tempUser])
-
-    const streamMsgId = userMsgId + 1
-    const streamMsg: ChatMessage = {
-      id: streamMsgId,
-      session_id: ceoChatSession.id,
-      role: 'assistant',
-      content: '',
-      sender_name: ceoChatCompany ? `${ceoChatCompany.name} CEO` : 'CEO',
-      created_at: new Date().toISOString(),
-    }
-    setCeoChatMessages((prev) => [...prev, streamMsg])
-
-    ceoAbortRef.current = new AbortController()
-
-    try {
-      const token = useAuthStore.getState().token
-      const response = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session_id: ceoChatSession.id, content, provider_override: editProvider, model_override: editModel }),
-        signal: ceoAbortRef.current.signal,
-      })
-      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          try {
-            const evt = JSON.parse(line.slice(6))
-            if (evt.thinking_chunk) {
-              setThinkingMap((prev) => ({ ...prev, [streamMsgId]: (prev[streamMsgId] ?? '') + evt.thinking_chunk }))
-            }
-            if (evt.chunk && !evt.done) {
-              setCeoChatMessages((prev) =>
-                prev.map((m) => m.id === streamMsgId ? { ...m, content: m.content + evt.chunk } : m)
-              )
-            }
-            if (evt.done && evt.final_content !== undefined) {
-              setCeoChatMessages((prev) =>
-                prev.map((m) => m.id === streamMsgId ? { ...m, content: evt.final_content, id: evt.message_id ?? streamMsgId } : m)
-              )
-            }
-          } catch { /* skip */ }
-        }
-      }
-    } catch (e: unknown) {
-      if (e instanceof Error && e.name === 'AbortError') {
-        setCeoChatMessages((prev) =>
-          prev.map((m) => m.id === streamMsgId && m.content === '' ? { ...m, content: '_(취소됨)_' } : m)
-        )
-      } else {
-        setCeoChatMessages((prev) => prev.filter((m) => m.id !== streamMsgId))
-      }
-    } finally {
-      ceoAbortRef.current = null
-      setCeoChatLoading(false)
-    }
-  }
-
-  // ── Main chairman sendMessage ──────────────────────────────────────────────
+  // ── Main sendMessage ──────────────────────────────────────────────────────
   const sendMessage = async () => {
     if (!input.trim() || !session || loading) return
 
@@ -747,11 +678,11 @@ export default function Chairman() {
       return
     }
 
-    // Company-query path (delegation chain)
+    // Company-query path (delegation chain) - only for chairman context
     const queriedCompany = detectCompanyQuery(content, companies)
     const isCreation = ['만들', '설립', '창설', '시작'].some((kw) => content.includes(kw))
 
-    if (queriedCompany && !isCreation) {
+    if (queriedCompany && !isCreation && selectedExec?.sessionType === 'chairman') {
       showDelegation(queriedCompany, content)
       try {
         const res = await chatApi.companyQuery(queriedCompany.id, content)
@@ -780,13 +711,10 @@ export default function Chairman() {
       session_id: session.id,
       role: 'assistant',
       content: '',
-      sender_name: chairman?.name || 'AI 회장',
+      sender_name: selectedExec?.name || 'AI',
       created_at: new Date().toISOString(),
     }
     setMessages((prev) => [...prev, streamMsg])
-
-    // Create abort controller for this request
-    abortRef.current = new AbortController()
 
     try {
       const token = useAuthStore.getState().token
@@ -794,7 +722,6 @@ export default function Chairman() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ session_id: session.id, content, provider_override: editProvider, model_override: editModel }),
-        signal: abortRef.current.signal,
       })
       if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
 
@@ -826,6 +753,7 @@ export default function Chairman() {
 
             if (evt.done) {
               if (evt.type === 'preview' && evt.company_data) {
+                // Show preview card — don't execute yet
                 setPreviewCompany(evt.company_data as PreviewCompany)
                 setPanelMode('preview')
                 setMessages((prev) =>
@@ -846,7 +774,7 @@ export default function Chairman() {
                 const created = parseCreatedCompany(evt.final_content)
                 if (created) {
                   setNewCompanyId(created.id)
-                  loadCompanies()
+                  loadExecutives()
                   setPanelMode('companies')
                   if (delegTimerRef.current) clearInterval(delegTimerRef.current)
                 }
@@ -855,28 +783,11 @@ export default function Chairman() {
           } catch { /* skip */ }
         }
       }
-    } catch (e: unknown) {
-      if (e instanceof Error && e.name === 'AbortError') {
-        // User cancelled — keep partial content
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === streamMsgId && m.content === ''
-              ? { ...m, content: '_(취소됨)_' }
-              : m
-          )
-        )
-      } else {
-        setMessages((prev) => prev.filter((m) => m.id !== streamMsgId))
-      }
+    } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== streamMsgId))
     } finally {
-      abortRef.current = null
       setLoading(false)
     }
-  }
-
-  const cancelMessage = () => {
-    abortRef.current?.abort()
-    ceoAbortRef.current?.abort()
   }
 
   const showDelegation = (company: Company, question: string) => {
@@ -910,100 +821,99 @@ export default function Chairman() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
   }
 
-  const handleCeoKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendCeoMessage() }
+  // Derive placeholder text based on selected exec
+  const getPlaceholder = () => {
+    if (!selectedExec) return '임원을 선택하세요…'
+    if (selectedExec.sessionType === 'chairman') return '회장님께 지시사항을 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈)'
+    if (selectedExec.sessionType === 'ceo') return `${selectedExec.companyName} CEO에게 지시… (Enter 전송)`
+    return `${selectedExec.name}에게 질문… (Enter 전송)`
   }
 
   return (
     <div className="flex h-[calc(100vh-4rem)] animate-fade-in overflow-hidden">
-      {/* ── Left Exec Sidebar ─────────────────────────────────────────────── */}
-      <div className="w-52 flex-shrink-0 flex flex-col border-r border-bg-border bg-bg-card overflow-y-auto">
-        <div className="px-3 py-3 border-b border-bg-border flex-shrink-0">
-          <div className="text-[10px] text-slate-500 uppercase tracking-widest font-mono">임원과의 대화</div>
+
+      {/* ── Executive List Sidebar ── */}
+      <div className="w-48 flex-shrink-0 flex flex-col border-r border-bg-border bg-bg-card overflow-hidden">
+        <div className="px-3 py-2.5 border-b border-bg-border flex-shrink-0">
+          <div className="text-[10px] text-slate-500 uppercase tracking-widest font-mono">임원 목록</div>
         </div>
-        {/* Chairman */}
-        {chairman && (
-          <button
-            onClick={() => { if (ceoChatCompany) closeCeoChat() }}
-            className={`flex items-center gap-2 px-3 py-2.5 text-left w-full hover:bg-bg-elevated transition-colors ${!ceoChatCompany ? 'bg-indigo-500/10 border-l-2 border-indigo-400' : ''}`}
-          >
-            <div className="w-7 h-7 rounded-lg bg-red-500/20 flex items-center justify-center text-sm flex-shrink-0">👔</div>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-medium text-slate-200 truncate">{chairman.name}</div>
-              <div className="text-[10px] text-slate-500 truncate">그룹 회장</div>
-            </div>
-          </button>
-        )}
-        {/* Committees */}
-        {committees.length > 0 && (
-          <>
-            <div className="px-3 py-1.5 border-b border-bg-border/30">
-              <div className="text-[9px] text-slate-600 uppercase tracking-widest font-mono">위원회</div>
-            </div>
-            {committees.map((node) => (
-              <button
-                key={node.id}
-                onClick={() => openCeoChat({ id: -(node.id), name: node.name, industry: node.role, description: node.description || '', status: 'active', vision: '' }, 'committee')}
-                className={`flex items-center gap-2 px-3 py-2.5 text-left w-full hover:bg-bg-elevated transition-colors ${ceoChatCompany?.id === -(node.id) ? 'bg-indigo-500/10 border-l-2 border-indigo-400' : ''}`}
-              >
-                <div className="w-7 h-7 rounded-lg bg-purple-500/20 flex items-center justify-center text-sm flex-shrink-0">🏛️</div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium text-slate-200 truncate">{node.name}</div>
-                  <div className="text-[10px] text-slate-500 truncate">{node.role}</div>
-                </div>
-              </button>
-            ))}
-          </>
-        )}
-        {/* Company CEOs */}
-        {companies.length > 0 && (
-          <>
-            <div className="px-3 py-1.5 border-b border-bg-border/30 mt-auto-0">
-              <div className="text-[9px] text-slate-600 uppercase tracking-widest font-mono">계열사 CEO</div>
-            </div>
-            {companies.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => openCeoChat(c)}
-                className={`flex items-center gap-2 px-3 py-2.5 text-left w-full hover:bg-bg-elevated transition-colors ${ceoChatCompany?.id === c.id ? 'bg-indigo-500/10 border-l-2 border-indigo-400' : ''}`}
-              >
-                <div className="w-7 h-7 rounded-lg bg-indigo-500/20 flex items-center justify-center text-sm flex-shrink-0">🤵</div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-medium text-slate-200 truncate">{c.name}</div>
-                  <div className="text-[10px] text-slate-500 truncate">{c.industry}</div>
-                </div>
-              </button>
-            ))}
-          </>
-        )}
+        <div className="flex-1 overflow-y-auto py-1">
+          {execsLoading ? (
+            <div className="flex items-center justify-center py-8"><Loader2 size={14} className="animate-spin text-slate-600" /></div>
+          ) : (
+            <>
+              {/* 그룹 본사 */}
+              {executives.filter(e => e.sessionType !== 'ceo').length > 0 && (
+                <>
+                  <div className="px-3 py-1.5 text-[9px] text-slate-600 uppercase tracking-widest font-mono">그룹 본사</div>
+                  {executives.filter(e => e.sessionType !== 'ceo').map(exec => (
+                    <button
+                      key={exec.key}
+                      onClick={() => selectExec(exec)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-bg-elevated"
+                      style={selectedExec?.key === exec.key ? { background: `${exec.color}15`, borderLeft: `2px solid ${exec.color}` } : { borderLeft: '2px solid transparent' }}
+                    >
+                      <span className="text-sm flex-shrink-0">{exec.emoji}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11px] font-medium text-slate-200 truncate">{exec.name}</div>
+                        <div className="text-[9px] text-slate-600 truncate">{exec.role}</div>
+                      </div>
+                      {selectedExec?.key === exec.key && <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: exec.color }} />}
+                    </button>
+                  ))}
+                </>
+              )}
+
+              {/* 계열사 CEO */}
+              {executives.filter(e => e.sessionType === 'ceo').length > 0 && (
+                <>
+                  <div className="px-3 py-1.5 mt-1 text-[9px] text-slate-600 uppercase tracking-widest font-mono">계열사 CEO</div>
+                  {executives.filter(e => e.sessionType === 'ceo').map(exec => (
+                    <button
+                      key={exec.key}
+                      onClick={() => selectExec(exec)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-bg-elevated"
+                      style={selectedExec?.key === exec.key ? { background: `${exec.color}15`, borderLeft: `2px solid ${exec.color}` } : { borderLeft: '2px solid transparent' }}
+                    >
+                      <span className="text-sm flex-shrink-0">{exec.emoji}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11px] font-medium text-slate-200 truncate">{exec.name}</div>
+                        <div className="text-[9px] text-slate-600 truncate">{exec.companyName}</div>
+                      </div>
+                      {selectedExec?.key === exec.key && <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: exec.color }} />}
+                    </button>
+                  ))}
+                </>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
-      {/* ── Main Chat (Chairman or CEO) ──────────────────────────────────────── */}
-      {!ceoChatCompany ? (
-        /* Chairman chat - existing code below */
-        <div className="flex-1 flex flex-col overflow-hidden">
+      {/* ── Main Chat ────────────────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-3 border-b border-bg-border flex-shrink-0">
           <div
             style={{
-              width: 38, height: 38, background: '#e24c4b', borderRadius: 10,
+              width: 38, height: 38, background: selectedExec?.color || '#e24c4b', borderRadius: 10,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 20, flexShrink: 0,
             }}
           >
-            👔
+            {selectedExec?.emoji || '👔'}
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-bold text-slate-100">
-              {chairman?.name || 'AI 회장'} · 커맨드센터
+              {selectedExec ? `${selectedExec.name} · ${selectedExec.role}` : '임원과의 대화'}
             </div>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-              <div className="flex items-center gap-1.5 text-[10px] text-red-400">
-                <div className="w-1.5 h-1.5 rounded-full bg-red-400 blink" />
-                한그룹 최고 의사결정권자
+              <div className="flex items-center gap-1.5 text-[10px]" style={{ color: selectedExec?.color || '#e24c4b' }}>
+                <div className="w-1.5 h-1.5 rounded-full blink" style={{ background: selectedExec?.color || '#e24c4b' }} />
+                {selectedExec?.sessionType === 'chairman' ? '한그룹 최고 의사결정권자' : selectedExec?.sessionType === 'ceo' ? `${selectedExec.companyName} 대표이사` : selectedExec?.role || '임원'}
               </div>
               {/* Real-time model + provider dropdown */}
-              {chairman && (
+              {selectedExec && (
                 <div className="flex items-center gap-1.5">
                   {/* Provider select */}
                   <select
@@ -1050,9 +960,9 @@ export default function Chairman() {
                     )}
                   />
                   {/* Save button (shows when changed) */}
-                  {(editProvider !== chairman.ai_provider || editModel !== chairman.ai_model) && (
+                  {selectedExec.nodeId > 0 && (editProvider !== selectedExec.provider || editModel !== selectedExec.model) && (
                     <button
-                      onClick={saveChairmanModel}
+                      onClick={saveExecModel}
                       disabled={savingModel}
                       className="text-[9px] px-2 py-0.5 rounded font-medium"
                       style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)' }}
@@ -1162,24 +1072,40 @@ export default function Chairman() {
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {messages.length === 0 && !loading && (
             <div className="flex flex-col items-center justify-center h-full gap-5 text-slate-600">
-              <div style={{ fontSize: 60 }}>👔</div>
+              <div style={{ fontSize: 60 }}>{selectedExec?.emoji || '👔'}</div>
               <div className="text-center space-y-1">
-                <div className="text-base font-semibold text-slate-300">한그룹 AI 회장님</div>
+                <div className="text-base font-semibold text-slate-300">
+                  {selectedExec?.sessionType === 'chairman'
+                    ? '한그룹 AI 회장님 · 회사 설립, 전략 수립…'
+                    : selectedExec?.sessionType === 'ceo'
+                    ? `${selectedExec.companyName} CEO · 회사 운영, 전략, 성과 보고…`
+                    : selectedExec
+                    ? `${selectedExec.name} · 위원회 현안, 검토, 의결…`
+                    : '임원을 선택하세요'
+                  }
+                </div>
                 <div className="text-xs text-slate-600 max-w-xs leading-relaxed">
-                  회사 설립, 전략 수립, 현황 조회 등<br />대화만으로 모든 지시를 내릴 수 있습니다
+                  {selectedExec?.sessionType === 'chairman'
+                    ? '회사 설립, 전략 수립, 현황 조회 등\n대화만으로 모든 지시를 내릴 수 있습니다'
+                    : selectedExec?.sessionType === 'ceo'
+                    ? '회사 운영 현황, 전략 논의, 성과 보고 등을\n직접 대화로 확인하세요'
+                    : '위원회 현안과 의결 사항을 논의하세요'
+                  }
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2 justify-center max-w-md">
-                {QUICK_PROMPTS.map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => setInput(p)}
-                    className="text-xs px-3 py-1.5 rounded-full bg-bg-elevated text-slate-400 hover:text-slate-200 hover:bg-brand/10 border border-transparent hover:border-brand/30 transition-all"
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
+              {selectedExec?.sessionType === 'chairman' && (
+                <div className="flex flex-wrap gap-2 justify-center max-w-md">
+                  {QUICK_PROMPTS.map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setInput(p)}
+                      className="text-xs px-3 py-1.5 rounded-full bg-bg-elevated text-slate-400 hover:text-slate-200 hover:bg-brand/10 border border-transparent hover:border-brand/30 transition-all"
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -1187,9 +1113,9 @@ export default function Chairman() {
             <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
               <div
                 className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-sm font-bold"
-                style={{ background: msg.role === 'user' ? '#334155' : '#e24c4b', color: 'white' }}
+                style={{ background: msg.role === 'user' ? '#334155' : (selectedExec?.color || '#e24c4b'), color: 'white' }}
               >
-                {msg.role === 'user' ? '🫵' : '👔'}
+                {msg.role === 'user' ? '🫵' : (selectedExec?.emoji || '👔')}
               </div>
               <div className={`max-w-[72%] space-y-1 flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                 <div className="text-[10px] text-slate-600">
@@ -1229,13 +1155,13 @@ export default function Chairman() {
                       <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                       <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
-                  ) : msg.role === 'user' ? (
-                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{msg.content}</pre>
                   ) : (
-                    <MarkdownMessage
-                      content={msg.content}
-                      streaming={loading && msg.content !== ''}
-                    />
+                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                      {msg.content}
+                      {msg.role === 'assistant' && loading && msg.content !== '' && (
+                        <span className="inline-block w-0.5 h-4 bg-slate-400 ml-0.5 align-middle" style={{ animation: 'blink 1s step-end infinite' }} />
+                      )}
+                    </pre>
                   )}
                 </div>
               </div>
@@ -1244,7 +1170,7 @@ export default function Chairman() {
 
           {loading && messages.every((m) => m.role === 'user') && (
             <div className="flex gap-3">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0" style={{ background: '#e24c4b' }}>👔</div>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0" style={{ background: selectedExec?.color || '#e24c4b' }}>{selectedExec?.emoji || '👔'}</div>
               <div className="chat-ai flex items-center gap-1.5 px-4 py-3">
                 <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                 <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -1265,120 +1191,19 @@ export default function Chairman() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKey}
-              placeholder="회장님께 지시사항을 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈)"
+              placeholder={getPlaceholder()}
               disabled={!session || loading}
             />
-            {loading ? (
-              <button
-                onClick={cancelMessage}
-                className="px-4 flex-shrink-0 flex items-center gap-1.5 rounded-lg text-sm font-medium"
-                style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}
-                title="생성 취소"
-              >
-                <Square size={14} />
-              </button>
-            ) : (
-              <button
-                onClick={sendMessage}
-                disabled={!input.trim() || !session}
-                className="btn-primary px-4 flex-shrink-0 flex items-center gap-1.5"
-              >
-                <Send size={15} />
-              </button>
-            )}
+            <button
+              onClick={sendMessage}
+              disabled={!input.trim() || !session || loading}
+              className="btn-primary px-4 flex-shrink-0 flex items-center gap-1.5"
+            >
+              {loading ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+            </button>
           </div>
         </div>
       </div>
-    ) : (
-      /* ── CEO / Committee Chat (full height, replaces modal) ────────────────── */
-      <div className="flex-1 flex flex-col overflow-hidden" style={{ background: 'linear-gradient(160deg, #0f172a 0%, #1a1535 100%)' }}>
-        {/* CEO chat header */}
-        <div className="flex items-center gap-3 px-5 py-3 border-b border-bg-border flex-shrink-0">
-          <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
-            🤵
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-bold text-slate-100">{ceoChatCompany.name} {ceoChatCompany.id < 0 ? '' : 'CEO'}</div>
-            <div className="text-[10px] text-indigo-400">{ceoChatCompany.industry} · 직접 대화</div>
-          </div>
-          <button onClick={closeCeoChat} className="btn-ghost gap-1.5 text-xs text-slate-500 hover:text-slate-300">
-            <X size={13} />회장으로 돌아가기
-          </button>
-        </div>
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {ceoChatMessages.length === 0 && !ceoChatLoading && (
-            <div className="flex flex-col items-center justify-center h-full gap-5 text-slate-600">
-              <div style={{ fontSize: 60 }}>🤵</div>
-              <div className="text-center space-y-1">
-                <div className="text-base font-semibold text-slate-300">{ceoChatCompany.name} {ceoChatCompany.id < 0 ? '' : 'CEO'}</div>
-                <div className="text-xs text-slate-600 max-w-xs leading-relaxed">회장님의 지시를 기다리고 있습니다</div>
-              </div>
-            </div>
-          )}
-          {ceoChatMessages.map((msg) => (
-            <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-sm font-bold" style={{ background: msg.role === 'user' ? '#334155' : 'rgba(99,102,241,0.25)', color: 'white' }}>
-                {msg.role === 'user' ? '🫵' : '🤵'}
-              </div>
-              <div className={`max-w-[72%] space-y-1 flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                <div className="text-[10px] text-slate-600">{msg.sender_name} · {format(new Date(msg.created_at), 'HH:mm')}</div>
-                {msg.role === 'assistant' && thinkingMap[msg.id] && (
-                  <div className="w-full rounded-lg overflow-hidden" style={{ border: '1px solid rgba(99,102,241,0.25)', background: 'rgba(99,102,241,0.04)' }}>
-                    <button onClick={() => setExpandedThinking((prev) => { const next = new Set(prev); next.has(msg.id) ? next.delete(msg.id) : next.add(msg.id); return next })} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left">
-                      <span className="text-[9px] text-indigo-400 font-medium">🧠 생각 과정</span>
-                      <span className="text-[8px] text-slate-600 ml-auto">{expandedThinking.has(msg.id) ? '접기 ▲' : '펼치기 ▼'}</span>
-                    </button>
-                    {expandedThinking.has(msg.id) && (
-                      <div className="px-2.5 pb-2.5">
-                        <pre className="whitespace-pre-wrap font-sans text-[10px] leading-relaxed text-slate-400">{thinkingMap[msg.id]}</pre>
-                      </div>
-                    )}
-                  </div>
-                )}
-                <div className={msg.role === 'user' ? 'chat-user' : 'chat-ai'}>
-                  {msg.role === 'assistant' && ceoChatLoading && msg.content === '' ? (
-                    <div className="flex items-center gap-1.5 py-0.5">
-                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                    </div>
-                  ) : msg.role === 'user' ? (
-                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{msg.content}</pre>
-                  ) : (
-                    <MarkdownMessage content={msg.content} streaming={ceoChatLoading && msg.content !== ''} />
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-          <div ref={ceoChatEndRef} />
-        </div>
-        {/* Input */}
-        <div className="p-4 flex-shrink-0 border-t border-bg-border">
-          <div className="flex gap-2 items-end">
-            <textarea
-              value={ceoChatInput}
-              onChange={(e) => setCeoChatInput(e.target.value)}
-              onKeyDown={handleCeoKey}
-              placeholder={`${ceoChatCompany.name}에게 지시하세요...`}
-              className="input flex-1 resize-none text-sm leading-relaxed"
-              rows={2}
-              disabled={ceoChatLoading}
-            />
-            {ceoChatLoading ? (
-              <button onClick={cancelMessage} style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, padding: '8px 12px', cursor: 'pointer' }}>
-                <Square size={14} />
-              </button>
-            ) : (
-              <button onClick={sendCeoMessage} disabled={!ceoChatInput.trim() || !ceoChatSession} className="btn-primary px-4 flex-shrink-0 flex items-center gap-1.5">
-                <Send size={15} />
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    )}
 
       {/* ── Right Live Panel ─────────────────────────────────────────────────── */}
       <div className="w-72 flex-shrink-0 flex flex-col border-l border-bg-border bg-bg-card overflow-hidden">
@@ -1749,10 +1574,10 @@ export default function Chairman() {
                         }
                       </div>
                     </div>
-                    {/* CEO chat button */}
+                    {/* CEO chat button - switches main chat to that CEO */}
                     <div className="px-3 pb-2 border-t border-bg-border/50">
                       <button
-                        onClick={(e) => { e.stopPropagation(); openCeoChat(c) }}
+                        onClick={(e) => { e.stopPropagation(); const exec = executives.find(ex => ex.companyId === c.id); if (exec) selectExec(exec) }}
                         className="w-full mt-1.5 py-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1.5 text-slate-400 hover:text-brand-light transition-colors"
                         style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
                       >
