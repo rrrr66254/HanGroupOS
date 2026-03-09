@@ -117,6 +117,159 @@ def _process_api_key_saves(content: str, db) -> tuple:
     return clean, results
 
 
+def _process_code_actions(content: str, provider, system_prompt: str, max_retries: int = 5) -> tuple:
+    """
+    응답에서 코드 실행 관련 액션 블록을 처리합니다.
+
+    처리 순서 (응답에 등장하는 순서대로):
+      <<INSTALL_PACKAGE:{...}>>  — pip 패키지 설치
+      <<SQL_QUERY:{...}>>        — 워크스페이스 DB SQL 실행
+      <<EXECUTE_CODE:{...}>>     — Python 코드 실행 (실패 시 자동 디버깅 루프)
+
+    EXECUTE_CODE 실패 시 AI에게 오류를 전달하여 코드를 수정받고 최대 max_retries회 재시도합니다.
+    """
+    from services.code_executor import execute_python, install_package
+    from services.workspace_db import execute_sql
+
+    results = []
+
+    # ── 1. INSTALL_PACKAGE ────────────────────────────────────────────────────
+    install_pat = re.compile(r'<<INSTALL_PACKAGE:(.*?)>>', re.DOTALL)
+    for m in install_pat.finditer(content):
+        try:
+            data = json.loads(m.group(1).strip())
+            pkg = data.get("package", "").strip()
+            desc = data.get("description", pkg)
+            if not pkg:
+                continue
+            res = install_package(pkg)
+            if res["success"]:
+                results.append(f"\n\n📦 **패키지 설치 완료**: `{pkg}`")
+            else:
+                results.append(f"\n\n❌ **패키지 설치 실패** `{pkg}`\n```\n{res['stderr'][:500]}\n```")
+        except Exception as e:
+            results.append(f"\n\n❌ INSTALL_PACKAGE 파싱 오류: {e}")
+    content = install_pat.sub("", content)
+
+    # ── 2. SQL_QUERY ──────────────────────────────────────────────────────────
+    sql_pat = re.compile(r'<<SQL_QUERY:(.*?)>>', re.DOTALL)
+    for m in sql_pat.finditer(content):
+        try:
+            data = json.loads(m.group(1).strip())
+            query = data.get("query", "").strip()
+            desc = data.get("description", "SQL 실행")
+            if not query:
+                continue
+            res = execute_sql(query)
+            if res["success"]:
+                if "rows" in res:
+                    preview = str(res["rows"][:5])[:400]
+                    results.append(
+                        f"\n\n✅ **{desc}** 완료 — {res['count']}행 반환\n```\n{preview}\n```"
+                    )
+                else:
+                    results.append(
+                        f"\n\n✅ **{desc}** 완료 — 영향 행: {res.get('affected_rows', 0)}"
+                    )
+            else:
+                results.append(f"\n\n❌ **SQL 오류**: `{res.get('error', '알 수 없음')}`")
+        except Exception as e:
+            results.append(f"\n\n❌ SQL_QUERY 파싱 오류: {e}")
+    content = sql_pat.sub("", content)
+
+    # ── 3. EXECUTE_CODE (with debug loop) ─────────────────────────────────────
+    code_pat = re.compile(r'<<EXECUTE_CODE:(.*?)>>', re.DOTALL)
+    code_matches = list(code_pat.finditer(content))
+
+    for m in code_matches:
+        try:
+            data = json.loads(m.group(1).strip())
+        except Exception as e:
+            results.append(f"\n\n❌ EXECUTE_CODE JSON 파싱 오류: {e}")
+            continue
+
+        desc = data.get("description", "코드 실행")
+        current_code = data.get("code", "").strip()
+        if not current_code:
+            continue
+
+        attempt_logs = []
+        success = False
+
+        for attempt in range(1, max_retries + 1):
+            exec_res = execute_python(current_code)
+
+            if exec_res["success"]:
+                output = exec_res["stdout"] or "(출력 없음)"
+                results.append(
+                    f"\n\n✅ **[{desc}]** 실행 성공 (시도 {attempt}/{max_retries})"
+                    f" — {exec_res['elapsed_seconds']}초\n"
+                    f"```\n{output[:3000]}\n```"
+                )
+                success = True
+                break
+            else:
+                # 실패 기록
+                err = exec_res["stderr"] or exec_res.get("stdout", "알 수 없는 오류")
+                attempt_logs.append(f"시도 {attempt}: {err[:300]}")
+                results.append(
+                    f"\n\n⚠️ **[{desc}]** 시도 {attempt} 실패 — AI가 코드 수정 중...\n"
+                    f"```\n{err[:500]}\n```"
+                )
+
+                if attempt >= max_retries:
+                    results.append(
+                        f"\n\n❌ **[{desc}]** {max_retries}회 시도 후 최종 실패.\n"
+                        f"마지막 오류:\n```\n{err[:800]}\n```"
+                    )
+                    break
+
+                # AI에게 오류 전달 → 수정된 코드 요청
+                fix_prompt = (
+                    f"Python 코드 실행 중 오류가 발생했습니다. 코드를 수정해주세요.\n\n"
+                    f"**작업**: {desc}\n\n"
+                    f"**오류 메시지**:\n```\n{err[:1500]}\n```\n\n"
+                    f"**실패한 코드**:\n```python\n{current_code[:3000]}\n```\n\n"
+                    f"오류 원인을 분석하고 수정된 전체 코드를 아래 형식으로만 제출하세요:\n"
+                    f"<<EXECUTE_CODE:{{\"language\":\"python\",\"code\":\"수정된코드\",\"description\":\"{desc}\"}}>>\n\n"
+                    f"필요한 패키지가 없다면 먼저:\n"
+                    f"<<INSTALL_PACKAGE:{{\"package\":\"패키지명\"}}>>"
+                )
+                try:
+                    fix_response = provider.chat(
+                        [{"role": "user", "content": fix_prompt}],
+                        system=system_prompt,
+                    )
+
+                    # INSTALL_PACKAGE 먼저 처리
+                    fix_install = re.search(r'<<INSTALL_PACKAGE:(.*?)>>', fix_response, re.DOTALL)
+                    if fix_install:
+                        try:
+                            pkg_data = json.loads(fix_install.group(1).strip())
+                            pkg = pkg_data.get("package", "")
+                            if pkg:
+                                install_res = install_package(pkg)
+                                if install_res["success"]:
+                                    results.append(f"\n\n📦 **자동 설치**: `{pkg}`")
+                        except Exception:
+                            pass
+
+                    # 수정된 코드 추출
+                    new_match = re.search(r'<<EXECUTE_CODE:(.*?)>>', fix_response, re.DOTALL)
+                    if new_match:
+                        try:
+                            new_data = json.loads(new_match.group(1).strip())
+                            current_code = new_data.get("code", current_code).strip()
+                        except Exception:
+                            pass  # 파싱 실패 시 기존 코드 유지
+                except Exception as call_err:
+                    results.append(f"\n\n❌ AI 코드 수정 호출 실패: {call_err}")
+                    break
+
+    content = code_pat.sub("", content)
+    return content.strip(), results
+
+
 def _process_terminal_requests(content: str, db, company_id, user_id: int) -> tuple:
     """Parse <<TERMINAL_REQUEST:...>> blocks, create DB records, return (clean_text, req_ids)."""
     req_ids = []
@@ -245,7 +398,9 @@ def send_message(
     # Execute any embedded action blocks
     clean_response, api_key_results = _process_api_key_saves(ai_response, db)
     clean_response, action_results = _execute_actions(clean_response, db, current_user.id)
-    final_content = clean_response + "".join(action_results) + "".join(api_key_results)
+    # Code execution actions (INSTALL_PACKAGE / SQL_QUERY / EXECUTE_CODE with debug loop)
+    clean_response, code_results = _process_code_actions(clean_response, provider, system_prompt)
+    final_content = clean_response + "".join(action_results) + "".join(api_key_results) + "".join(code_results)
 
     # Save AI response
     ai_name = session.agent_name or {
@@ -430,13 +585,15 @@ def stream_message(
             content_after_terminal, terminal_req_ids = _process_terminal_requests(content_after_apikey, new_db, company_id, user_id)
             # Handle company creation
             clean, action_results = _execute_actions(content_after_terminal, new_db, user_id)
+            # Handle code execution (INSTALL_PACKAGE / SQL_QUERY / EXECUTE_CODE + debug loop)
+            clean, code_results = _process_code_actions(clean, prov, sys_prompt)
             # Append terminal request notifications
             terminal_notes = ""
             for rid in terminal_req_ids:
                 tr = new_db.query(TerminalRequest).filter(TerminalRequest.id == rid).first()
                 if tr:
                     terminal_notes += f"\n\n⏳ **터미널 명령 요청 제출됨** (ID #{tr.id})\n`{tr.command}`\n사유: {tr.reason}\n관리자 승인 대기 중..."
-            final = clean + "".join(action_results) + terminal_notes + "".join(api_key_results)
+            final = clean + "".join(action_results) + terminal_notes + "".join(api_key_results) + "".join(code_results)
             ai_msg = ChatMessage(
                 session_id=session_id,
                 role="assistant",
