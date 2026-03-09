@@ -188,6 +188,10 @@ export default function Chairman() {
   // Template library state
   const [templateVisible, setTemplateVisible] = useState(false)
 
+  // Thinking state
+  const [thinkingMap, setThinkingMap] = useState<Record<number, string>>({})
+  const [expandedThinking, setExpandedThinking] = useState<Set<number>>(new Set())
+
   // CEO direct chat state
   const [ceoChatCompany, setCeoChatCompany] = useState<Company | null>(null)
   const [ceoChatSession, setCeoChatSession] = useState<ChatSession | null>(null)
@@ -587,6 +591,9 @@ export default function Chairman() {
           if (!line.startsWith('data: ')) continue
           try {
             const evt = JSON.parse(line.slice(6))
+            if (evt.thinking_chunk) {
+              setThinkingMap((prev) => ({ ...prev, [streamMsgId]: (prev[streamMsgId] ?? '') + evt.thinking_chunk }))
+            }
             if (evt.chunk && !evt.done) {
               setCeoChatMessages((prev) =>
                 prev.map((m) => m.id === streamMsgId ? { ...m, content: m.content + evt.chunk } : m)
@@ -716,6 +723,10 @@ export default function Chairman() {
           if (!line.startsWith('data: ')) continue
           try {
             const evt = JSON.parse(line.slice(6))
+
+            if (evt.thinking_chunk) {
+              setThinkingMap((prev) => ({ ...prev, [streamMsgId]: (prev[streamMsgId] ?? '') + evt.thinking_chunk }))
+            }
 
             if (evt.chunk && !evt.done) {
               setMessages((prev) =>
@@ -945,6 +956,33 @@ export default function Chairman() {
                 <div className="text-[10px] text-slate-600">
                   {msg.sender_name} · {format(new Date(msg.created_at), 'HH:mm')}
                 </div>
+                {msg.role === 'assistant' && thinkingMap[msg.id] && (
+                  <div className="w-full rounded-lg overflow-hidden" style={{ border: '1px solid rgba(99,102,241,0.25)', background: 'rgba(99,102,241,0.04)' }}>
+                    <button
+                      onClick={() => setExpandedThinking((prev) => {
+                        const next = new Set(prev)
+                        next.has(msg.id) ? next.delete(msg.id) : next.add(msg.id)
+                        return next
+                      })}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left"
+                    >
+                      <span className="text-[10px] text-indigo-400 font-medium">🧠 생각 과정</span>
+                      <span className="text-[9px] text-slate-600 ml-auto">
+                        {expandedThinking.has(msg.id) ? '접기 ▲' : '펼치기 ▼'}
+                      </span>
+                    </button>
+                    {expandedThinking.has(msg.id) && (
+                      <div className="px-3 pb-3">
+                        <pre className="whitespace-pre-wrap font-sans text-[11px] leading-relaxed text-slate-400">
+                          {thinkingMap[msg.id]}
+                          {loading && (
+                            <span className="inline-block w-0.5 h-3 bg-indigo-400 ml-0.5 align-middle" style={{ animation: 'blink 1s step-end infinite' }} />
+                          )}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className={msg.role === 'user' ? 'chat-user' : 'chat-ai'}>
                   {msg.role === 'assistant' && loading && msg.content === '' ? (
                     <div className="flex items-center gap-1.5 py-0.5">
@@ -1535,7 +1573,35 @@ export default function Chairman() {
                   >
                     {msg.role === 'user' ? '👔' : '🤵'}
                   </div>
-                  <div className={`max-w-[75%] ${msg.role === 'user' ? 'chat-user' : 'chat-ai'}`}>
+                  <div className={`max-w-[75%] space-y-1 flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    {msg.role === 'assistant' && thinkingMap[msg.id] && (
+                      <div className="w-full rounded-lg overflow-hidden" style={{ border: '1px solid rgba(99,102,241,0.25)', background: 'rgba(99,102,241,0.04)' }}>
+                        <button
+                          onClick={() => setExpandedThinking((prev) => {
+                            const next = new Set(prev)
+                            next.has(msg.id) ? next.delete(msg.id) : next.add(msg.id)
+                            return next
+                          })}
+                          className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left"
+                        >
+                          <span className="text-[9px] text-indigo-400 font-medium">🧠 생각 과정</span>
+                          <span className="text-[8px] text-slate-600 ml-auto">
+                            {expandedThinking.has(msg.id) ? '접기 ▲' : '펼치기 ▼'}
+                          </span>
+                        </button>
+                        {expandedThinking.has(msg.id) && (
+                          <div className="px-2.5 pb-2.5">
+                            <pre className="whitespace-pre-wrap font-sans text-[10px] leading-relaxed text-slate-400">
+                              {thinkingMap[msg.id]}
+                              {ceoChatLoading && (
+                                <span className="inline-block w-0.5 h-3 bg-indigo-400 ml-0.5 align-middle" style={{ animation: 'blink 1s step-end infinite' }} />
+                              )}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <div className={msg.role === 'user' ? 'chat-user' : 'chat-ai'}>
                     {msg.role === 'assistant' && ceoChatLoading && msg.content === '' ? (
                       <div className="flex items-center gap-1.5 py-0.5">
                         <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
@@ -1550,6 +1616,7 @@ export default function Chairman() {
                         )}
                       </pre>
                     )}
+                    </div>
                   </div>
                 </div>
               ))}

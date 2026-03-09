@@ -264,6 +264,24 @@ def stream_message(
                                 break
                         except json.JSONDecodeError:
                             continue
+            elif prov.provider == "anthropic":
+                import anthropic as _anthropic
+
+                client = _anthropic.Anthropic(api_key=prov.api_key)
+                with client.messages.stream(
+                    model=prov.model,
+                    max_tokens=16000,
+                    thinking={"type": "enabled", "budget_tokens": 8000},
+                    system=sys_prompt or "You are an AI executive assistant for HAN Group.",
+                    messages=msgs,
+                ) as stream:
+                    for event in stream:
+                        if event.type == "content_block_delta":
+                            if event.delta.type == "thinking_delta":
+                                yield f"data: {json.dumps({'thinking_chunk': event.delta.thinking, 'done': False}, ensure_ascii=False)}\n\n"
+                            elif event.delta.type == "text_delta":
+                                full_content += event.delta.text
+                                yield f"data: {json.dumps({'chunk': event.delta.text, 'done': False}, ensure_ascii=False)}\n\n"
             else:
                 # Non-streaming providers: call normally and emit as single chunk
                 response = prov.chat(msgs, system=sys_prompt, session_type="chairman")
