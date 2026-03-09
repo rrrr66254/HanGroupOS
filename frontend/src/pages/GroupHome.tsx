@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Building2, MessageSquare, BarChart2, Clock, Loader2,
   Zap, ChevronRight, ArrowRight, Trophy, RefreshCw,
-  TrendingUp, Users, Star,
+  TrendingUp, Users, Star, Wifi,
 } from 'lucide-react'
 import { chatApi, companiesApi } from '../api/client'
 import { format } from 'date-fns'
+
+const POLL_INTERVAL = 30 // seconds
 
 interface TimelineEvent {
   type: string; icon: string; title: string; description: string; created_at: string
@@ -40,6 +42,10 @@ export default function GroupHome() {
   const [loading, setLoading] = useState(true)
   const [actionsLoading, setActionsLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [countdown, setCountdown] = useState(POLL_INTERVAL)
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadAll = async () => {
     setRefreshing(true)
@@ -53,10 +59,25 @@ export default function GroupHome() {
       setTimeline(timelineRes.data as TimelineEvent[])
       const kpiData = kpiRes.data as { companies: CompanyKPI[] }
       setKpiTop(kpiData.companies.slice(0, 4))
+      setLastRefreshed(new Date())
+      setCountdown(POLL_INTERVAL)
     } catch { /* ignore */ } finally {
       setLoading(false)
       setRefreshing(false)
     }
+  }
+
+  const startPolling = () => {
+    if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current)
+
+    pollTimerRef.current = setInterval(() => {
+      loadAll()
+    }, POLL_INTERVAL * 1000)
+
+    countdownTimerRef.current = setInterval(() => {
+      setCountdown((prev) => (prev <= 1 ? POLL_INTERVAL : prev - 1))
+    }, 1000)
   }
 
   const loadActions = async () => {
@@ -73,6 +94,11 @@ export default function GroupHome() {
   useEffect(() => {
     loadAll()
     loadActions()
+    startPolling()
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current)
+    }
   }, [])
 
   const handleActionClick = (action: RecommendedAction) => {
@@ -95,8 +121,18 @@ export default function GroupHome() {
           <p className="text-xs text-slate-500 mt-1">그룹 전체 현황을 한눈에 확인하세요</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Live polling indicator */}
+          <div
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px]"
+            style={{ background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.18)', color: '#34d399' }}
+            title={lastRefreshed ? `마지막 갱신: ${format(lastRefreshed, 'HH:mm:ss')}` : ''}
+          >
+            <Wifi size={9} />
+            <span className="font-mono">{countdown}s</span>
+            {refreshing && <RefreshCw size={9} className="animate-spin" />}
+          </div>
           <button
-            onClick={() => { loadAll(); loadActions() }}
+            onClick={() => { loadAll(); loadActions(); startPolling() }}
             disabled={refreshing}
             className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-slate-500 hover:text-slate-300 bg-bg-elevated border border-bg-border"
           >

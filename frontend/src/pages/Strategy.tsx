@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Map, Plus, X, Trophy, Target, Milestone, BarChart3 } from 'lucide-react'
+import { Map, Plus, X, Trophy, Target, Milestone, BarChart3, LayoutGrid, List } from 'lucide-react'
 import { strategyApi, companiesApi } from '../api/client'
 import type { StrategyItem, Company, CEOPerformance } from '../types'
 import { format } from 'date-fns'
@@ -11,19 +11,164 @@ const ITEM_TYPE_ICONS: Record<string, React.ElementType> = {
   kpi: BarChart3,
 }
 
-const PRIORITY_COLORS: Record<string, string> = {
-  high: 'text-danger',
-  medium: 'text-warning',
-  low: 'text-slate-400',
+const ITEM_TYPE_META: Record<string, { label: string; color: string; bg: string }> = {
+  objective:  { label: '목표',       color: '#818cf8', bg: 'rgba(129,140,248,0.12)' },
+  initiative: { label: '이니셔티브', color: '#34d399', bg: 'rgba(52,211,153,0.10)' },
+  milestone:  { label: '마일스톤',   color: '#fbbf24', bg: 'rgba(251,191,36,0.10)' },
+  kpi:        { label: 'KPI',        color: '#60a5fa', bg: 'rgba(96,165,250,0.10)' },
 }
 
-function ProgressBar({ value }: { value: number }) {
+const PRIORITY_META: Record<string, { color: string; label: string }> = {
+  high:   { color: '#f87171', label: '높음' },
+  medium: { color: '#fbbf24', label: '중간' },
+  low:    { color: '#64748b', label: '낮음' },
+}
+
+// ── Company lane colors ────────────────────────────────────────────────────
+const LANE_COLORS = [
+  '#818cf8', '#34d399', '#fb923c', '#fbbf24',
+  '#f472b6', '#60a5fa', '#a3e635', '#c084fc',
+]
+
+function ProgressBar({ value, color }: { value: number; color?: string }) {
   return (
-    <div className="w-full bg-bg-border rounded-full h-1.5">
+    <div className="w-full bg-bg-border rounded-full h-1">
       <div
-        className="h-1.5 rounded-full bg-brand transition-all duration-300"
-        style={{ width: `${value}%` }}
+        className="h-1 rounded-full transition-all duration-300"
+        style={{ width: `${value}%`, background: color ?? '#6366f1' }}
       />
+    </div>
+  )
+}
+
+// ── Strategy card ──────────────────────────────────────────────────────────
+function StrategyCard({
+  item, onProgressChange, onDelete, laneColor,
+}: {
+  item: StrategyItem
+  onProgressChange: (id: number, v: number) => void
+  onDelete: (id: number) => void
+  laneColor: string
+}) {
+  const typeMeta = ITEM_TYPE_META[item.item_type] ?? ITEM_TYPE_META.objective
+  const priorityMeta = PRIORITY_META[item.priority] ?? PRIORITY_META.medium
+  const Icon = ITEM_TYPE_ICONS[item.item_type] ?? Target
+
+  return (
+    <div
+      className="rounded-xl p-3 group relative transition-all hover:brightness-110"
+      style={{ background: typeMeta.bg, border: `1px solid ${typeMeta.color}25` }}
+    >
+      {/* Type + priority badges */}
+      <div className="flex items-center gap-1 mb-1.5">
+        <div
+          className="flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+          style={{ background: `${typeMeta.color}20`, color: typeMeta.color }}
+        >
+          <Icon size={8} />{typeMeta.label}
+        </div>
+        <div
+          className="text-[9px] px-1.5 py-0.5 rounded-full font-medium ml-auto"
+          style={{ color: priorityMeta.color }}
+        >
+          {priorityMeta.label}
+        </div>
+        <button
+          onClick={() => onDelete(item.id)}
+          className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-400 transition-all ml-1 p-0.5"
+        >
+          <X size={9} />
+        </button>
+      </div>
+
+      {/* Title */}
+      <div className="text-[11px] font-semibold text-slate-200 leading-snug mb-1">{item.title}</div>
+      {item.description && (
+        <div className="text-[9px] text-slate-600 leading-relaxed mb-2 line-clamp-2">{item.description}</div>
+      )}
+
+      {/* Progress */}
+      <div className="space-y-1">
+        <ProgressBar value={item.progress} color={laneColor} />
+        <div className="flex items-center justify-between">
+          <input
+            type="range" min={0} max={100}
+            value={item.progress}
+            onChange={(e) => onProgressChange(item.id, parseInt(e.target.value))}
+            className="w-full h-1 opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-3 left-3 right-3"
+            style={{ width: 'calc(100% - 24px)' }}
+          />
+          <span className="text-[9px] font-mono" style={{ color: laneColor }}>{item.progress}%</span>
+          {item.due_date && (
+            <span className="text-[9px] text-slate-700">{item.due_date}</span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Lane (one per company) ─────────────────────────────────────────────────
+function CompanyLane({
+  company, items, color, onProgressChange, onDelete,
+}: {
+  company: { id: number | null; name: string }
+  items: StrategyItem[]
+  color: string
+  onProgressChange: (id: number, v: number) => void
+  onDelete: (id: number) => void
+}) {
+  const totalProgress = items.length
+    ? Math.round(items.reduce((s, i) => s + i.progress, 0) / items.length)
+    : 0
+
+  return (
+    <div
+      className="flex-shrink-0 flex flex-col rounded-xl overflow-hidden"
+      style={{
+        width: 220,
+        background: `${color}06`,
+        border: `1px solid ${color}20`,
+      }}
+    >
+      {/* Lane header */}
+      <div
+        className="px-3 py-2.5 flex-shrink-0"
+        style={{ background: `${color}12`, borderBottom: `1px solid ${color}20` }}
+      >
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="text-[11px] font-bold text-slate-200 truncate">{company.name}</div>
+          <div
+            className="text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ml-1"
+            style={{ background: `${color}20`, color }}
+          >
+            {items.length}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1 h-1 rounded-full bg-bg-border overflow-hidden">
+            <div className="h-full rounded-full transition-all" style={{ width: `${totalProgress}%`, background: color }} />
+          </div>
+          <span className="text-[9px] font-mono flex-shrink-0" style={{ color }}>{totalProgress}%</span>
+        </div>
+      </div>
+
+      {/* Cards */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-[120px]">
+        {items.length === 0 ? (
+          <div className="text-[10px] text-slate-700 text-center py-6">전략 없음</div>
+        ) : (
+          items.map((item) => (
+            <StrategyCard
+              key={item.id}
+              item={item}
+              laneColor={color}
+              onProgressChange={onProgressChange}
+              onDelete={onDelete}
+            />
+          ))
+        )}
+      </div>
     </div>
   )
 }
@@ -42,15 +187,16 @@ export default function Strategy() {
   const [evalCompany, setEvalCompany] = useState('')
   const [evalPeriod, setEvalPeriod] = useState('')
   const [tab, setTab] = useState<'map' | 'leaderboard' | 'evaluate'>('map')
+  const [viewMode, setViewMode] = useState<'board' | 'list'>('board')
 
   const load = async () => {
-    const cid = companyFilter ? parseInt(companyFilter) : undefined
-    strategyApi.map(cid).then((r) => setItems(r.data))
+    // Always fetch all items; board view filters client-side for lane layout
+    strategyApi.map(undefined).then((r) => setItems(r.data))
     strategyApi.leaderboard().then((r) => setLeaderboard(r.data))
     companiesApi.list().then((r) => setCompanies(r.data))
   }
 
-  useEffect(() => { load() }, [companyFilter])
+  useEffect(() => { load() }, [])
 
   const createItem = async () => {
     await strategyApi.createItem({
@@ -84,7 +230,11 @@ export default function Strategy() {
     }
   }
 
-  const grouped = items.reduce<Record<string, StrategyItem[]>>((acc, item) => {
+  const filteredItems = companyFilter
+    ? items.filter((i) => String(i.company_id) === companyFilter)
+    : items
+
+  const grouped = filteredItems.reduce<Record<string, StrategyItem[]>>((acc, item) => {
     const key = item.item_type
     if (!acc[key]) acc[key] = []
     acc[key].push(item)
@@ -114,6 +264,7 @@ export default function Strategy() {
 
       {tab === 'map' && (
         <>
+          {/* Toolbar */}
           <div className="flex items-center gap-3">
             <select
               className="input max-w-[180px] text-xs"
@@ -123,70 +274,161 @@ export default function Strategy() {
               <option value="">전체 그룹</option>
               {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+
+            {/* View mode toggle */}
+            <div className="flex rounded-lg border border-bg-border overflow-hidden text-xs">
+              <button
+                onClick={() => setViewMode('board')}
+                className={`px-2.5 py-1.5 flex items-center gap-1 transition-colors ${viewMode === 'board' ? 'bg-brand/20 text-brand-light' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                <LayoutGrid size={11} />보드
+              </button>
+              <button
+                onClick={() => setViewMode('list')}
+                className={`px-2.5 py-1.5 flex items-center gap-1 transition-colors ${viewMode === 'list' ? 'bg-brand/20 text-brand-light' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                <List size={11} />목록
+              </button>
+            </div>
+
             <button onClick={() => setShowNew(true)} className="btn-primary flex items-center gap-2 ml-auto text-xs py-1.5">
               <Plus size={13} /> 전략 추가
             </button>
           </div>
 
-          {Object.entries(grouped).map(([type, typeItems]) => {
-            const Icon = ITEM_TYPE_ICONS[type] || Target
-            return (
-              <div key={type} className="card p-4">
-                <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-2 mb-3">
-                  <Icon size={14} className="text-brand-light" />
-                  {type === 'objective' ? '목표' : type === 'milestone' ? '마일스톤' : type === 'kpi' ? 'KPI' : '이니셔티브'}
-                  <span className="badge-brand">{typeItems.length}</span>
-                </h3>
-                <div className="space-y-2">
-                  {typeItems.map((item) => (
-                    <div key={item.id} className="bg-bg-elevated rounded-lg px-3 py-3 group">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-medium text-slate-200 truncate">{item.title}</span>
-                            <span className={`text-[10px] font-medium ${PRIORITY_COLORS[item.priority]}`}>
-                              {item.priority}
-                            </span>
-                          </div>
-                          {item.description && (
-                            <p className="text-[10px] text-slate-500 mt-0.5 truncate">{item.description}</p>
-                          )}
-                          <div className="flex items-center gap-3 mt-2">
-                            <ProgressBar value={item.progress} />
-                            <input
-                              type="range"
-                              min={0} max={100}
-                              value={item.progress}
-                              onChange={(e) => updateProgress(item.id, parseInt(e.target.value))}
-                              className="w-24 h-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                            />
-                            <span className="text-[10px] text-slate-500 w-8 flex-shrink-0">{item.progress}%</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1 ml-2">
-                          {item.due_date && (
-                            <span className="text-[10px] text-slate-600">{item.due_date}</span>
-                          )}
-                          <button
-                            onClick={() => deleteItem(item.id)}
-                            className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-danger p-1 transition-all"
-                          >
-                            <X size={11} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+          {/* ── Board view: company lanes ── */}
+          {viewMode === 'board' && (
+            <>
+              {items.length === 0 ? (
+                <div className="card p-12 text-center text-slate-600 text-sm">
+                  <Map size={32} className="mx-auto mb-3 text-slate-700" />
+                  전략 항목이 없습니다. 추가 버튼을 눌러 전략을 작성하세요.
                 </div>
-              </div>
-            )
-          })}
+              ) : (
+                <div
+                  className="flex gap-3 overflow-x-auto pb-3"
+                  style={{ minHeight: 400 }}
+                >
+                  {/* Group-level lane (no company) */}
+                  {(() => {
+                    const groupItems = items.filter((i) => !i.company_id)
+                    if (!companyFilter && groupItems.length > 0) {
+                      return (
+                        <CompanyLane
+                          key="group"
+                          company={{ id: null, name: '그룹 전체' }}
+                          items={groupItems}
+                          color="#e24c4b"
+                          onProgressChange={updateProgress}
+                          onDelete={deleteItem}
+                        />
+                      )
+                    }
+                    return null
+                  })()}
 
-          {items.length === 0 && (
-            <div className="card p-12 text-center text-slate-600 text-sm">
-              <Map size={32} className="mx-auto mb-3 text-slate-700" />
-              전략 항목이 없습니다. 추가 버튼을 눌러 전략을 작성하세요.
-            </div>
+                  {/* Per-company lanes */}
+                  {companies
+                    .filter((c) => !companyFilter || String(c.id) === companyFilter)
+                    .map((c, idx) => {
+                      const laneItems = items.filter((i) => i.company_id === c.id)
+                      const color = LANE_COLORS[idx % LANE_COLORS.length]
+                      return (
+                        <CompanyLane
+                          key={c.id}
+                          company={c}
+                          items={laneItems}
+                          color={color}
+                          onProgressChange={updateProgress}
+                          onDelete={deleteItem}
+                        />
+                      )
+                    })
+                  }
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── List view ── */}
+          {viewMode === 'list' && (
+            <>
+              {Object.entries(grouped).map(([type, typeItems]) => {
+                const Icon = ITEM_TYPE_ICONS[type] || Target
+                const meta = ITEM_TYPE_META[type] ?? ITEM_TYPE_META.objective
+                return (
+                  <div key={type} className="card p-4">
+                    <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-2 mb-3">
+                      <Icon size={13} style={{ color: meta.color }} />
+                      <span style={{ color: meta.color }}>{meta.label}</span>
+                      <span
+                        className="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
+                        style={{ background: meta.bg, color: meta.color }}
+                      >
+                        {typeItems.length}
+                      </span>
+                    </h3>
+                    <div className="space-y-2">
+                      {typeItems.map((item) => {
+                        const priorityMeta = PRIORITY_META[item.priority] ?? PRIORITY_META.medium
+                        return (
+                          <div key={item.id} className="bg-bg-elevated rounded-lg px-3 py-3 group">
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-xs font-medium text-slate-200 truncate">{item.title}</span>
+                                  <span className="text-[9px] font-medium flex-shrink-0" style={{ color: priorityMeta.color }}>
+                                    {priorityMeta.label}
+                                  </span>
+                                  {item.company_id && (
+                                    <span
+                                      className="text-[8px] px-1 py-0.5 rounded flex-shrink-0"
+                                      style={{ background: 'rgba(99,102,241,0.12)', color: '#a5b4fc' }}
+                                    >
+                                      {companies.find((c) => c.id === item.company_id)?.name ?? ''}
+                                    </span>
+                                  )}
+                                </div>
+                                {item.description && (
+                                  <p className="text-[10px] text-slate-500 mb-1.5 truncate">{item.description}</p>
+                                )}
+                                <div className="flex items-center gap-3">
+                                  <ProgressBar value={item.progress} color={meta.color} />
+                                  <input
+                                    type="range" min={0} max={100}
+                                    value={item.progress}
+                                    onChange={(e) => updateProgress(item.id, parseInt(e.target.value))}
+                                    className="w-20 h-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  />
+                                  <span className="text-[10px] font-mono w-8 flex-shrink-0" style={{ color: meta.color }}>{item.progress}%</span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                                {item.due_date && (
+                                  <span className="text-[10px] text-slate-600">{item.due_date}</span>
+                                )}
+                                <button
+                                  onClick={() => deleteItem(item.id)}
+                                  className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-danger p-1 transition-all"
+                                >
+                                  <X size={11} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+              {items.length === 0 && (
+                <div className="card p-12 text-center text-slate-600 text-sm">
+                  <Map size={32} className="mx-auto mb-3 text-slate-700" />
+                  전략 항목이 없습니다. 추가 버튼을 눌러 전략을 작성하세요.
+                </div>
+              )}
+            </>
           )}
         </>
       )}

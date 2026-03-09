@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Building2, Plus, X, RefreshCw, ChevronRight, ChevronLeft, Bot, Check } from 'lucide-react'
+import { Building2, Plus, X, RefreshCw, ChevronRight, ChevronLeft, Bot, Check, Zap } from 'lucide-react'
 import { companiesApi, orgApi, modelsApi } from '../api/client'
 import type { Company, OrgNode } from '../types'
 import OrgChart from '../components/OrgChart'
@@ -189,11 +189,21 @@ function CompanyModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
 // ── AI Edit Panel ─────────────────────────────────────────────────────────
 type ModelCatalog = { id: number; name: string; provider: string; model_id: string }
 
+const LEVEL_META: Record<string, { label: string; color: string; bg: string }> = {
+  ceo:        { label: 'CEO',    color: '#e24c4b', bg: 'rgba(226,76,75,0.12)' },
+  chief:      { label: 'Chief',  color: '#818cf8', bg: 'rgba(129,140,248,0.12)' },
+  team_lead:  { label: '팀장',   color: '#34d399', bg: 'rgba(52,211,153,0.12)' },
+  specialist: { label: '전문가', color: '#94a3b8', bg: 'rgba(148,163,184,0.08)' },
+}
+
 function AiEditPanel({ companyId }: { companyId: number }) {
   const [nodes, setNodes] = useState<OrgNode[]>([])
   const [catalog, setCatalog] = useState<ModelCatalog[]>([])
   const [editing, setEditing] = useState<Record<number, { ai_provider: string; ai_model: string }>>({})
   const [saving, setSaving] = useState<number | null>(null)
+  const [bulkBudget, setBulkBudget] = useState<Budget>('any')
+  const [bulkApplying, setBulkApplying] = useState(false)
+  const [savedIds, setSavedIds] = useState<Set<number>>(new Set())
 
   useEffect(() => {
     orgApi.nodes(companyId).then((r) => setNodes(r.data))
@@ -220,71 +230,153 @@ function AiEditPanel({ companyId }: { companyId: number }) {
       await orgApi.updateNode(node.id, patch)
       setNodes((prev) => prev.map((n) => n.id === node.id ? { ...n, ...patch } : n))
       setEditing((prev) => { const next = { ...prev }; delete next[node.id]; return next })
+      setSavedIds((prev) => new Set([...prev, node.id]))
+      setTimeout(() => setSavedIds((prev) => { const next = new Set(prev); next.delete(node.id); return next }), 2000)
     } finally {
       setSaving(null)
     }
   }
 
-  const LEVEL_LABEL: Record<string, string> = {
-    ceo: 'CEO', chief: 'Chief', team_lead: '팀장', specialist: '전문가',
+  const handleBulkApply = async () => {
+    setBulkApplying(true)
+    try {
+      const updates = nodes.map(async (node) => {
+        const [provider, model] = AI_TIER[node.level]?.[bulkBudget] ?? ['ollama', 'qwen2.5']
+        await orgApi.updateNode(node.id, { ai_provider: provider, ai_model: model })
+        return { id: node.id, ai_provider: provider, ai_model: model }
+      })
+      const results = await Promise.all(updates)
+      setNodes((prev) => prev.map((n) => {
+        const r = results.find((res) => res.id === n.id)
+        return r ? { ...n, ...r } : n
+      }))
+      setEditing({})
+    } finally {
+      setBulkApplying(false)
+    }
   }
 
   const providerOptions = [...new Set(catalog.map((m) => m.provider))]
+  const levelOrder = ['ceo', 'chief', 'team_lead', 'specialist']
+  const grouped = levelOrder
+    .map((level) => ({ level, nodes: nodes.filter((n) => n.level === level) }))
+    .filter((g) => g.nodes.length > 0)
 
   return (
-    <div className="p-4 space-y-2 max-h-[500px] overflow-y-auto">
+    <div className="p-4 max-h-[560px] overflow-y-auto space-y-4">
       {nodes.length === 0 && (
         <div className="text-center text-slate-600 text-xs py-8">조직원 없음</div>
       )}
-      {nodes.map((node) => {
-        const cur = editing[node.id] ?? { ai_provider: node.ai_provider, ai_model: node.ai_model }
-        const filteredModels = catalog.filter((m) => m.provider === cur.ai_provider)
-        const isDirty = !!editing[node.id]
 
+      {/* Bulk tier applier */}
+      {nodes.length > 0 && (
+        <div
+          className="rounded-xl p-3 flex items-center gap-3"
+          style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.2)' }}
+        >
+          <Bot size={13} className="text-indigo-400 flex-shrink-0" />
+          <span className="text-[11px] text-slate-400 flex-shrink-0">일괄 배정</span>
+          <div className="flex gap-1.5 flex-1">
+            {BUDGET_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setBulkBudget(opt.value)}
+                className={`flex-1 py-1 rounded text-[10px] font-medium transition-all ${
+                  bulkBudget === opt.value
+                    ? 'bg-brand/25 text-brand-light border border-brand/40'
+                    : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={handleBulkApply}
+            disabled={bulkApplying}
+            className="flex-shrink-0 px-3 py-1 rounded-lg text-[10px] font-semibold flex items-center gap-1.5"
+            style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)' }}
+          >
+            {bulkApplying ? <RefreshCw size={10} className="animate-spin" /> : <Zap size={10} />}
+            {bulkApplying ? '적용 중…' : '전체 적용'}
+          </button>
+        </div>
+      )}
+
+      {/* Level-grouped node rows */}
+      {grouped.map(({ level, nodes: levelNodes }) => {
+        const meta = LEVEL_META[level] ?? { label: level, color: '#94a3b8', bg: 'rgba(148,163,184,0.08)' }
         return (
-          <div key={node.id} className="flex items-center gap-2 p-2 rounded-lg bg-bg-card border border-bg-border">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="text-[9px] text-slate-600 bg-slate-800 px-1.5 py-0.5 rounded">
-                  {LEVEL_LABEL[node.level] ?? node.level}
-                </span>
-                <span className="text-xs font-medium text-slate-200 truncate">{node.name}</span>
+          <div key={level}>
+            <div className="flex items-center gap-2 mb-1.5">
+              <div
+                className="text-[9px] font-bold px-2 py-0.5 rounded-full"
+                style={{ background: meta.bg, color: meta.color, border: `1px solid ${meta.color}30` }}
+              >
+                {meta.label}
               </div>
-              <div className="text-[10px] text-slate-500 truncate mt-0.5">{node.role}</div>
+              <div className="flex-1 h-px bg-bg-border" />
             </div>
-            <select
-              value={cur.ai_provider}
-              onChange={(e) => handleProviderChange(node.id, e.target.value)}
-              className="input text-[10px] py-1 px-2 w-24"
-            >
-              {providerOptions.map((p) => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-            <select
-              value={cur.ai_model}
-              onChange={(e) => handleModelChange(node.id, e.target.value)}
-              className="input text-[10px] py-1 px-2 w-36"
-            >
-              {filteredModels.map((m) => (
-                <option key={m.model_id} value={m.model_id}>{m.model_id}</option>
-              ))}
-            </select>
-            <button
-              onClick={() => handleSave(node)}
-              disabled={!isDirty || saving === node.id}
-              className={`p-1.5 rounded transition-all ${
-                isDirty
-                  ? 'bg-brand/20 text-brand-light hover:bg-brand/30'
-                  : 'text-slate-700 cursor-default'
-              }`}
-            >
-              {saving === node.id ? (
-                <span className="text-[10px]">...</span>
-              ) : (
-                <Check size={12} />
-              )}
-            </button>
+            <div className="space-y-1.5">
+              {levelNodes.map((node) => {
+                const cur = editing[node.id] ?? { ai_provider: node.ai_provider, ai_model: node.ai_model }
+                const filteredModels = catalog.filter((m) => m.provider === cur.ai_provider)
+                const isDirty = !!editing[node.id]
+                const isSaved = savedIds.has(node.id)
+
+                return (
+                  <div
+                    key={node.id}
+                    className="flex items-center gap-2 p-2.5 rounded-lg transition-all"
+                    style={{
+                      background: isDirty ? 'rgba(99,102,241,0.05)' : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${isDirty ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.06)'}`,
+                    }}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11px] font-medium text-slate-200 truncate">{node.name}</div>
+                      <div className="text-[9px] text-slate-600 truncate mt-0.5">{node.role}</div>
+                    </div>
+                    <select
+                      value={cur.ai_provider}
+                      onChange={(e) => handleProviderChange(node.id, e.target.value)}
+                      className="input text-[10px] py-1 px-2 w-[90px]"
+                    >
+                      {providerOptions.map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={cur.ai_model}
+                      onChange={(e) => handleModelChange(node.id, e.target.value)}
+                      className="input text-[10px] py-1 px-2 w-[140px]"
+                    >
+                      {filteredModels.map((m) => (
+                        <option key={m.model_id} value={m.model_id}>{m.model_id}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => handleSave(node)}
+                      disabled={!isDirty || saving === node.id}
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all flex-shrink-0 ${
+                        isSaved
+                          ? 'bg-emerald-500/20 text-emerald-400'
+                          : isDirty
+                          ? 'bg-brand/20 text-brand-light hover:bg-brand/30'
+                          : 'text-slate-700 cursor-default'
+                      }`}
+                    >
+                      {saving === node.id
+                        ? <RefreshCw size={11} className="animate-spin" />
+                        : isSaved
+                        ? <Check size={11} />
+                        : <Check size={11} />
+                      }
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )
       })}
