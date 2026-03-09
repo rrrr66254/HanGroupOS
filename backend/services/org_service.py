@@ -32,6 +32,71 @@ AI_TIER: Dict[str, Dict[str, Tuple[str, str]]] = {
 }
 
 # ── Role-based specialization descriptions ────────────────────────────────
+# ── Specialist definitions per team_lead role ────────────────────────────────
+SPECIALIST_DEFS: Dict[str, List[Dict]] = {
+    "콘텐츠 제작 팀장": [
+        {"name": "콘텐츠 작가",  "role": "콘텐츠 작가"},
+        {"name": "에디터",       "role": "콘텐츠 에디터"},
+        {"name": "크리에이터",   "role": "크리에이티브 디자이너"},
+    ],
+    "배포 전략 팀장": [
+        {"name": "SNS 마케터",   "role": "SNS 마케터"},
+        {"name": "SEO 전문가",   "role": "SEO 전문가"},
+        {"name": "채널 분석가",  "role": "채널 분석가"},
+    ],
+    "플랫폼 개발 팀장": [
+        {"name": "시스템 개발자",  "role": "시스템 개발자"},
+        {"name": "인프라 엔지니어", "role": "인프라 엔지니어"},
+        {"name": "QA 엔지니어",   "role": "QA 엔지니어"},
+    ],
+    "제품 관리 팀장": [
+        {"name": "제품 기획자",   "role": "제품 기획자"},
+        {"name": "UX 리서처",    "role": "UX 리서처"},
+        {"name": "제품 분석가",   "role": "제품 데이터 분석가"},
+    ],
+    "백엔드 팀장": [
+        {"name": "백엔드 개발자 A", "role": "백엔드 개발자"},
+        {"name": "백엔드 개발자 B", "role": "백엔드 개발자"},
+        {"name": "DevOps 엔지니어", "role": "DevOps 엔지니어"},
+    ],
+    "프론트엔드 팀장": [
+        {"name": "FE 개발자 A",  "role": "프론트엔드 개발자"},
+        {"name": "FE 개발자 B",  "role": "프론트엔드 개발자"},
+        {"name": "UI 디자이너",  "role": "UI 디자이너"},
+    ],
+    "마케팅 팀장": [
+        {"name": "그로스 해커",     "role": "그로스 해커"},
+        {"name": "콘텐츠 마케터",   "role": "콘텐츠 마케터"},
+        {"name": "퍼포먼스 마케터", "role": "퍼포먼스 마케터"},
+    ],
+    "데이터 분석 팀장": [
+        {"name": "데이터 분석가 A", "role": "데이터 분석가"},
+        {"name": "데이터 분석가 B", "role": "데이터 분석가"},
+        {"name": "BI 개발자",       "role": "BI 개발자"},
+    ],
+    "데이터 엔지니어링 팀장": [
+        {"name": "데이터 엔지니어 A", "role": "데이터 엔지니어"},
+        {"name": "데이터 엔지니어 B", "role": "데이터 엔지니어"},
+        {"name": "ML 엔지니어",       "role": "ML 엔지니어"},
+    ],
+    "비즈니스 인사이트 팀장": [
+        {"name": "전략 분석가 A", "role": "전략 분석가"},
+        {"name": "전략 분석가 B", "role": "전략 분석가"},
+        {"name": "리서처",        "role": "비즈니스 리서처"},
+    ],
+    "운영 팀장": [
+        {"name": "운영 담당자 A",   "role": "운영 담당자"},
+        {"name": "운영 담당자 B",   "role": "운영 담당자"},
+        {"name": "프로세스 개선가", "role": "프로세스 개선가"},
+    ],
+}
+GENERIC_SPECIALISTS = [
+    {"name": "스페셜리스트 A", "role": "스페셜리스트"},
+    {"name": "스페셜리스트 B", "role": "스페셜리스트"},
+    {"name": "스페셜리스트 C", "role": "스페셜리스트"},
+]
+
+
 ROLE_DESC: Dict[str, str] = {
     "최고경영자":             "회사 전략 실행 및 전체 팀 총괄 — 의사결정 특화",
     "콘텐츠 총괄":            "AI 콘텐츠 전략·창작 총괄 — 창의적 판단 특화",
@@ -153,6 +218,25 @@ def create_company_org(
         name_to_id[nd["name"]] = node.id
         created.append(node)
 
+        # Auto-create 3 specialists under each team_lead
+        if nd["level"] == "team_lead":
+            spec_list = SPECIALIST_DEFS.get(nd["role"], GENERIC_SPECIALISTS)
+            sp_provider, sp_model = _get_ai_for_level("specialist", ai_budget)
+            for sp in spec_list:
+                sp_node = OrgNode(
+                    company_id=company_id,
+                    name=sp["name"],
+                    role=sp["role"],
+                    level="specialist",
+                    parent_id=node.id,
+                    ai_provider=sp_provider,
+                    ai_model=sp_model,
+                    description=f"{sp['role']} 담당",
+                )
+                db.add(sp_node)
+                db.flush()
+                created.append(sp_node)
+
     db.commit()
     return created
 
@@ -191,3 +275,60 @@ def get_group_org_tree(db: Session) -> List[Dict]:
     """Group-level nodes (company_id = None)."""
     nodes = db.query(OrgNode).filter(OrgNode.company_id == None).all()
     return build_org_tree(nodes)
+
+
+def ensure_company_specialists(
+    db: Session,
+    company_id: int,
+    ai_budget: str = "any",
+) -> List[OrgNode]:
+    """Add up to 3 specialists under each team_lead that currently has fewer than 3."""
+    team_leads = (
+        db.query(OrgNode)
+        .filter(OrgNode.company_id == company_id, OrgNode.level == "team_lead")
+        .all()
+    )
+    created: List[OrgNode] = []
+    sp_provider, sp_model = _get_ai_for_level("specialist", ai_budget)
+
+    for tl in team_leads:
+        existing_count = (
+            db.query(OrgNode)
+            .filter(OrgNode.parent_id == tl.id, OrgNode.level == "specialist")
+            .count()
+        )
+        if existing_count >= 3:
+            continue
+
+        spec_list = SPECIALIST_DEFS.get(tl.role, GENERIC_SPECIALISTS)
+        needed = 3 - existing_count
+
+        for sp in spec_list[:needed]:
+            sp_node = OrgNode(
+                company_id=company_id,
+                name=sp["name"],
+                role=sp["role"],
+                level="specialist",
+                parent_id=tl.id,
+                ai_provider=sp_provider,
+                ai_model=sp_model,
+                description=f"{sp['role']} 담당",
+            )
+            db.add(sp_node)
+            db.flush()
+            created.append(sp_node)
+
+    db.commit()
+    return created
+
+
+def ensure_all_companies_specialists(db: Session, ai_budget: str = "any") -> int:
+    """Ensure 3 specialists per team_lead for all companies. Returns total created count."""
+    companies = db.query(OrgNode.company_id).filter(
+        OrgNode.company_id != None, OrgNode.level == "team_lead"
+    ).distinct().all()
+    total = 0
+    for (company_id,) in companies:
+        created = ensure_company_specialists(db, company_id, ai_budget)
+        total += len(created)
+    return total

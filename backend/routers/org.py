@@ -10,7 +10,10 @@ from schemas.schemas import (
     OrgTemplateCreate, OrgTemplateOut,
     OrgProposalCreate, OrgProposalOut,
 )
-from services.org_service import build_org_tree, get_group_org_tree
+from services.org_service import (
+    build_org_tree, get_group_org_tree,
+    ensure_company_specialists, ensure_all_companies_specialists,
+)
 
 router = APIRouter(prefix="/api/org", tags=["org"])
 
@@ -133,6 +136,27 @@ def group_tree(db: Session = Depends(get_db), _: User = Depends(get_current_user
 @router.get("/templates", response_model=List[OrgTemplateOut])
 def list_templates(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return db.query(OrgTemplate).all()
+
+
+@router.post("/ensure-specialists/{company_id}")
+def ensure_specialists(
+    company_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Add missing specialists (up to 3 per team_lead) for a company."""
+    created = ensure_company_specialists(db, company_id)
+    return {"created": len(created), "company_id": company_id}
+
+
+@router.post("/ensure-all-specialists")
+def ensure_all_specialists(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Add missing specialists for ALL companies."""
+    total = ensure_all_companies_specialists(db)
+    return {"created": total}
 
 
 @router.post("/templates", response_model=OrgTemplateOut)

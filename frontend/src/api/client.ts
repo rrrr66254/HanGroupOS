@@ -69,6 +69,8 @@ export const orgApi = {
     api.get('/org/proposals', { params: { company_id: companyId } }),
   approveProposal: (id: number) => api.post(`/org/proposals/${id}/approve`),
   rejectProposal: (id: number) => api.post(`/org/proposals/${id}/reject`),
+  ensureSpecialists: (companyId: number) => api.post(`/org/ensure-specialists/${companyId}`),
+  ensureAllSpecialists: () => api.post('/org/ensure-all-specialists'),
 }
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
