@@ -308,3 +308,18 @@ class AgentActivity(Base):
     status = Column(String(20), default="working")  # idle | working | thinking | done
     meta = Column(JSON, default={})
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class WorkLog(Base):
+    __tablename__ = "work_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    org_node_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=True)
+    agent_name = Column(String(100), nullable=False)
+    agent_role = Column(String(100), nullable=False)
+    level = Column(String(50), nullable=False)  # specialist | team_lead | chief | ceo | chairman
+    task = Column(String(500), nullable=False)
+    result = Column(Text, nullable=False)
+    cycle_id = Column(String(50), nullable=True)  # UUID groups logs from same work cycle
+    parent_log_id = Column(Integer, ForeignKey("work_logs.id"), nullable=True)  # chain tracing
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { orgApi, companiesApi } from '../api/client'
+import { orgApi, companiesApi, agentApi, workApi } from '../api/client'
 import { useProviderHealth } from '../components/ProviderStatusBanner'
 import type { OrgNode } from '../types'
 
@@ -98,6 +98,7 @@ interface LiveAgent {
   id: number; name: string; level: string; role: string
   ai_model: string; ai_provider: string
   charIdx: number; x: number; y: number; mode: AgentMode; bubble: string
+  meta?: Record<string, unknown>
 }
 
 // ── Dynamic desk position computation ────────────────────────────────────────
@@ -398,6 +399,17 @@ export default function LiveOffice() {
   const [savingModel, setSavingModel] = useState(false)
   const [savedModelMsg, setSavedModelMsg] = useState<string | null>(null)
 
+  // Personality editor state
+  const [personalityStyle, setPersonalityStyle] = useState('')
+  const [personalityTraits, setPersonalityTraits] = useState('')
+  const [personalitySpecialty, setPersonalitySpecialty] = useState('')
+  const [savingPersonality, setSavingPersonality] = useState(false)
+  const [savedPersonalityMsg, setSavedPersonalityMsg] = useState<string | null>(null)
+
+  // Work trigger state
+  const [triggeringWork, setTriggeringWork] = useState(false)
+  const [workMsg, setWorkMsg] = useState<string | null>(null)
+
   // Load companies list
   useEffect(() => {
     companiesApi.list().then((r) => setCompanies(r.data as Company[]))
@@ -412,6 +424,7 @@ export default function LiveOffice() {
       id: n.id, name: n.name, level: n.level, role: n.role || '',
       ai_model: n.ai_model || '—', ai_provider: n.ai_provider || 'mock',
       charIdx: i, x: 0, y: 0, mode: 'idle' as AgentMode, bubble: '',
+      meta: n.meta || {},
     }))
     const pm = computePositions(rawAgents)
     const finalAgents = rawAgents.map((a) => {
@@ -479,14 +492,51 @@ export default function LiveOffice() {
     }
   }
 
+  const savePersonality = async () => {
+    if (!selectedAgent) return
+    setSavingPersonality(true)
+    try {
+      const personality = {
+        style: personalityStyle,
+        traits: personalityTraits.split(',').map((t) => t.trim()).filter(Boolean),
+        specialty: personalitySpecialty,
+      }
+      await agentApi.updatePersonality(selectedAgent.id, personality)
+      setAgents((prev) => prev.map((a) =>
+        a.id === selectedAgent.id ? { ...a, meta: { ...(a.meta || {}), personality } } : a
+      ))
+      setSavedPersonalityMsg('저장됨')
+    } catch { setSavedPersonalityMsg('오류') }
+    setSavingPersonality(false)
+    setTimeout(() => setSavedPersonalityMsg(null), 2000)
+  }
+
+  const handleWorkTrigger = async () => {
+    if (selectedId === 'chairman' || typeof selectedId !== 'number') return
+    setTriggeringWork(true)
+    setWorkMsg(null)
+    try {
+      const res = await workApi.trigger(selectedId)
+      const data = res.data as { total_logs: number; cycle_id: string }
+      setWorkMsg(`✅ 업무 완료 (${data.total_logs}건 · 사이클 #${data.cycle_id})`)
+    } catch { setWorkMsg('❌ 업무 실행 오류') }
+    setTriggeringWork(false)
+    setTimeout(() => setWorkMsg(null), 5000)
+  }
+
   const selData = selectedAgent ? agents.find((a) => a.id === selectedAgent.id) : null
 
-  // Sync model edit state when selection changes
+  // Sync model + personality edit state when selection changes
   useEffect(() => {
     if (!selData) return
     const prov = selData.ai_provider === 'mock' ? 'ollama' : (selData.ai_provider || 'ollama')
     setEditProvider(prov)
     setEditModel(selData.ai_model !== '—' ? selData.ai_model : (prov === 'ollama' ? 'qwen2.5' : ''))
+    // Load personality from meta
+    const p = (selData.meta?.personality || {}) as Record<string, unknown>
+    setPersonalityStyle((p.style as string) || '')
+    setPersonalityTraits(Array.isArray(p.traits) ? (p.traits as string[]).join(', ') : '')
+    setPersonalitySpecialty((p.specialty as string) || '')
   }, [selData?.id])
 
   const saveAgentModel = async () => {
@@ -530,21 +580,38 @@ export default function LiveOffice() {
             </div>
           ))}
           {selectedId !== 'chairman' && (
-            <button
-              onClick={handleEnsureSpecialists}
-              disabled={ensuringSpecs}
-              className="text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
-              style={{
-                background: 'rgba(99,102,241,0.15)',
-                color: '#a5b4fc',
-                border: '1px solid rgba(99,102,241,0.3)',
-              }}
-            >
-              {ensuringSpecs ? '구성 중…' : '스페셜리스트 3명 구성'}
-            </button>
+            <>
+              <button
+                onClick={handleEnsureSpecialists}
+                disabled={ensuringSpecs}
+                className="text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
+                style={{
+                  background: 'rgba(99,102,241,0.15)',
+                  color: '#a5b4fc',
+                  border: '1px solid rgba(99,102,241,0.3)',
+                }}
+              >
+                {ensuringSpecs ? '구성 중…' : '스페셜리스트 3명 구성'}
+              </button>
+              <button
+                onClick={handleWorkTrigger}
+                disabled={triggeringWork}
+                className="text-xs px-3 py-1.5 rounded-lg font-medium transition-all flex items-center gap-1.5"
+                style={{
+                  background: triggeringWork ? 'rgba(52,211,153,0.06)' : 'rgba(52,211,153,0.12)',
+                  color: '#34d399',
+                  border: '1px solid rgba(52,211,153,0.3)',
+                }}
+              >
+                {triggeringWork ? '실행 중…' : '⚙️ 업무 실행'}
+              </button>
+            </>
           )}
           {ensureMsg && (
             <span className="text-[11px] text-emerald-400">{ensureMsg}</span>
+          )}
+          {workMsg && (
+            <span className="text-[11px]" style={{ color: workMsg.startsWith('✅') ? '#34d399' : '#f87171' }}>{workMsg}</span>
           )}
         </div>
       </div>
@@ -705,6 +772,51 @@ export default function LiveOffice() {
                 {savingModel ? '…' : '저장'}
               </button>
               {savedModelMsg && <span className="text-[9px] text-emerald-400">{savedModelMsg}</span>}
+            </div>
+            {/* Personality editor */}
+            <div
+              className="rounded-lg p-3 space-y-2"
+              style={{ background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.15)' }}
+            >
+              <div className="text-[10px] font-medium text-indigo-300 mb-2">🧠 에이전트 개성 설정</div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-500 w-16 flex-shrink-0">스타일</span>
+                <input
+                  value={personalityStyle}
+                  onChange={(e) => setPersonalityStyle(e.target.value)}
+                  placeholder="예: 분석적, 창의적, 직접적"
+                  className="flex-1 text-[10px] bg-bg-base border border-bg-border rounded px-2 py-1 text-slate-300"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-500 w-16 flex-shrink-0">특성 (,구분)</span>
+                <input
+                  value={personalityTraits}
+                  onChange={(e) => setPersonalityTraits(e.target.value)}
+                  placeholder="예: 꼼꼼함, 목표 지향적, 데이터 중심"
+                  className="flex-1 text-[10px] bg-bg-base border border-bg-border rounded px-2 py-1 text-slate-300"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-500 w-16 flex-shrink-0">전문 분야</span>
+                <input
+                  value={personalitySpecialty}
+                  onChange={(e) => setPersonalitySpecialty(e.target.value)}
+                  placeholder="예: 백엔드 아키텍처, SEO 최적화"
+                  className="flex-1 text-[10px] bg-bg-base border border-bg-border rounded px-2 py-1 text-slate-300"
+                />
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={savePersonality}
+                  disabled={savingPersonality}
+                  className="text-[9px] px-2.5 py-1 rounded font-medium"
+                  style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)' }}
+                >
+                  {savingPersonality ? '…' : '개성 저장'}
+                </button>
+                {savedPersonalityMsg && <span className="text-[9px] text-emerald-400">{savedPersonalityMsg}</span>}
+              </div>
             </div>
             {/* Status row */}
             <div className="grid grid-cols-2 gap-2">

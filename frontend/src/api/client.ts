@@ -199,3 +199,20 @@ export const liveOfficeApi = {
 export const dashboardApi = {
   stats: () => api.get('/knowledge/dashboard/stats'),
 }
+
+// ── Work (Autonomous Loop) ────────────────────────────────────────────────────
+export const workApi = {
+  trigger: (companyId: number) => api.post(`/work/trigger/${companyId}`),
+  logs: (companyId?: number, cycleId?: string, limit?: number) =>
+    api.get('/work/logs', { params: { company_id: companyId, cycle_id: cycleId, limit } }),
+  cycles: (companyId?: number) =>
+    api.get('/work/cycles', { params: { company_id: companyId } }),
+}
+
+// ── Agent (personality + direct chat) ────────────────────────────────────────
+export const agentApi = {
+  updatePersonality: (nodeId: number, personality: object) =>
+    api.patch(`/org/nodes/${nodeId}/personality`, personality),
+  chat: (nodeId: number, message: string) =>
+    api.post('/chat/agent-chat', { node_id: nodeId, message }),
+}

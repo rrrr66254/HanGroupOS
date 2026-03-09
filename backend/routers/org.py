@@ -159,6 +159,25 @@ def ensure_all_specialists(
     return {"created": total}
 
 
+@router.patch("/nodes/{node_id}/personality")
+def update_node_personality(
+    node_id: int,
+    personality: dict,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Update only the personality sub-object inside node.meta."""
+    node = db.query(OrgNode).filter(OrgNode.id == node_id).first()
+    if not node:
+        raise HTTPException(404, "Node not found")
+    meta = dict(node.meta or {})
+    meta["personality"] = personality
+    node.meta = meta
+    db.commit()
+    db.refresh(node)
+    return {"ok": True, "node_id": node_id, "personality": personality}
+
+
 @router.post("/migrate-mock")
 def migrate_mock_nodes(
     db: Session = Depends(get_db),

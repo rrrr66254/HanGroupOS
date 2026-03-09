@@ -18,6 +18,9 @@ from services.ai_provider import (
     CHAIRMAN_SYSTEM, CEO_SYSTEM,
 )
 from services.org_service import create_company_org
+from services.work_service import (
+    build_personality_context, get_relevant_memories, get_node_ai_provider,
+)
 
 
 def _execute_actions(ai_response: str, db: Session, user_id: int) -> tuple:
@@ -675,9 +678,10 @@ def multi_ceo_meeting(
     accumulated = ""
 
     for co, ceo_name in participants:
+        prev_block = ("이전 발언:\n" + accumulated + "\n") if accumulated else ""
         prompt = (
             f"{context_header}"
-            f"{'이전 발언:\n' + accumulated + chr(10) if accumulated else ''}"
+            f"{prev_block}"
             f"[{ceo_name} / {co.name} CEO] 발언 순서입니다. "
             f"안건에 대한 귀사의 입장과 제안을 3~4문장으로 간결하게 발표해주세요."
         )
@@ -899,3 +903,46 @@ def dismiss_suggestion(
         s.status = "dismissed"
         db.commit()
     return {"ok": True}
+
+
+@router.post("/agent-chat")
+def agent_chat(
+    req: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Direct chat with a specific agent — injects personality + company memory."""
+    node_id = req.get("node_id")
+    message = req.get("message", "")
+    if not node_id or not message:
+        raise HTTPException(400, "node_id and message required")
+
+    node = db.query(OrgNode).filter(OrgNode.id == node_id).first()
+    if not node:
+        raise HTTPException(404, "Agent not found")
+
+    personality_ctx = build_personality_context(node)
+    memory_ctx = get_relevant_memories(db, node.company_id)
+
+    system = (
+        f"당신은 {node.role} {node.name}입니다.\n"
+        f"{node.description or '한그룹 계열사의 AI 임직원입니다.'}"
+        f"{personality_ctx}"
+        + (f"\n\n{memory_ctx}" if memory_ctx else "")
+    )
+
+    ai = get_node_ai_provider(db, node)
+    response = ai.chat(
+        messages=[{"role": "user", "content": message}],
+        system=system,
+        max_tokens=600,
+    )
+
+    return {
+        "agent_name": node.name,
+        "agent_role": node.role,
+        "level": node.level,
+        "provider": ai.provider,
+        "model": ai.model,
+        "response": response,
+    }

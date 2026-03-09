@@ -6,6 +6,7 @@ import {
   TrendingUp, Users, Star, Wifi,
 } from 'lucide-react'
 import { chatApi, companiesApi } from '../api/client'
+import WorkFeed from '../components/WorkFeed'
 import { useAppStore } from '../store/useStore'
 import { format } from 'date-fns'
 
@@ -342,6 +343,11 @@ export default function GroupHome() {
           </div>
         </div>
       )}
+
+      {/* ── Autonomous Work Feed ── */}
+      <div className="card p-4">
+        <WorkFeed />
+      </div>
     </div>
   )
 }
