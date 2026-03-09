@@ -9,8 +9,8 @@ type Budget = 'any' | 'low' | 'free'
 const AI_TIER: Record<string, Record<Budget, [string, string]>> = {
   ceo:        { any: ['anthropic', 'claude-sonnet-4-6'],       low: ['openai', 'gpt-4o-mini'], free: ['ollama', 'llama3.2'] },
   chief:      { any: ['anthropic', 'claude-haiku-4-5-20251001'], low: ['openai', 'gpt-4o-mini'], free: ['ollama', 'llama3.2'] },
-  team_lead:  { any: ['openai', 'gpt-4o-mini'],               low: ['ollama', 'llama3.2'],    free: ['mock', 'mock-model'] },
-  specialist: { any: ['ollama', 'llama3.2'],                   low: ['mock', 'mock-model'],   free: ['mock', 'mock-model'] },
+  team_lead:  { any: ['openai', 'gpt-4o-mini'],               low: ['ollama', 'llama3.2'],   free: ['ollama', 'qwen2.5'] },
+  specialist: { any: ['ollama', 'qwen2.5'],                    low: ['ollama', 'qwen2.5'],    free: ['ollama', 'qwen2.5'] },
 }
 
 const INDUSTRY_PREVIEW: Record<string, { level: string; label: string }[]> = {
@@ -46,7 +46,7 @@ function getIndustryKey(industry: string): string {
 }
 
 const BUDGET_OPTIONS: { value: Budget; label: string; sub: string }[] = [
-  { value: 'free', label: '무료',      sub: 'Mock + Ollama (API 키 불필요)' },
+  { value: 'free', label: '무료',      sub: 'Ollama qwen2.5 (API 키 불필요)' },
   { value: 'low',  label: '절약',      sub: 'GPT-4o-mini + Llama 3.2' },
   { value: 'any',  label: '최고 성능', sub: 'Claude Sonnet + GPT-4o' },
 ]

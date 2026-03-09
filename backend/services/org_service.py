@@ -22,12 +22,12 @@ AI_TIER: Dict[str, Dict[str, Tuple[str, str]]] = {
     "team_lead": {
         "any":  ("openai", "gpt-4o-mini"),
         "low":  ("ollama", "llama3.2"),
-        "free": ("mock",   "mock-model"),
+        "free": ("ollama", "qwen2.5"),
     },
     "specialist": {
-        "any":  ("ollama", "llama3.2"),
-        "low":  ("mock",   "mock-model"),
-        "free": ("mock",   "mock-model"),
+        "any":  ("ollama", "qwen2.5"),
+        "low":  ("ollama", "qwen2.5"),
+        "free": ("ollama", "qwen2.5"),
     },
 }
 
