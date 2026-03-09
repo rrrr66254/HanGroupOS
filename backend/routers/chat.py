@@ -21,7 +21,7 @@ from services.org_service import create_company_org
 from services.work_service import (
     build_personality_context, get_relevant_memories, get_node_ai_provider,
 )
-from services.reality_engine import build_reality_context
+from services.reality_engine import build_reality_context, build_api_key_context
 
 
 def _execute_actions(ai_response: str, db: Session, user_id: int) -> tuple:
@@ -51,6 +51,71 @@ def _execute_actions(ai_response: str, db: Session, user_id: int) -> tuple:
 
     clean = pattern.sub("", ai_response).strip()
     return clean, results
+
+def _process_api_key_saves(content: str, db) -> tuple:
+    """
+    <<SAVE_API_KEY:{...}>> 블록을 파싱하여 DB에 저장합니다.
+    반환: (clean_text, save_results)
+    """
+    from models.models import ExternalApiKey
+    from datetime import datetime as _dt
+    results = []
+    pattern = re.compile(r'<<SAVE_API_KEY:(.*?)>>', re.DOTALL)
+
+    for match in pattern.finditer(content):
+        raw = match.group(1).strip()
+        try:
+            data = json.loads(raw)
+            service = data.get("service", "").strip()
+            api_key = data.get("api_key", "").strip()
+            label = data.get("label", service)
+            extra_config = data.get("extra_config", {})
+
+            if not service:
+                results.append("\n\n❌ API 키 저장 실패: service 값이 없습니다.")
+                continue
+
+            # 기존 키가 있으면 업데이트, 없으면 신규 생성
+            existing = db.query(ExternalApiKey).filter(
+                ExternalApiKey.service == service
+            ).first()
+
+            if existing:
+                existing.api_key = api_key
+                existing.label = label or existing.label
+                if extra_config:
+                    merged = dict(existing.extra_config or {})
+                    merged.update(extra_config)
+                    existing.extra_config = merged
+                existing.is_active = True
+                existing.updated_at = _dt.utcnow()
+                action = "업데이트"
+            else:
+                existing = ExternalApiKey(
+                    service=service,
+                    label=label,
+                    api_key=api_key,
+                    extra_config=extra_config,
+                    is_active=True,
+                )
+                db.add(existing)
+                action = "등록"
+
+            db.flush()
+            key_preview = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "****"
+            results.append(
+                f"\n\n✅ **{label} API 키 {action} 완료**\n"
+                f"서비스: `{service}` | 키: `{key_preview}`"
+                + (f" | 추가 설정: {extra_config}" if extra_config else "")
+            )
+        except json.JSONDecodeError as exc:
+            results.append(f"\n\n❌ API 키 저장 실패 (JSON 파싱 오류): {exc}")
+        except Exception as exc:
+            results.append(f"\n\n❌ API 키 저장 실패: {exc}")
+
+    clean = pattern.sub("", content).strip()
+    return clean, results
+
 
 def _process_terminal_requests(content: str, db, company_id, user_id: int) -> tuple:
     """Parse <<TERMINAL_REQUEST:...>> blocks, create DB records, return (clean_text, req_ids)."""
@@ -171,13 +236,16 @@ def send_message(
 
     system_prompt = _get_system(session.session_type)
     system_prompt += build_reality_context(db, session.session_type, session.company_id)
+    if session.session_type == "chairman":
+        system_prompt += build_api_key_context(db)
     ai_response = provider.chat(
         messages, system=system_prompt, session_type=session.session_type
     )
 
-    # Execute any embedded action blocks (e.g. <<CREATE_COMPANY:...>>)
-    clean_response, action_results = _execute_actions(ai_response, db, current_user.id)
-    final_content = clean_response + "".join(action_results)
+    # Execute any embedded action blocks
+    clean_response, api_key_results = _process_api_key_saves(ai_response, db)
+    clean_response, action_results = _execute_actions(clean_response, db, current_user.id)
+    final_content = clean_response + "".join(action_results) + "".join(api_key_results)
 
     # Save AI response
     ai_name = session.agent_name or {
@@ -249,6 +317,8 @@ def stream_message(
     # Inject real DB data into system prompt to prevent AI hallucination
     reality_ctx = build_reality_context(db, session.session_type, session.company_id)
     system_prompt = system_prompt + reality_ctx
+    if session.session_type == "chairman":
+        system_prompt += build_api_key_context(db)
 
     ai_name = session.agent_name or {
         "chairman": "AI 회장",
@@ -354,8 +424,10 @@ def stream_message(
 
         # Save complete AI message (new DB session since original is closed)
         with SessionLocal() as new_db:
-            # Handle terminal requests first
-            content_after_terminal, terminal_req_ids = _process_terminal_requests(full_content, new_db, company_id, user_id)
+            # Handle API key saves first
+            content_after_apikey, api_key_results = _process_api_key_saves(full_content, new_db)
+            # Handle terminal requests
+            content_after_terminal, terminal_req_ids = _process_terminal_requests(content_after_apikey, new_db, company_id, user_id)
             # Handle company creation
             clean, action_results = _execute_actions(content_after_terminal, new_db, user_id)
             # Append terminal request notifications
@@ -364,7 +436,7 @@ def stream_message(
                 tr = new_db.query(TerminalRequest).filter(TerminalRequest.id == rid).first()
                 if tr:
                     terminal_notes += f"\n\n⏳ **터미널 명령 요청 제출됨** (ID #{tr.id})\n`{tr.command}`\n사유: {tr.reason}\n관리자 승인 대기 중..."
-            final = clean + "".join(action_results) + terminal_notes
+            final = clean + "".join(action_results) + terminal_notes + "".join(api_key_results)
             ai_msg = ChatMessage(
                 session_id=session_id,
                 role="assistant",
