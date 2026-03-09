@@ -8,8 +8,16 @@ import {
 } from 'lucide-react'
 import { chatApi, orgApi, companiesApi, modelsApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
+import { useProviderHealth } from '../components/ProviderStatusBanner'
 import type { ChatSession, ChatMessage } from '../types'
 import { format } from 'date-fns'
+
+// Available models per provider (for dropdowns)
+const PROVIDER_MODELS: Record<string, string[]> = {
+  anthropic: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+  openai: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'],
+  ollama: ['qwen2.5', 'llama3.2', 'llama3.2:3b', 'llama3.2:1b', 'qwen2.5:7b', 'qwen2.5:14b', 'gemma3:4b'],
+}
 
 interface OllamaStatus {
   base_url: string
@@ -166,6 +174,12 @@ export default function Chairman() {
   const [ollamaChecking, setOllamaChecking] = useState(true)
   const [ollamaBannerDismissed, setOllamaBannerDismissed] = useState(false)
 
+  // Real-time provider health + model edit state
+  const { health } = useProviderHealth()
+  const [editProvider, setEditProvider] = useState('ollama')
+  const [editModel, setEditModel] = useState('qwen2.5')
+  const [savingModel, setSavingModel] = useState(false)
+
   // KPI state
   const [kpiData, setKpiData] = useState<GroupKPI | null>(null)
   const [kpiLoading, setKpiLoading] = useState(false)
@@ -214,6 +228,28 @@ export default function Chairman() {
       setOllamaChecking(false)
     }
   }, [])
+
+  // Sync edit state when chairman loads
+  useEffect(() => {
+    if (!chairman) return
+    const prov = chairman.ai_provider === 'mock' ? 'ollama' : (chairman.ai_provider || 'ollama')
+    setEditProvider(prov)
+    setEditModel(chairman.ai_model || (prov === 'ollama' ? 'qwen2.5' : ''))
+  }, [chairman?.id, chairman?.ai_provider, chairman?.ai_model])
+
+  const saveChairmanModel = async () => {
+    if (!chairman) return
+    setSavingModel(true)
+    try {
+      await orgApi.updateNode(chairman.id, {
+        name: chairman.name, role: chairman.role, level: chairman.level,
+        ai_provider: editProvider, ai_model: editModel,
+        description: chairman.description || '',
+      })
+      setChairman({ ...chairman, ai_provider: editProvider, ai_model: editModel })
+    } catch {}
+    setSavingModel(false)
+  }
 
   useEffect(() => {
     checkOllama()
@@ -823,31 +859,100 @@ export default function Chairman() {
           >
             👔
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <div className="text-sm font-bold text-slate-100">
               {chairman?.name || 'AI 회장'} · 커맨드센터
             </div>
-            <div className="text-[10px] flex items-center gap-1.5 text-red-400">
-              <div className="w-1.5 h-1.5 rounded-full bg-red-400 blink" />
-              한그룹 최고 의사결정권자
-              {chairman?.ai_model && (
-                <span className="text-slate-600 font-mono ml-1">{chairman.ai_model}</span>
+            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+              <div className="flex items-center gap-1.5 text-[10px] text-red-400">
+                <div className="w-1.5 h-1.5 rounded-full bg-red-400 blink" />
+                한그룹 최고 의사결정권자
+              </div>
+              {/* Real-time model + provider dropdown */}
+              {chairman && (
+                <div className="flex items-center gap-1.5">
+                  {/* Provider select */}
+                  <select
+                    value={editProvider}
+                    onChange={(e) => {
+                      setEditProvider(e.target.value)
+                      const mods = e.target.value === 'ollama'
+                        ? (health?.ollama.models_available.length ? health.ollama.models_available : PROVIDER_MODELS.ollama)
+                        : PROVIDER_MODELS[e.target.value] || []
+                      setEditModel(mods[0] || '')
+                    }}
+                    className="text-[10px] bg-bg-elevated border border-bg-border rounded px-1.5 py-0.5 text-slate-400 font-mono cursor-pointer"
+                  >
+                    {['ollama', 'anthropic', 'openai'].map((p) => {
+                      const connected = p === 'ollama'
+                        ? health?.ollama.status === 'connected'
+                        : health?.[p as 'anthropic' | 'openai']?.status === 'configured'
+                      return <option key={p} value={p}>{p}{connected ? ' ✓' : ' ✗'}</option>
+                    })}
+                  </select>
+                  {/* Model select */}
+                  <select
+                    value={editModel}
+                    onChange={(e) => setEditModel(e.target.value)}
+                    className="text-[10px] bg-bg-elevated border border-bg-border rounded px-1.5 py-0.5 text-slate-400 font-mono cursor-pointer"
+                  >
+                    {(editProvider === 'ollama'
+                      ? [...new Set([...( health?.ollama.models_available || []), ...PROVIDER_MODELS.ollama])]
+                      : PROVIDER_MODELS[editProvider] || []
+                    ).map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  {/* Connection status dot */}
+                  <span
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{
+                      background: (editProvider === 'ollama'
+                        ? health?.ollama.status === 'connected'
+                        : health?.[editProvider as 'anthropic' | 'openai']?.status === 'configured')
+                        ? '#34d399' : '#ef4444',
+                    }}
+                    title={(editProvider === 'ollama'
+                      ? health?.ollama.status === 'connected' ? 'Ollama 연결됨' : 'Ollama 미연결'
+                      : health?.[editProvider as 'anthropic' | 'openai']?.status === 'configured' ? 'API 키 등록됨' : 'API 키 없음'
+                    )}
+                  />
+                  {/* Save button (shows when changed) */}
+                  {(editProvider !== chairman.ai_provider || editModel !== chairman.ai_model) && (
+                    <button
+                      onClick={saveChairmanModel}
+                      disabled={savingModel}
+                      className="text-[9px] px-2 py-0.5 rounded font-medium"
+                      style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)' }}
+                    >
+                      {savingModel ? '…' : '저장'}
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           </div>
-          <div className="ml-auto flex items-center gap-2">
-            {!ollamaChecking && ollamaStatus && (
+          <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+            {/* Unified provider status badge */}
+            {health && (
               <div
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium cursor-pointer"
                 style={
-                  ollamaStatus.reachable
+                  health.ollama.status === 'connected'
                     ? { background: 'rgba(16,185,129,0.1)', color: '#34d399', border: '1px solid rgba(16,185,129,0.2)' }
+                    : health.anthropic.status === 'configured' || health.openai.status === 'configured'
+                    ? { background: 'rgba(99,102,241,0.1)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.2)' }
                     : { background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }
                 }
-                onClick={() => ollamaStatus.reachable ? checkOllama() : navigate('/admin')}
-                title={ollamaStatus.reachable ? `Ollama 연결됨 (${ollamaStatus.base_url})` : 'Ollama 미연결 — 클릭하여 설정'}
+                onClick={() => navigate('/admin')}
+                title="AI 연결 상태"
               >
-                {ollamaStatus.reachable ? <><Wifi size={10} />Ollama</> : <><WifiOff size={10} />Ollama 미연결</>}
+                {health.ollama.status === 'connected'
+                  ? <><Wifi size={10} />Ollama 연결됨</>
+                  : health.anthropic.status === 'configured'
+                  ? <><CheckCircle size={10} />Anthropic</>
+                  : health.openai.status === 'configured'
+                  ? <><CheckCircle size={10} />OpenAI</>
+                  : <><WifiOff size={10} />연결 없음</>
+                }
               </div>
             )}
             {newCompanyId && (

@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { meetingsApi, orgApi, companiesApi } from '../api/client'
+import { orgApi, companiesApi } from '../api/client'
+import { useProviderHealth } from '../components/ProviderStatusBanner'
 import type { OrgNode } from '../types'
+
+// Available models per provider
+const PROVIDER_MODELS: Record<string, string[]> = {
+  anthropic: ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+  openai: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'],
+  ollama: ['qwen2.5', 'llama3.2', 'llama3.2:3b', 'llama3.2:1b', 'qwen2.5:7b', 'qwen2.5:14b', 'gemma3:4b'],
+}
 
 // ── Canvas dimensions ──────────────────────────────────────────────────────────
 const CW = 960
@@ -381,6 +389,15 @@ export default function LiveOffice() {
   const [ensureMsg, setEnsureMsg] = useState<string | null>(null)
   const tickRef = useRef(0)
 
+  // Provider health for model dropdowns
+  const { health } = useProviderHealth()
+
+  // Model edit state for selected agent
+  const [editProvider, setEditProvider] = useState('ollama')
+  const [editModel, setEditModel] = useState('qwen2.5')
+  const [savingModel, setSavingModel] = useState(false)
+  const [savedModelMsg, setSavedModelMsg] = useState<string | null>(null)
+
   // Load companies list
   useEffect(() => {
     companiesApi.list().then((r) => setCompanies(r.data as Company[]))
@@ -463,6 +480,33 @@ export default function LiveOffice() {
   }
 
   const selData = selectedAgent ? agents.find((a) => a.id === selectedAgent.id) : null
+
+  // Sync model edit state when selection changes
+  useEffect(() => {
+    if (!selData) return
+    const prov = selData.ai_provider === 'mock' ? 'ollama' : (selData.ai_provider || 'ollama')
+    setEditProvider(prov)
+    setEditModel(selData.ai_model !== '—' ? selData.ai_model : (prov === 'ollama' ? 'qwen2.5' : ''))
+  }, [selData?.id])
+
+  const saveAgentModel = async () => {
+    if (!selData) return
+    setSavingModel(true)
+    try {
+      const agent = agents.find((a) => a.id === selData.id)
+      if (!agent) return
+      await orgApi.updateNode(selData.id, {
+        name: agent.name, role: agent.role, level: agent.level,
+        ai_provider: editProvider, ai_model: editModel, description: '',
+      })
+      setAgents((prev) => prev.map((a) =>
+        a.id === selData.id ? { ...a, ai_provider: editProvider, ai_model: editModel } : a
+      ))
+      setSavedModelMsg('저장됨')
+    } catch { setSavedModelMsg('오류') }
+    setSavingModel(false)
+    setTimeout(() => setSavedModelMsg(null), 2000)
+  }
   const officeLabel = selectedId === 'chairman'
     ? '🏛 회장실'
     : `🏢 ${companies.find((c) => c.id === selectedId)?.name || ''}`
@@ -607,21 +651,84 @@ export default function LiveOffice() {
             </div>
             <button onClick={() => setSelectedAgent(null)} className="text-slate-600 hover:text-slate-300 text-xs px-2">✕</button>
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div className="bg-bg-elevated rounded-lg px-3 py-2">
-              <div className="text-[9px] text-slate-500 mb-1">AI 프로바이더</div>
-              <div className="text-xs font-mono text-brand-light">{selData.ai_provider}</div>
+          <div className="space-y-2">
+            {/* Model change row */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="text-[9px] text-slate-500 w-14">AI 모델</div>
+              {/* Provider select */}
+              <select
+                value={editProvider}
+                onChange={(e) => {
+                  setEditProvider(e.target.value)
+                  const mods = e.target.value === 'ollama'
+                    ? [...new Set([...(health?.ollama.models_available || []), ...PROVIDER_MODELS.ollama])]
+                    : PROVIDER_MODELS[e.target.value] || []
+                  setEditModel(mods[0] || '')
+                }}
+                className="text-[10px] bg-bg-base border border-bg-border rounded px-2 py-1 text-slate-300 font-mono cursor-pointer"
+              >
+                {['ollama', 'anthropic', 'openai'].map((p) => {
+                  const ok = p === 'ollama'
+                    ? health?.ollama.status === 'connected'
+                    : health?.[p as 'anthropic' | 'openai']?.status === 'configured'
+                  return <option key={p} value={p}>{p}{ok ? ' ✓' : ' ✗'}</option>
+                })}
+              </select>
+              {/* Model select */}
+              <select
+                value={editModel}
+                onChange={(e) => setEditModel(e.target.value)}
+                className="flex-1 text-[10px] bg-bg-base border border-bg-border rounded px-2 py-1 text-slate-300 font-mono cursor-pointer"
+              >
+                {(editProvider === 'ollama'
+                  ? [...new Set([...(health?.ollama.models_available || []), ...PROVIDER_MODELS.ollama])]
+                  : PROVIDER_MODELS[editProvider] || []
+                ).map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+              {/* Connection status */}
+              <span
+                className="w-2 h-2 rounded-full flex-shrink-0"
+                style={{
+                  background: (editProvider === 'ollama'
+                    ? health?.ollama.status === 'connected'
+                    : health?.[editProvider as 'anthropic' | 'openai']?.status === 'configured')
+                    ? '#34d399' : '#ef4444',
+                }}
+              />
+              {/* Save button */}
+              <button
+                onClick={saveAgentModel}
+                disabled={savingModel || (editProvider === (selData.ai_provider === 'mock' ? 'ollama' : selData.ai_provider) && editModel === selData.ai_model)}
+                className="text-[9px] px-2.5 py-1 rounded font-medium transition-colors"
+                style={{ background: 'rgba(99,102,241,0.2)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)' }}
+              >
+                {savingModel ? '…' : '저장'}
+              </button>
+              {savedModelMsg && <span className="text-[9px] text-emerald-400">{savedModelMsg}</span>}
             </div>
-            <div className="bg-bg-elevated rounded-lg px-3 py-2">
-              <div className="text-[9px] text-slate-500 mb-1">AI 모델</div>
-              <div className="text-xs font-mono text-emerald-400 truncate">{selData.ai_model}</div>
-            </div>
-            <div className="bg-bg-elevated rounded-lg px-3 py-2">
-              <div className="text-[9px] text-slate-500 mb-1">현재 상태</div>
-              <div className="text-xs">
-                {selData.mode === 'working' ? '🟢 작업 중'
-                  : selData.mode === 'thinking' ? '🔵 분석 중'
-                  : selData.mode === 'coffee' ? '☕ 휴식' : '⚪ 대기'}
+            {/* Status row */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-bg-elevated rounded-lg px-3 py-2">
+                <div className="text-[9px] text-slate-500 mb-1">현재 상태</div>
+                <div className="text-xs">
+                  {selData.mode === 'working' ? '🟢 작업 중'
+                    : selData.mode === 'thinking' ? '🔵 분석 중'
+                    : selData.mode === 'coffee' ? '☕ 휴식' : '⚪ 대기'}
+                </div>
+              </div>
+              <div className="bg-bg-elevated rounded-lg px-3 py-2">
+                <div className="text-[9px] text-slate-500 mb-1">연결 상태</div>
+                <div className="text-[10px] font-mono" style={{
+                  color: (editProvider === 'ollama'
+                    ? health?.ollama.status === 'connected'
+                    : health?.[editProvider as 'anthropic' | 'openai']?.status === 'configured')
+                    ? '#34d399' : '#f87171',
+                }}>
+                  {(editProvider === 'ollama'
+                    ? health?.ollama.status === 'connected' ? '✓ 연결됨' : '✗ 미연결'
+                    : health?.[editProvider as 'anthropic' | 'openai']?.status === 'configured' ? '✓ 등록됨' : '✗ 키 없음'
+                  )}
+                </div>
               </div>
             </div>
           </div>

@@ -159,6 +159,21 @@ def ensure_all_specialists(
     return {"created": total}
 
 
+@router.post("/migrate-mock")
+def migrate_mock_nodes(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Replace 'mock' ai_provider with 'ollama' on all org nodes."""
+    nodes = db.query(OrgNode).filter(OrgNode.ai_provider == "mock").all()
+    for n in nodes:
+        n.ai_provider = "ollama"
+        if not n.ai_model:
+            n.ai_model = "qwen2.5"
+    db.commit()
+    return {"migrated": len(nodes)}
+
+
 @router.post("/templates", response_model=OrgTemplateOut)
 def create_template(
     template_in: OrgTemplateCreate,

@@ -1,6 +1,7 @@
 import { useLocation, useNavigate } from 'react-router-dom'
 import { LogOut, User, Bell, Sun, Moon } from 'lucide-react'
 import { useAuthStore, useAppStore } from '../store/useStore'
+import ProviderStatusBanner from './ProviderStatusBanner'
 
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': '대시보드',
@@ -37,6 +38,8 @@ export default function Header() {
       </div>
 
       <div className="flex items-center gap-3">
+        <ProviderStatusBanner />
+        <div className="h-4 w-px bg-bg-border" />
         <button
           onClick={toggleTheme}
           className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-bg-elevated transition-colors"

@@ -175,17 +175,57 @@ def providers_health(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Returns real-time connection status for all providers."""
+    import httpx
+    from core.config import settings
+
     configs = (
         db.query(ProviderConfig)
         .filter(ProviderConfig.user_id == current_user.id, ProviderConfig.is_active == True)
         .all()
     )
-    result = {"mock": {"status": "always_available", "model": "mock-model"}}
-    for c in configs:
-        result[c.provider] = {
-            "status": "configured" if (c.api_key or c.provider in ("ollama", "mock")) else "no_api_key",
-            "model": c.model_override or "default",
+    config_map = {c.provider: c for c in configs}
+
+    # ── Ollama: actually ping the server ──────────────────────────────────────
+    ollama_cfg = config_map.get("ollama")
+    base_url = (
+        (ollama_cfg.base_url if ollama_cfg and ollama_cfg.base_url else None)
+        or settings.OLLAMA_BASE_URL
+        or "http://localhost:11434"
+    )
+    model = (
+        (ollama_cfg.model_override if ollama_cfg and ollama_cfg.model_override else None)
+        or settings.OLLAMA_MODEL
+        or "qwen2.5"
+    )
+
+    reachable = False
+    models_available: list = []
+    try:
+        r = httpx.get(f"{base_url}/api/tags", timeout=3.0)
+        if r.status_code == 200:
+            reachable = True
+            models_available = [m["name"] for m in r.json().get("models", [])]
+    except Exception:
+        pass
+
+    result: dict = {
+        "ollama": {
+            "status": "connected" if reachable else "disconnected",
+            "model": model,
+            "models_available": models_available,
+            "base_url": base_url,
         }
+    }
+
+    # ── API-based providers ────────────────────────────────────────────────────
+    for provider in ["anthropic", "openai", "gemini"]:
+        cfg = config_map.get(provider)
+        result[provider] = {
+            "status": "configured" if (cfg and cfg.api_key) else "no_api_key",
+            "model": cfg.model_override if cfg else "",
+        }
+
     return result
 
 

@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { useAuthStore, useAppStore } from './store/useStore'
 import Layout from './components/Layout'
 import OllamaSetupNotice from './components/OllamaSetupNotice'
+import { startHealthPoller } from './components/ProviderStatusBanner'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Chairman from './pages/Chairman'
@@ -30,6 +31,8 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   const theme = useAppStore((s) => s.theme)
+  const token = useAuthStore((s) => s.token)
+  useEffect(() => { if (token) startHealthPoller() }, [token])
   useEffect(() => {
     if (theme === 'light') {
       document.documentElement.classList.add('light')

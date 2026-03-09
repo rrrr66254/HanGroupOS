@@ -71,6 +71,7 @@ export const orgApi = {
   rejectProposal: (id: number) => api.post(`/org/proposals/${id}/reject`),
   ensureSpecialists: (companyId: number) => api.post(`/org/ensure-specialists/${companyId}`),
   ensureAllSpecialists: () => api.post('/org/ensure-all-specialists'),
+  migrateMock: () => api.post('/org/migrate-mock'),
 }
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
