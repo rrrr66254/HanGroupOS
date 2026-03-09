@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from core.database import get_db, SessionLocal
-from core.auth import get_current_user
+from core.security import get_current_user
 from models.models import WorkLog, AgentMessage, User, Company, OrgNode
 from services.work_service import (
     run_work_cycle, run_work_cycle_stream,
