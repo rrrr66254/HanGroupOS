@@ -4,6 +4,7 @@ import {
   Send, Loader2, ArrowRight, CheckCircle, Building2,
   Eye, X, Plus, ChevronRight, WifiOff, Wifi, Settings,
   MessageSquare, Zap, AlertCircle, BarChart2, Users,
+  Clock, Trophy, FileText, Coffee,
 } from 'lucide-react'
 import { chatApi, orgApi, companiesApi, modelsApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
@@ -66,7 +67,38 @@ interface GroupKPI {
   totals: { total_companies: number; total_ai_messages: number; avg_ai_score: number }
 }
 
-type PanelMode = 'companies' | 'delegation' | 'preview' | 'kpi'
+interface TimelineEvent {
+  type: string
+  icon: string
+  title: string
+  description: string
+  created_at: string
+}
+
+interface MeetingSpeech {
+  ceo_name: string
+  company: string
+  industry: string
+  speech: string
+}
+
+interface MeetingResult {
+  topic: string
+  transcript: MeetingSpeech[]
+  minutes: string
+  participants: { company: string; ceo_name: string }[]
+}
+
+interface PerformanceRanking {
+  name: string
+  industry: string
+  ai_score: number
+  ai_messages: number
+  org_nodes: number
+  strategies: number
+}
+
+type PanelMode = 'companies' | 'delegation' | 'preview' | 'kpi' | 'feed'
 
 const QUICK_PROMPTS = [
   '현재 계열사 현황을 보고해줘',
@@ -110,6 +142,16 @@ export default function Chairman() {
   // KPI state
   const [kpiData, setKpiData] = useState<GroupKPI | null>(null)
   const [kpiLoading, setKpiLoading] = useState(false)
+  const [perfReport, setPerfReport] = useState<{ rankings: PerformanceRanking[]; analysis: string } | null>(null)
+  const [perfLoading, setPerfLoading] = useState(false)
+
+  // Timeline feed state
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([])
+  const [timelineLoading, setTimelineLoading] = useState(false)
+
+  // Multi-CEO meeting state
+  const [meetingResult, setMeetingResult] = useState<MeetingResult | null>(null)
+  const [meetingVisible, setMeetingVisible] = useState(false)
 
   // CEO direct chat state
   const [ceoChatCompany, setCeoChatCompany] = useState<Company | null>(null)
@@ -249,6 +291,75 @@ export default function Chairman() {
       setKpiData(res.data as GroupKPI)
     } catch { /* ignore */ } finally {
       setKpiLoading(false)
+    }
+  }
+
+  const loadPerformanceReport = async () => {
+    setPerfLoading(true)
+    try {
+      const res = await chatApi.performanceReport()
+      setPerfReport(res.data as { rankings: PerformanceRanking[]; analysis: string })
+    } catch { /* ignore */ } finally {
+      setPerfLoading(false)
+    }
+  }
+
+  // ── Timeline feed ─────────────────────────────────────────────────────────
+  const loadTimeline = async () => {
+    setTimelineLoading(true)
+    try {
+      const res = await chatApi.timeline(30)
+      setTimelineEvents(res.data as TimelineEvent[])
+    } catch { /* ignore */ } finally {
+      setTimelineLoading(false)
+    }
+  }
+
+  // ── Multi-CEO meeting ──────────────────────────────────────────────────────
+  const handleMultiCeoMeeting = async (meetingCompanies: Company[], topic: string) => {
+    if (delegTimerRef.current) clearInterval(delegTimerRef.current)
+    setBriefingAnswer(null)
+
+    // Animate delegation steps for all participants
+    const animSteps: DelegationStep[] = [
+      { from: '회장', to: '전체 CEO', message: `회의 소집: ${topic.slice(0, 24)}…`, status: 'active' },
+      ...meetingCompanies.map((c) => ({
+        from: `${c.name} CEO`, to: '회의실', message: '발언 준비 중', status: 'pending' as const,
+      })),
+      { from: '전체 CEO', to: '회장', message: '회의록 보고', status: 'pending' },
+    ]
+    setDelegationSteps(animSteps)
+    setPanelMode('delegation')
+
+    let step = 1
+    delegTimerRef.current = setInterval(() => {
+      setDelegationSteps((prev) =>
+        prev.map((s, i) => ({ ...s, status: i < step ? 'done' : i === step ? 'active' : 'pending' }))
+      )
+      step++
+      if (step >= animSteps.length && delegTimerRef.current) clearInterval(delegTimerRef.current)
+    }, 1800)
+
+    try {
+      const res = await chatApi.multiCeoMeeting(meetingCompanies.map((c) => c.id), topic)
+      const data = res.data as MeetingResult
+      if (delegTimerRef.current) clearInterval(delegTimerRef.current)
+      setDelegationSteps(animSteps.map((s) => ({ ...s, status: 'done' as const })))
+      setBriefingAnswer(data.minutes)
+      setMeetingResult(data)
+      setMeetingVisible(true)
+
+      const syntheticMsg: ChatMessage = {
+        id: Date.now(),
+        session_id: session?.id ?? 0,
+        role: 'assistant',
+        content: `📋 [경영진 회의 결과 — ${topic}]\n\n${data.minutes}`,
+        sender_name: 'AI 회의 조정관',
+        created_at: new Date().toISOString(),
+      }
+      setMessages((prev) => [...prev, syntheticMsg])
+    } catch {
+      if (delegTimerRef.current) clearInterval(delegTimerRef.current)
     }
   }
 
@@ -428,10 +539,20 @@ export default function Chairman() {
     }
     setMessages((prev) => [...prev, tempUser])
 
-    // Collaboration path — two company names + collaboration keywords
-    const collabKeywords = ['협력', '협업', '함께', '공동', '같이', '연합', '합작', '같이']
-    const isCollab = collabKeywords.some((kw) => content.includes(kw))
     const mentionedCos = companies.filter((c) => content.includes(c.name))
+
+    // Multi-CEO meeting path
+    const meetingKeywords = ['회의', '소집', '경영진', '긴급', '전략 회의', '임원']
+    const isMeeting = meetingKeywords.some((kw) => content.includes(kw))
+    if (isMeeting && mentionedCos.length >= 2) {
+      await handleMultiCeoMeeting(mentionedCos, content)
+      setLoading(false)
+      return
+    }
+
+    // Collaboration path — two company names + collaboration keywords
+    const collabKeywords = ['협력', '협업', '함께', '공동', '같이', '연합', '합작']
+    const isCollab = collabKeywords.some((kw) => content.includes(kw))
     if (isCollab && mentionedCos.length >= 2) {
       await handleCollaboration(mentionedCos[0], mentionedCos[1], content)
       setLoading(false)
@@ -783,31 +904,27 @@ export default function Chairman() {
       {/* ── Right Live Panel ─────────────────────────────────────────────────── */}
       <div className="w-72 flex-shrink-0 flex flex-col border-l border-bg-border bg-bg-card overflow-hidden">
         {/* Panel tabs */}
-        <div className="flex border-b border-bg-border flex-shrink-0">
-          <button
-            onClick={() => setPanelMode('companies')}
-            className={`flex-1 py-2 text-[10px] font-medium transition-colors ${panelMode === 'companies' ? 'text-brand-light border-b-2 border-brand' : 'text-slate-500 hover:text-slate-300'}`}
-          >
-            <span className="flex items-center justify-center gap-1"><Building2 size={10} />계열사</span>
-          </button>
-          <button
-            onClick={() => { setPanelMode('kpi'); if (!kpiData) loadKpi() }}
-            className={`flex-1 py-2 text-[10px] font-medium transition-colors ${panelMode === 'kpi' ? 'text-brand-light border-b-2 border-brand' : 'text-slate-500 hover:text-slate-300'}`}
-          >
-            <span className="flex items-center justify-center gap-1"><BarChart2 size={10} />KPI</span>
-          </button>
-          <button
-            onClick={() => setPanelMode('delegation')}
-            className={`flex-1 py-2 text-[10px] font-medium transition-colors ${panelMode === 'delegation' ? 'text-brand-light border-b-2 border-brand' : 'text-slate-500 hover:text-slate-300'}`}
-          >
-            <span className="flex items-center justify-center gap-1"><ArrowRight size={10} />지시체인</span>
-          </button>
+        <div className="flex border-b border-bg-border flex-shrink-0 text-[9px]">
+          {([
+            { mode: 'companies', icon: Building2, label: '계열사', onClick: () => setPanelMode('companies') },
+            { mode: 'kpi', icon: Trophy, label: 'KPI', onClick: () => { setPanelMode('kpi'); if (!kpiData) loadKpi() } },
+            { mode: 'feed', icon: Clock, label: '피드', onClick: () => { setPanelMode('feed'); if (!timelineEvents.length) loadTimeline() } },
+            { mode: 'delegation', icon: ArrowRight, label: '체인', onClick: () => setPanelMode('delegation') },
+          ] as const).map(({ mode, icon: Icon, label, onClick }) => (
+            <button
+              key={mode}
+              onClick={onClick}
+              className={`flex-1 py-2 font-medium transition-colors ${panelMode === mode ? 'text-brand-light border-b-2 border-brand' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+              <span className="flex items-center justify-center gap-0.5"><Icon size={9} />{label}</span>
+            </button>
+          ))}
           {previewCompany && (
             <button
               onClick={() => setPanelMode('preview')}
-              className={`flex-1 py-2 text-[10px] font-medium transition-colors ${panelMode === 'preview' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-amber-500 hover:text-amber-300'}`}
+              className={`flex-1 py-2 font-medium transition-colors ${panelMode === 'preview' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-amber-500 hover:text-amber-300'}`}
             >
-              <span className="flex items-center justify-center gap-1"><AlertCircle size={10} />승인</span>
+              <span className="flex items-center justify-center gap-0.5"><AlertCircle size={9} />승인</span>
             </button>
           )}
         </div>
@@ -894,6 +1011,62 @@ export default function Chairman() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* ── Timeline feed panel ── */}
+          {panelMode === 'feed' && (
+            <>
+              <div className="flex items-center justify-between px-1 mb-2">
+                <div className="text-[10px] text-slate-500 uppercase tracking-widest font-mono">그룹 활동 피드</div>
+                <button
+                  onClick={loadTimeline}
+                  className="text-[9px] text-slate-600 hover:text-slate-400 flex items-center gap-0.5"
+                >
+                  {timelineLoading ? <Loader2 size={9} className="animate-spin" /> : <Clock size={9} />}
+                  새로고침
+                </button>
+              </div>
+
+              {timelineLoading && !timelineEvents.length && (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 size={16} className="animate-spin text-slate-600" />
+                </div>
+              )}
+
+              {!timelineLoading && timelineEvents.length === 0 && (
+                <div className="text-center py-10 space-y-2">
+                  <Clock size={20} className="text-slate-700 mx-auto" />
+                  <div className="text-[11px] text-slate-600">아직 활동 기록이 없습니다</div>
+                </div>
+              )}
+
+              <div className="space-y-0.5">
+                {timelineEvents.map((ev, i) => {
+                  const iconBg =
+                    ev.type === 'company_created' ? 'rgba(16,185,129,0.15)' :
+                    ev.type === 'ceo_briefing' ? 'rgba(99,102,241,0.15)' :
+                    ev.type === 'directive' ? 'rgba(226,76,75,0.15)' :
+                    'rgba(245,158,11,0.15)'
+                  return (
+                    <div key={i} className="flex gap-2 py-1.5">
+                      <div
+                        className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 text-[11px]"
+                        style={{ background: iconBg }}
+                      >
+                        {ev.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[10px] font-medium text-slate-300 truncate">{ev.title}</div>
+                        <div className="text-[9px] text-slate-600 truncate mt-0.5">{ev.description}</div>
+                        <div className="text-[8px] text-slate-700 mt-0.5">
+                          {format(new Date(ev.created_at), 'MM/dd HH:mm')}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
           )}
 
           {/* ── KPI panel ── */}
@@ -994,6 +1167,60 @@ export default function Chairman() {
                   )}
                 </>
               )}
+
+              {/* Performance report section */}
+              <div className="mt-3">
+                <button
+                  onClick={loadPerformanceReport}
+                  disabled={perfLoading}
+                  className="w-full py-2 rounded-lg text-[10px] font-medium flex items-center justify-center gap-1.5 transition-colors"
+                  style={{
+                    background: perfLoading ? 'rgba(99,102,241,0.05)' : 'rgba(99,102,241,0.1)',
+                    color: '#a5b4fc',
+                    border: '1px solid rgba(99,102,241,0.25)',
+                  }}
+                >
+                  {perfLoading ? <Loader2 size={10} className="animate-spin" /> : <FileText size={10} />}
+                  AI 주간 성과 보고서 생성
+                </button>
+
+                {perfReport && (
+                  <div
+                    className="mt-2 rounded-lg p-3 space-y-2"
+                    style={{ background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.15)' }}
+                  >
+                    <div className="text-[9px] text-indigo-400 font-medium flex items-center gap-1 mb-1">
+                      <Trophy size={9} />주간 성과 랭킹
+                    </div>
+                    {perfReport.rankings.map((r, i) => (
+                      <div key={r.name} className="flex items-center gap-1.5">
+                        <span className="text-[11px] flex-shrink-0">
+                          {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[9px] font-medium text-slate-300 truncate">{r.name}</div>
+                          <div className="h-0.5 rounded-full bg-bg-border mt-0.5 overflow-hidden">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${r.ai_score}%`,
+                                background: i === 0 ? '#fbbf24' : i === 1 ? '#94a3b8' : i === 2 ? '#b45309' : '#6366f1',
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-bold text-slate-400 flex-shrink-0">{r.ai_score}</span>
+                      </div>
+                    ))}
+                    <div
+                      className="text-[9px] text-slate-500 leading-relaxed mt-2 pt-2 line-clamp-8"
+                      style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}
+                    >
+                      {perfReport.analysis}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {!kpiData && !kpiLoading && (
                 <div className="text-center py-10 space-y-2">
@@ -1253,9 +1480,126 @@ export default function Chairman() {
         </div>
       )}
 
+      {/* ── Multi-CEO Meeting Modal ─────────────────────────────────────────── */}
+      {meetingVisible && meetingResult && (
+        <div
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(0,0,0,0.7)',
+            zIndex: 300,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setMeetingVisible(false) }}
+        >
+          <div
+            style={{
+              width: 580, maxHeight: '85vh',
+              background: 'linear-gradient(160deg, #0a0f1e 0%, #0f172a 60%, #1a1035 100%)',
+              borderRadius: 18,
+              border: '1px solid rgba(99,102,241,0.4)',
+              boxShadow: '0 32px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(99,102,241,0.15)',
+              display: 'flex', flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Meeting header */}
+            <div
+              className="flex items-center gap-3 px-5 py-4 flex-shrink-0"
+              style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+            >
+              <div style={{ fontSize: 22 }}>🏛️</div>
+              <div className="flex-1">
+                <div className="text-sm font-bold text-slate-100">한그룹 경영진 회의</div>
+                <div className="text-[10px] text-indigo-400 mt-0.5 truncate">{meetingResult.topic}</div>
+              </div>
+              <div className="flex items-center gap-1.5 mr-2">
+                {meetingResult.participants.map((p) => (
+                  <div
+                    key={p.company}
+                    className="text-[9px] px-1.5 py-0.5 rounded text-indigo-300"
+                    style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.2)' }}
+                    title={`${p.company} CEO`}
+                  >
+                    {p.company.slice(0, 4)}
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setMeetingVisible(false)} className="text-slate-600 hover:text-slate-300">
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Transcript + Minutes */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {/* Transcript */}
+              <div>
+                <div className="text-[10px] text-slate-500 uppercase tracking-widest font-mono mb-3">
+                  발언 기록
+                </div>
+                <div className="space-y-3">
+                  {meetingResult.transcript.map((t, i) => (
+                    <div key={i} className="flex gap-2.5">
+                      <div
+                        className="w-7 h-7 rounded-lg flex items-center justify-center text-xs flex-shrink-0"
+                        style={{ background: `hsl(${(i * 60 + 220) % 360},40%,20%)`, border: `1px solid hsl(${(i * 60 + 220) % 360},40%,35%)` }}
+                      >
+                        🤵
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-[10px] font-semibold text-slate-300 mb-1">
+                          {t.ceo_name}
+                          <span className="text-slate-600 font-normal ml-1">({t.company})</span>
+                        </div>
+                        <div
+                          className="text-[11px] text-slate-400 leading-relaxed rounded-lg p-2.5"
+                          style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}
+                        >
+                          {t.speech}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Minutes */}
+              <div
+                className="rounded-xl p-4"
+                style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.2)' }}
+              >
+                <div className="text-[10px] text-indigo-400 uppercase tracking-widest font-mono mb-2 flex items-center gap-1.5">
+                  <Coffee size={9} />공식 회의록
+                </div>
+                <pre className="text-[11px] text-slate-300 leading-relaxed whitespace-pre-wrap font-sans">
+                  {meetingResult.minutes}
+                </pre>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div
+              className="flex items-center justify-between px-5 py-3 flex-shrink-0"
+              style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}
+            >
+              <div className="text-[10px] text-slate-600">
+                참석: {meetingResult.participants.map((p) => p.ceo_name).join(' · ')}
+              </div>
+              <button
+                onClick={() => setMeetingVisible(false)}
+                className="text-xs px-4 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
+                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
         .line-clamp-6 { display:-webkit-box; -webkit-line-clamp:6; -webkit-box-orient:vertical; overflow:hidden; }
+        .line-clamp-8 { display:-webkit-box; -webkit-line-clamp:8; -webkit-box-orient:vertical; overflow:hidden; }
       `}</style>
     </div>
   )

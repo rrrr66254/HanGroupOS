@@ -11,6 +11,7 @@ from schemas.schemas import (
     ChatSessionCreate, ChatSessionOut,
     ChatMessageOut, ChatRequest, CompanyQueryRequest,
     ConfirmCompanyRequest, BriefCeoRequest, CollaborateRequest,
+    MultiCeoMeetingRequest,
 )
 from services.ai_provider import (
     get_provider_from_db,
@@ -563,6 +564,170 @@ def collaborate(
             {"from": ceo_a_name, "to": "회장", "message": "최종 공동 실행 계획 보고", "status": "done"},
         ],
     }
+
+
+@router.get("/timeline")
+def timeline(
+    limit: int = 30,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Aggregate recent events across the group into a chronological activity feed."""
+    from datetime import timezone
+    events = []
+
+    # Company creations
+    for c in db.query(Company).order_by(Company.created_at.desc()).limit(15).all():
+        events.append({
+            "type": "company_created", "icon": "🏢",
+            "title": f"계열사 설립: {c.name}",
+            "description": f"{c.industry}" + (f" · {c.description[:40]}" if c.description else ""),
+            "created_at": c.created_at.isoformat(),
+        })
+
+    # CEO sessions (new CEO briefings)
+    for s in db.query(ChatSession).filter(ChatSession.session_type == "ceo").order_by(ChatSession.created_at.desc()).limit(15).all():
+        co_name = ""
+        if s.company_id:
+            co = db.query(Company).filter(Company.id == s.company_id).first()
+            co_name = co.name if co else ""
+        events.append({
+            "type": "ceo_briefing", "icon": "🤵",
+            "title": f"CEO 브리핑: {co_name}",
+            "description": s.title or "CEO 세션 시작",
+            "created_at": s.created_at.isoformat(),
+        })
+
+    # Chairman directives (user messages in chairman sessions)
+    rows = (
+        db.query(ChatMessage)
+        .join(ChatSession, ChatMessage.session_id == ChatSession.id)
+        .filter(ChatSession.session_type == "chairman", ChatMessage.role == "user")
+        .order_by(ChatMessage.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    for m in rows:
+        snippet = m.content[:55] + "…" if len(m.content) > 55 else m.content
+        events.append({
+            "type": "directive", "icon": "👔",
+            "title": "회장 지시",
+            "description": snippet,
+            "created_at": m.created_at.isoformat(),
+        })
+
+    # Strategy items
+    for s in db.query(StrategyItem).order_by(StrategyItem.created_at.desc()).limit(10).all():
+        events.append({
+            "type": "strategy", "icon": "🎯",
+            "title": f"전략 수립: {s.title}",
+            "description": f"{s.item_type} · 우선순위 {s.priority}",
+            "created_at": s.created_at.isoformat(),
+        })
+
+    events.sort(key=lambda e: e["created_at"], reverse=True)
+    return events[:limit]
+
+
+@router.post("/multi-ceo-meeting")
+def multi_ceo_meeting(
+    req: MultiCeoMeetingRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Simulate a multi-CEO strategy meeting and return transcript + minutes."""
+    companies = [db.query(Company).filter(Company.id == int(cid)).first() for cid in req.company_ids]
+    companies = [c for c in companies if c]
+    if len(companies) < 2:
+        raise HTTPException(400, "최소 2개 회사가 필요합니다")
+
+    participants = []
+    for company in companies:
+        node = db.query(OrgNode).filter(OrgNode.company_id == company.id, OrgNode.level == "ceo").first()
+        participants.append((company, node.name if node else f"{company.name} CEO"))
+
+    provider = get_provider_from_db(db, current_user.id)
+
+    context_header = (
+        f"한그룹 회장 주재 긴급 경영진 회의\n"
+        f"안건: {req.topic}\n"
+        f"참석자: {', '.join(f'{name}({co.name})' for co, name in participants)}\n\n"
+    )
+    transcript = []
+    accumulated = ""
+
+    for co, ceo_name in participants:
+        prompt = (
+            f"{context_header}"
+            f"{'이전 발언:\n' + accumulated + chr(10) if accumulated else ''}"
+            f"[{ceo_name} / {co.name} CEO] 발언 순서입니다. "
+            f"안건에 대한 귀사의 입장과 제안을 3~4문장으로 간결하게 발표해주세요."
+        )
+        speech = provider.chat([{"role": "user", "content": prompt}], system=CEO_SYSTEM, session_type="ceo")
+        transcript.append({"ceo_name": ceo_name, "company": co.name, "industry": co.industry, "speech": speech})
+        accumulated += f"[{ceo_name}]: {speech}\n\n"
+
+    minutes_prompt = (
+        f"다음 경영진 회의 내용을 바탕으로 공식 회의록을 작성해주세요.\n\n"
+        f"안건: {req.topic}\n\n발언 내용:\n{accumulated}\n\n"
+        f"주요 결정사항, 각사 역할 분담, 후속 액션 아이템을 포함하여 "
+        f"구체적이고 실행 가능한 회의록을 작성해주세요."
+    )
+    minutes = provider.chat([{"role": "user", "content": minutes_prompt}], system=CHAIRMAN_SYSTEM, session_type="chairman")
+
+    return {
+        "topic": req.topic,
+        "transcript": transcript,
+        "minutes": minutes,
+        "participants": [{"company": co.name, "ceo_name": name} for co, name in participants],
+    }
+
+
+@router.get("/performance-report")
+def performance_report(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate AI-powered weekly performance ranking and analysis for all companies."""
+    companies = db.query(Company).filter(Company.status == "active").all()
+    rankings = []
+    for company in companies:
+        sessions = db.query(ChatSession).filter(ChatSession.company_id == company.id).all()
+        session_ids = [s.id for s in sessions]
+        msg_count = (
+            db.query(ChatMessage).filter(ChatMessage.session_id.in_(session_ids)).count()
+            if session_ids else 0
+        )
+        node_count = db.query(OrgNode).filter(OrgNode.company_id == company.id).count()
+        strategy_count = db.query(StrategyItem).filter(StrategyItem.company_id == company.id).count()
+        ai_score = min(100, msg_count * 5 + node_count * 3 + strategy_count * 10)
+        rankings.append({
+            "name": company.name,
+            "industry": company.industry,
+            "ai_messages": msg_count,
+            "org_nodes": node_count,
+            "strategies": strategy_count,
+            "ai_score": ai_score,
+        })
+
+    rankings.sort(key=lambda x: x["ai_score"], reverse=True)
+
+    analysis = "계열사 데이터가 없습니다."
+    if rankings:
+        report_lines = "\n".join(
+            f"{i+1}위. {r['name']} ({r['industry']}): 점수 {r['ai_score']}, "
+            f"AI 대화 {r['ai_messages']}회, 조직 {r['org_nodes']}명, 전략 {r['strategies']}개"
+            for i, r in enumerate(rankings)
+        )
+        prompt = (
+            f"다음은 한그룹 계열사 AI 활동 주간 현황입니다.\n\n{report_lines}\n\n"
+            f"각 계열사의 성과를 분석하고 강점과 개선점을 포함한 주간 성과 보고서를 작성해주세요. "
+            f"상위 계열사의 성공 요인과 하위 계열사에 대한 구체적인 권고사항을 포함해주세요."
+        )
+        provider = get_provider_from_db(db, current_user.id)
+        analysis = provider.chat([{"role": "user", "content": prompt}], system=CHAIRMAN_SYSTEM, session_type="chairman")
+
+    return {"rankings": rankings, "analysis": analysis}
 
 
 @router.delete("/sessions/{session_id}")

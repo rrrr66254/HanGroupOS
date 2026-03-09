@@ -86,6 +86,10 @@ export const chatApi = {
   groupKpi: () => api.get('/chat/group-kpi'),
   collaborate: (companyAId: number, companyBId: number, task: string) =>
     api.post('/chat/collaborate', { company_a_id: companyAId, company_b_id: companyBId, task }),
+  timeline: (limit?: number) => api.get('/chat/timeline', { params: { limit } }),
+  multiCeoMeeting: (companyIds: number[], topic: string) =>
+    api.post('/chat/multi-ceo-meeting', { company_ids: companyIds, topic }),
+  performanceReport: () => api.get('/chat/performance-report'),
   suggestions: (companyId?: number) =>
     api.get('/chat/suggestions', { params: { company_id: companyId } }),
   dismissSuggestion: (id: number) => api.post(`/chat/suggestions/${id}/dismiss`),

@@ -275,6 +275,11 @@ class CollaborateRequest(BaseModel):
     task: str
 
 
+class MultiCeoMeetingRequest(BaseModel):
+    company_ids: list
+    topic: str
+
+
 # ── Market ───────────────────────────────────────────────────────────────────
 class MarketAnalyzeRequest(BaseModel):
     industry: str
