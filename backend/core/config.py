@@ -17,11 +17,11 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./han_group.db"
 
     # AI Providers
-    DEFAULT_PROVIDER: str = "ollama"  # ollama | anthropic | openai | gemini | mock
+    DEFAULT_PROVIDER: str = "ollama"  # ollama | anthropic | openai | gemini
     ANTHROPIC_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
-    OLLAMA_BASE_URL: str = ""          # 빈 값이면 프론트엔드에서 설정 안내
+    OLLAMA_BASE_URL: str = "http://localhost:11434"  # Ollama 기본 주소
     OLLAMA_MODEL: str = "qwen2.5"     # llama3 / qwen2.5
 
     # Default models per provider
