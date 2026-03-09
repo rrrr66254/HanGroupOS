@@ -21,6 +21,7 @@ from services.org_service import create_company_org
 from services.work_service import (
     build_personality_context, get_relevant_memories, get_node_ai_provider,
 )
+from services.reality_engine import build_reality_context
 
 
 def _execute_actions(ai_response: str, db: Session, user_id: int) -> tuple:
@@ -169,6 +170,7 @@ def send_message(
         provider.model = req.model_override
 
     system_prompt = _get_system(session.session_type)
+    system_prompt += build_reality_context(db, session.session_type, session.company_id)
     ai_response = provider.chat(
         messages, system=system_prompt, session_type=session.session_type
     )
@@ -244,6 +246,10 @@ def stream_message(
         provider.model = req.model_override
 
     system_prompt = _get_system(session.session_type)
+    # Inject real DB data into system prompt to prevent AI hallucination
+    reality_ctx = build_reality_context(db, session.session_type, session.company_id)
+    system_prompt = system_prompt + reality_ctx
+
     ai_name = session.agent_name or {
         "chairman": "AI 회장",
         "ceo": "AI CEO",
