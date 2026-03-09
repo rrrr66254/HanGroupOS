@@ -280,6 +280,12 @@ class MultiCeoMeetingRequest(BaseModel):
     topic: str
 
 
+class BoardMeetingRequest(BaseModel):
+    agenda: str
+    company_ids: list
+    include_independent: bool = True
+
+
 # ── Market ───────────────────────────────────────────────────────────────────
 class MarketAnalyzeRequest(BaseModel):
     industry: str

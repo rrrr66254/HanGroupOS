@@ -3,12 +3,13 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, MessageSquare, Building2, CheckSquare,
   Users, TrendingUp, Map, FlaskConical, Monitor,
-  Brain, Settings, ChevronLeft, ChevronRight, Zap,
+  Brain, Settings, ChevronLeft, ChevronRight, Zap, Home,
 } from 'lucide-react'
 import { useAppStore } from '../store/useStore'
 
 const NAV = [
-  { to: '/chairman', icon: MessageSquare, label: 'AI 회장', highlight: true },
+  { to: '/group-home', icon: Home, label: '그룹 홈', highlight: true },
+  { to: '/chairman', icon: MessageSquare, label: 'AI 회장' },
   { to: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
   { to: '/companies', icon: Building2, label: '계열사' },
   { to: '/approvals', icon: CheckSquare, label: '승인함' },

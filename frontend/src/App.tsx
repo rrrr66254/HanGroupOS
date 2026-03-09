@@ -14,6 +14,7 @@ import Simulation from './pages/Simulation'
 import LiveOffice from './pages/LiveOffice'
 import Memory from './pages/Memory'
 import Admin from './pages/Admin'
+import GroupHome from './pages/GroupHome'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -39,7 +40,8 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route index element={<Navigate to="/chairman" replace />} />
+          <Route index element={<Navigate to="/group-home" replace />} />
+          <Route path="group-home" element={<GroupHome />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="chairman" element={<Chairman />} />
           <Route path="companies" element={<Companies />} />
@@ -52,7 +54,7 @@ export default function App() {
           <Route path="memory" element={<Memory />} />
           <Route path="admin" element={<Admin />} />
         </Route>
-        <Route path="*" element={<Navigate to="/chairman" replace />} />
+        <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>
     </BrowserRouter>
   )

@@ -4,7 +4,7 @@ import {
   Send, Loader2, ArrowRight, CheckCircle, Building2,
   Eye, X, Plus, ChevronRight, WifiOff, Wifi, Settings,
   MessageSquare, Zap, AlertCircle, BarChart2, Users,
-  Clock, Trophy, FileText, Coffee,
+  Clock, Trophy, FileText, Coffee, BookOpen, Vote,
 } from 'lucide-react'
 import { chatApi, orgApi, companiesApi, modelsApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
@@ -98,14 +98,41 @@ interface PerformanceRanking {
   strategies: number
 }
 
+interface BoardVote {
+  name: string
+  title: string
+  type: string
+  company: string
+  vote: '찬성' | '반대' | '보류'
+  reasoning: string
+}
+interface BoardResult {
+  agenda: string
+  votes: BoardVote[]
+  tally: { 찬성: number; 반대: number; 보류: number }
+  result: '가결' | '부결' | '보류'
+  resolution: string
+}
+
+const COMPANY_TEMPLATES = [
+  { emoji: '💡', name: '한인텔리전스', industry: '인공지능', description: 'AI 연구개발 및 서비스 플랫폼', vision: 'AI 기술로 산업 혁신을 이끈다', color: '#818cf8' },
+  { emoji: '📱', name: '한테크', industry: '소프트웨어', description: 'B2B SaaS 및 디지털 솔루션', vision: '기술로 비즈니스를 가속한다', color: '#34d399' },
+  { emoji: '📺', name: '한미디어', industry: '미디어', description: '디지털 콘텐츠 및 OTT 플랫폼', vision: '콘텐츠로 세상을 연결한다', color: '#fb923c' },
+  { emoji: '💰', name: '한파이낸스', industry: '핀테크', description: 'AI 기반 금융 서비스 플랫폼', vision: '금융을 모두에게 쉽게', color: '#fbbf24' },
+  { emoji: '🏥', name: '한헬스', industry: '헬스케어', description: '디지털 헬스케어 및 의료 AI', vision: '기술로 건강한 사회를 만든다', color: '#f472b6' },
+  { emoji: '📦', name: '한로지스', industry: '물류', description: 'AI 물류 최적화 플랫폼', vision: '스마트 물류로 세상을 잇는다', color: '#60a5fa' },
+  { emoji: '⚡', name: '한에너지', industry: '에너지', description: '신재생 에너지 솔루션', vision: '깨끗한 에너지로 미래를 연다', color: '#a3e635' },
+  { emoji: '🎓', name: '한에듀', industry: '교육', description: 'AI 맞춤형 교육 플랫폼', vision: '모두를 위한 교육 혁신', color: '#c084fc' },
+]
+
 type PanelMode = 'companies' | 'delegation' | 'preview' | 'kpi' | 'feed'
 
 const QUICK_PROMPTS = [
   '현재 계열사 현황을 보고해줘',
-  'AI 소프트웨어 회사 설립해줘',
-  '데이터 분석 회사 만들어줘',
+  '한인텔리전스 AI 회사를 설립해줘',
+  '한미디어 미디어 계열사를 만들어줘',
   '그룹 전략 방향을 분석해줘',
-  '미디어 계열사를 설립해줘',
+  '이사회를 소집해서 사업 확장 안건을 결의해줘',
 ]
 
 function parseCreatedCompany(text: string): { id: number; name: string } | null {
@@ -152,6 +179,14 @@ export default function Chairman() {
   // Multi-CEO meeting state
   const [meetingResult, setMeetingResult] = useState<MeetingResult | null>(null)
   const [meetingVisible, setMeetingVisible] = useState(false)
+
+  // Board meeting state
+  const [boardResult, setBoardResult] = useState<BoardResult | null>(null)
+  const [boardVisible, setBoardVisible] = useState(false)
+  const [boardLoading, setBoardLoading] = useState(false)
+
+  // Template library state
+  const [templateVisible, setTemplateVisible] = useState(false)
 
   // CEO direct chat state
   const [ceoChatCompany, setCeoChatCompany] = useState<Company | null>(null)
@@ -417,6 +452,57 @@ export default function Chairman() {
     }
   }
 
+  // ── Board meeting ──────────────────────────────────────────────────────────
+  const handleBoardMeeting = async (agenda: string) => {
+    if (delegTimerRef.current) clearInterval(delegTimerRef.current)
+    setBriefingAnswer(null)
+    setBoardLoading(true)
+
+    const animSteps: DelegationStep[] = [
+      { from: '회장', to: '전체 이사', message: `이사회 소집: ${agenda.slice(0, 24)}…`, status: 'active' },
+      ...companies.slice(0, 3).map((c) => ({
+        from: `${c.name} CEO`, to: '이사회', message: '입장 표명 준비', status: 'pending' as const,
+      })),
+      { from: '독립 이사', to: '이사회', message: '독립 의견 개진', status: 'pending' },
+      { from: '이사회', to: '회장', message: '결의 보고', status: 'pending' },
+    ]
+    setDelegationSteps(animSteps)
+    setPanelMode('delegation')
+
+    let step = 1
+    delegTimerRef.current = setInterval(() => {
+      setDelegationSteps((prev) =>
+        prev.map((s, i) => ({ ...s, status: i < step ? 'done' : i === step ? 'active' : 'pending' }))
+      )
+      step++
+      if (step >= animSteps.length && delegTimerRef.current) clearInterval(delegTimerRef.current)
+    }, 1600)
+
+    try {
+      const res = await chatApi.boardMeeting(agenda, companies.map((c) => c.id), true)
+      const data = res.data as BoardResult
+      if (delegTimerRef.current) clearInterval(delegTimerRef.current)
+      setDelegationSteps(animSteps.map((s) => ({ ...s, status: 'done' as const })))
+      setBoardResult(data)
+      setBoardVisible(true)
+      setBoardLoading(false)
+
+      const resultEmoji = data.result === '가결' ? '✅' : data.result === '부결' ? '❌' : '⏸️'
+      const syntheticMsg: ChatMessage = {
+        id: Date.now(),
+        session_id: session?.id ?? 0,
+        role: 'assistant',
+        content: `${resultEmoji} [이사회 결의 — ${data.result}]\n\n안건: ${data.agenda}\n찬성 ${data.tally['찬성']} · 반대 ${data.tally['반대']} · 보류 ${data.tally['보류']}\n\n${data.resolution}`,
+        sender_name: 'AI 이사회',
+        created_at: new Date().toISOString(),
+      }
+      setMessages((prev) => [...prev, syntheticMsg])
+    } catch {
+      if (delegTimerRef.current) clearInterval(delegTimerRef.current)
+      setBoardLoading(false)
+    }
+  }
+
   // ── CEO direct chat ───────────────────────────────────────────────────────
   const openCeoChat = async (company: Company) => {
     setCeoChatCompany(company)
@@ -555,6 +641,15 @@ export default function Chairman() {
     const isCollab = collabKeywords.some((kw) => content.includes(kw))
     if (isCollab && mentionedCos.length >= 2) {
       await handleCollaboration(mentionedCos[0], mentionedCos[1], content)
+      setLoading(false)
+      return
+    }
+
+    // Board meeting path
+    const boardKeywords = ['이사회', '안건', '투표', '결의', '이사진']
+    const isBoard = boardKeywords.some((kw) => content.includes(kw))
+    if (isBoard && companies.length > 0) {
+      await handleBoardMeeting(content)
       setLoading(false)
       return
     }
@@ -756,6 +851,12 @@ export default function Chairman() {
                 <CheckCircle size={12} />AI 오피스 보기
               </button>
             )}
+            <button
+              onClick={() => setTemplateVisible(true)}
+              className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-slate-500 hover:text-slate-300 bg-bg-elevated border border-bg-border"
+            >
+              <BookOpen size={12} />템플릿
+            </button>
             <button
               onClick={newSession}
               className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-slate-500 hover:text-slate-300 bg-bg-elevated border border-bg-border"
@@ -1596,10 +1697,233 @@ export default function Chairman() {
         </div>
       )}
 
+      {/* ── Template Library Modal ──────────────────────────────────────────── */}
+      {templateVisible && (
+        <div
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(0,0,0,0.7)',
+            zIndex: 400,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setTemplateVisible(false) }}
+        >
+          <div
+            style={{
+              width: 620,
+              background: 'linear-gradient(160deg, #0a0f1e 0%, #0f172a 60%, #130f2a 100%)',
+              borderRadius: 18,
+              border: '1px solid rgba(99,102,241,0.35)',
+              boxShadow: '0 32px 80px rgba(0,0,0,0.8)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header */}
+            <div
+              className="flex items-center gap-3 px-5 py-4"
+              style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+            >
+              <div style={{ fontSize: 20 }}>📋</div>
+              <div className="flex-1">
+                <div className="text-sm font-bold text-slate-100">계열사 설립 템플릿</div>
+                <div className="text-[10px] text-indigo-400 mt-0.5">빠른 설립을 위한 사전 구성 템플릿을 선택하세요</div>
+              </div>
+              <button onClick={() => setTemplateVisible(false)} className="text-slate-600 hover:text-slate-300">
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Template Grid */}
+            <div className="p-5 grid grid-cols-4 gap-3">
+              {COMPANY_TEMPLATES.map((tpl) => (
+                <button
+                  key={tpl.name}
+                  onClick={() => {
+                    setTemplateVisible(false)
+                    setInput(`${tpl.name} ${tpl.industry} 계열사를 설립해줘. 설명: ${tpl.description}. 비전: ${tpl.vision}`)
+                  }}
+                  className="rounded-xl p-3 text-left transition-all hover:scale-105"
+                  style={{
+                    background: `${tpl.color}12`,
+                    border: `1px solid ${tpl.color}30`,
+                  }}
+                >
+                  <div className="text-2xl mb-2">{tpl.emoji}</div>
+                  <div className="text-[11px] font-bold text-slate-200 mb-1">{tpl.name}</div>
+                  <div
+                    className="text-[9px] px-1.5 py-0.5 rounded font-medium inline-block mb-1.5"
+                    style={{ background: `${tpl.color}20`, color: tpl.color }}
+                  >
+                    {tpl.industry}
+                  </div>
+                  <div className="text-[9px] text-slate-500 leading-relaxed line-clamp-2">
+                    {tpl.description}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Footer */}
+            <div
+              className="px-5 py-3 text-[10px] text-slate-600 flex items-center justify-between"
+              style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}
+            >
+              <span>템플릿 선택 시 AI 회장에게 설립 지시가 자동 입력됩니다</span>
+              <button
+                onClick={() => setTemplateVisible(false)}
+                className="text-slate-500 hover:text-slate-300 px-3 py-1 rounded"
+                style={{ background: 'rgba(255,255,255,0.05)' }}
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Board Meeting Result Modal ───────────────────────────────────────── */}
+      {boardVisible && boardResult && (
+        <div
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(0,0,0,0.7)',
+            zIndex: 350,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setBoardVisible(false) }}
+        >
+          <div
+            style={{
+              width: 560, maxHeight: '85vh',
+              background: 'linear-gradient(160deg, #0a0f1e 0%, #0f172a 60%, #0f1a14 100%)',
+              borderRadius: 18,
+              border: `1px solid ${boardResult.result === '가결' ? 'rgba(16,185,129,0.4)' : boardResult.result === '부결' ? 'rgba(239,68,68,0.4)' : 'rgba(245,158,11,0.4)'}`,
+              boxShadow: '0 32px 80px rgba(0,0,0,0.8)',
+              display: 'flex', flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Header */}
+            <div
+              className="flex items-center gap-3 px-5 py-4 flex-shrink-0"
+              style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+            >
+              <div style={{ fontSize: 22 }}>⚖️</div>
+              <div className="flex-1">
+                <div className="text-sm font-bold text-slate-100">한그룹 이사회 결의</div>
+                <div className="text-[10px] text-slate-400 mt-0.5 truncate">{boardResult.agenda}</div>
+              </div>
+              <div
+                className="px-3 py-1 rounded-full text-xs font-bold flex-shrink-0"
+                style={
+                  boardResult.result === '가결'
+                    ? { background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)' }
+                    : boardResult.result === '부결'
+                    ? { background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }
+                    : { background: 'rgba(245,158,11,0.15)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.3)' }
+                }
+              >
+                {boardResult.result === '가결' ? '✅ 가결' : boardResult.result === '부결' ? '❌ 부결' : '⏸️ 보류'}
+              </div>
+              <button onClick={() => setBoardVisible(false)} className="text-slate-600 hover:text-slate-300 ml-1">
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Vote tally */}
+            <div className="px-5 py-3 flex-shrink-0 grid grid-cols-3 gap-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              {[
+                { label: '찬성', count: boardResult.tally['찬성'], color: '#34d399' },
+                { label: '반대', count: boardResult.tally['반대'], color: '#f87171' },
+                { label: '보류', count: boardResult.tally['보류'], color: '#fbbf24' },
+              ].map(({ label, count, color }) => (
+                <div
+                  key={label}
+                  className="rounded-lg p-3 text-center"
+                  style={{ background: `${color}10`, border: `1px solid ${color}25` }}
+                >
+                  <div className="text-xl font-bold" style={{ color }}>{count}</div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">{label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Individual votes */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-2">
+              <div className="text-[10px] text-slate-500 uppercase tracking-widest font-mono mb-3">이사별 투표 현황</div>
+              {boardResult.votes.map((v, i) => (
+                <div
+                  key={i}
+                  className="rounded-lg p-3 flex gap-3"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}
+                >
+                  <div
+                    className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold"
+                    style={
+                      v.vote === '찬성'
+                        ? { background: 'rgba(16,185,129,0.15)', color: '#34d399' }
+                        : v.vote === '반대'
+                        ? { background: 'rgba(239,68,68,0.15)', color: '#f87171' }
+                        : { background: 'rgba(245,158,11,0.15)', color: '#fbbf24' }
+                    }
+                  >
+                    {v.vote === '찬성' ? '✓' : v.vote === '반대' ? '✗' : '–'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className="text-[11px] font-semibold text-slate-200">{v.name}</span>
+                      <span className="text-[9px] text-slate-600">·</span>
+                      <span className="text-[9px] text-slate-500">{v.title}</span>
+                      {v.company && (
+                        <span
+                          className="text-[8px] px-1.5 py-0.5 rounded ml-1"
+                          style={{ background: 'rgba(99,102,241,0.12)', color: '#a5b4fc' }}
+                        >
+                          {v.company}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-slate-500 leading-relaxed">{v.reasoning}</div>
+                  </div>
+                </div>
+              ))}
+
+              {/* Resolution */}
+              <div
+                className="rounded-xl p-4 mt-2"
+                style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.2)' }}
+              >
+                <div className="text-[10px] text-indigo-400 uppercase tracking-widest font-mono mb-2 flex items-center gap-1.5">
+                  <Vote size={9} />공식 결의문
+                </div>
+                <pre className="text-[11px] text-slate-300 leading-relaxed whitespace-pre-wrap font-sans">
+                  {boardResult.resolution}
+                </pre>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div
+              className="flex items-center justify-end px-5 py-3 flex-shrink-0"
+              style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}
+            >
+              <button
+                onClick={() => setBoardVisible(false)}
+                className="text-xs px-4 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
+                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
         .line-clamp-6 { display:-webkit-box; -webkit-line-clamp:6; -webkit-box-orient:vertical; overflow:hidden; }
         .line-clamp-8 { display:-webkit-box; -webkit-line-clamp:8; -webkit-box-orient:vertical; overflow:hidden; }
+        .line-clamp-2 { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
       `}</style>
     </div>
   )

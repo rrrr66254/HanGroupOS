@@ -90,6 +90,9 @@ export const chatApi = {
   multiCeoMeeting: (companyIds: number[], topic: string) =>
     api.post('/chat/multi-ceo-meeting', { company_ids: companyIds, topic }),
   performanceReport: () => api.get('/chat/performance-report'),
+  boardMeeting: (agenda: string, companyIds: number[], includeIndependent?: boolean) =>
+    api.post('/chat/board-meeting', { agenda, company_ids: companyIds, include_independent: includeIndependent ?? true }),
+  recommendedActions: () => api.get('/chat/recommended-actions'),
   suggestions: (companyId?: number) =>
     api.get('/chat/suggestions', { params: { company_id: companyId } }),
   dismissSuggestion: (id: number) => api.post(`/chat/suggestions/${id}/dismiss`),

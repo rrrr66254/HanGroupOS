@@ -11,7 +11,7 @@ from schemas.schemas import (
     ChatSessionCreate, ChatSessionOut,
     ChatMessageOut, ChatRequest, CompanyQueryRequest,
     ConfirmCompanyRequest, BriefCeoRequest, CollaborateRequest,
-    MultiCeoMeetingRequest,
+    MultiCeoMeetingRequest, BoardMeetingRequest,
 )
 from services.ai_provider import (
     get_provider_from_db,
@@ -728,6 +728,116 @@ def performance_report(
         analysis = provider.chat([{"role": "user", "content": prompt}], system=CHAIRMAN_SYSTEM, session_type="chairman")
 
     return {"rankings": rankings, "analysis": analysis}
+
+
+@router.post("/board-meeting")
+def board_meeting(
+    req: BoardMeetingRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """AI 이사회 — CEOs + independent directors vote on an agenda with reasoning."""
+    companies = [db.query(Company).filter(Company.id == int(cid)).first() for cid in req.company_ids]
+    companies = [c for c in companies if c]
+
+    # Build voter list: company CEOs
+    voters = []
+    for company in companies:
+        node = db.query(OrgNode).filter(OrgNode.company_id == company.id, OrgNode.level == "ceo").first()
+        ceo_name = node.name if node else f"{company.name} CEO"
+        voters.append({"name": ceo_name, "title": f"{company.name} CEO", "type": "ceo", "company": company.name})
+
+    # Independent directors
+    if req.include_independent:
+        voters += [
+            {"name": "한지수 사외이사", "title": "독립 사외이사 (재무전문)", "type": "independent", "company": ""},
+            {"name": "박현우 사외이사", "title": "독립 사외이사 (전략전문)", "type": "independent", "company": ""},
+        ]
+
+    provider = get_provider_from_db(db, current_user.id)
+    DIRECTOR_SYSTEM = (
+        "당신은 한그룹 이사회 구성원입니다. 안건에 대해 찬성/반대/보류 중 하나를 선택하고 "
+        "2~3문장으로 근거를 설명하세요. 반드시 첫 줄에 '투표: 찬성', '투표: 반대', '투표: 보류' 중 하나로 시작하세요."
+    )
+
+    votes = []
+    context = f"한그룹 이사회 안건: {req.agenda}\n\n참석자: {', '.join(v['name'] for v in voters)}"
+    for voter in voters:
+        prompt = (
+            f"{context}\n\n[{voter['name']} / {voter['title']}] 발언 차례입니다. "
+            f"위 안건에 대해 투표하고 의견을 밝혀주세요."
+        )
+        response = provider.chat([{"role": "user", "content": prompt}], system=DIRECTOR_SYSTEM, session_type="ceo")
+        vote_type = "보류"
+        if "투표: 찬성" in response:
+            vote_type = "찬성"
+        elif "투표: 반대" in response:
+            vote_type = "반대"
+        votes.append({**voter, "vote": vote_type, "reasoning": response})
+
+    tally = {"찬성": sum(1 for v in votes if v["vote"] == "찬성"),
+             "반대": sum(1 for v in votes if v["vote"] == "반대"),
+             "보류": sum(1 for v in votes if v["vote"] == "보류")}
+    result = "가결" if tally["찬성"] > tally["반대"] else "부결" if tally["반대"] > tally["찬성"] else "보류"
+
+    vote_summary = "\n".join(f"[{v['name']}] {v['vote']}: {v['reasoning'][:80]}…" for v in votes)
+    summary_prompt = (
+        f"이사회 안건: {req.agenda}\n\n투표 결과 ({result}): 찬성 {tally['찬성']}, 반대 {tally['반대']}, 보류 {tally['보류']}\n\n"
+        f"이사 의견:\n{vote_summary}\n\n"
+        f"이사회 결의 내용과 후속 조치를 공식 이사회 결의문 형식으로 작성해주세요."
+    )
+    resolution = provider.chat([{"role": "user", "content": summary_prompt}], system=CHAIRMAN_SYSTEM, session_type="chairman")
+
+    return {
+        "agenda": req.agenda,
+        "votes": votes,
+        "tally": tally,
+        "result": result,
+        "resolution": resolution,
+    }
+
+
+@router.get("/recommended-actions")
+def recommended_actions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate today's AI-recommended actions for the chairman based on group status."""
+    company_count = db.query(Company).filter(Company.status == "active").count()
+    recent_msgs = (
+        db.query(ChatMessage)
+        .join(ChatSession, ChatMessage.session_id == ChatSession.id)
+        .filter(ChatSession.session_type == "chairman", ChatMessage.role == "user")
+        .order_by(ChatMessage.created_at.desc())
+        .limit(5)
+        .all()
+    )
+    recent_directives = [m.content[:60] for m in recent_msgs]
+
+    prompt = (
+        f"현재 한그룹 현황:\n"
+        f"- 활성 계열사: {company_count}개\n"
+        f"- 최근 회장 지시: {'; '.join(recent_directives) if recent_directives else '없음'}\n\n"
+        f"오늘 회장이 취해야 할 중요 액션 3가지를 JSON 배열로 제시하세요. "
+        f'형식: [{{"action":"액션명","reason":"이유","priority":"high/medium/low"}}]'
+    )
+    provider = get_provider_from_db(db, current_user.id)
+    raw = provider.chat([{"role": "user", "content": prompt}], system=CHAIRMAN_SYSTEM, session_type="chairman")
+
+    actions = []
+    try:
+        import re as _re
+        m = _re.search(r'\[.*?\]', raw, _re.DOTALL)
+        if m:
+            actions = json.loads(m.group())
+    except Exception:
+        actions = [
+            {"action": "계열사 현황 점검", "reason": "정기 성과 모니터링", "priority": "high"},
+            {"action": "신규 사업 기회 검토", "reason": "시장 변화 대응", "priority": "medium"},
+            {"action": "CEO 브리핑 일정 확인", "reason": "전략 정렬 확인", "priority": "low"},
+        ]
+
+    return {"actions": actions, "company_count": company_count}
 
 
 @router.delete("/sessions/{session_id}")
