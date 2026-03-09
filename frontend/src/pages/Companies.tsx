@@ -341,86 +341,84 @@ function AiEditPanel({ companyId }: { companyId: number }) {
                 const isSaved = savedIds.has(node.id)
 
                 return (
-                  <div key={node.id}>
                   <div
-                    className="flex items-center gap-2 p-2.5 rounded-lg transition-all"
+                    key={node.id}
+                    className="rounded-lg p-2.5 transition-all"
                     style={{
                       background: isDirty ? 'rgba(99,102,241,0.05)' : 'rgba(255,255,255,0.02)',
                       border: `1px solid ${isDirty ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.06)'}`,
                     }}
                   >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[11px] font-medium text-slate-200 truncate">{node.name}</div>
-                      <div className="text-[9px] text-slate-600 truncate mt-0.5">{node.role}</div>
-                    </div>
-                    <select
-                      value={cur.ai_provider}
-                      onChange={(e) => handleProviderChange(node.id, e.target.value)}
-                      className="input text-[10px] py-1 px-2 w-[90px]"
-                    >
-                      {providerOptions.map((p) => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                    </select>
-                    <select
-                      value={cur.ai_model}
-                      onChange={(e) => handleModelChange(node.id, e.target.value)}
-                      className="input text-[10px] py-1 px-2 w-[140px]"
-                    >
-                      {filteredModels.map((m) => (
-                        <option key={m.model_id} value={m.model_id}>{m.model_id}</option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => handleSave(node)}
-                      disabled={!isDirty || saving === node.id}
-                      title="저장"
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all flex-shrink-0 ${
-                        isSaved
-                          ? 'bg-emerald-500/20 text-emerald-400'
-                          : isDirty
-                          ? 'bg-brand/20 text-brand-light hover:bg-brand/30'
-                          : 'text-slate-700 cursor-default'
-                      }`}
-                    >
-                      {saving === node.id
-                        ? <RefreshCw size={11} className="animate-spin" />
-                        : <Check size={11} />
-                      }
-                    </button>
-                    {/* Test button */}
-                    <button
-                      onClick={() => handleTest(node)}
-                      disabled={testing === node.id}
-                      title="AI 응답 테스트"
-                      className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-slate-600 hover:text-amber-400 hover:bg-amber-400/10 transition-all"
-                    >
-                      {testing === node.id
-                        ? <RefreshCw size={11} className="animate-spin text-amber-400" />
-                        : <Zap size={11} />
-                      }
-                    </button>
-                  </div>
-
-                  {/* Test result inline */}
-                  {testResult?.nodeId === node.id && (
-                    <div
-                      className="mt-2 rounded-lg p-2.5 text-[10px] leading-relaxed text-slate-300"
-                      style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)' }}
-                    >
-                      <div className="flex items-center gap-1 mb-1 text-[9px] text-amber-500 font-medium">
-                        <Zap size={8} />
-                        {testResult.provider} / {testResult.model}
-                        <button
-                          onClick={() => setTestResult(null)}
-                          className="ml-auto text-slate-700 hover:text-slate-400"
-                        >
-                          <X size={9} />
-                        </button>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11px] font-medium text-slate-200 truncate">{node.name}</div>
+                        <div className="text-[9px] text-slate-600 truncate mt-0.5">{node.role}</div>
                       </div>
-                      {testResult.response}
+                      <select
+                        value={cur.ai_provider}
+                        onChange={(e) => handleProviderChange(node.id, e.target.value)}
+                        className="input text-[10px] py-1 px-2 w-[90px]"
+                      >
+                        {providerOptions.map((p) => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={cur.ai_model}
+                        onChange={(e) => handleModelChange(node.id, e.target.value)}
+                        className="input text-[10px] py-1 px-2 w-[140px]"
+                      >
+                        {filteredModels.map((m) => (
+                          <option key={m.model_id} value={m.model_id}>{m.model_id}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => handleSave(node)}
+                        disabled={!isDirty || saving === node.id}
+                        title="저장"
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all flex-shrink-0 ${
+                          isSaved
+                            ? 'bg-emerald-500/20 text-emerald-400'
+                            : isDirty
+                            ? 'bg-brand/20 text-brand-light hover:bg-brand/30'
+                            : 'text-slate-700 cursor-default'
+                        }`}
+                      >
+                        {saving === node.id
+                          ? <RefreshCw size={11} className="animate-spin" />
+                          : <Check size={11} />
+                        }
+                      </button>
+                      <button
+                        onClick={() => handleTest(node)}
+                        disabled={testing === node.id}
+                        title="AI 응답 테스트"
+                        className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-slate-600 hover:text-amber-400 hover:bg-amber-400/10 transition-all"
+                      >
+                        {testing === node.id
+                          ? <RefreshCw size={11} className="animate-spin text-amber-400" />
+                          : <Zap size={11} />
+                        }
+                      </button>
                     </div>
-                  )}
+                    {testResult?.nodeId === node.id && (
+                      <div
+                        className="mt-2 rounded-lg p-2.5 text-[10px] leading-relaxed text-slate-300"
+                        style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.2)' }}
+                      >
+                        <div className="flex items-center gap-1 mb-1 text-[9px] text-amber-500 font-medium">
+                          <Zap size={8} />
+                          {testResult.provider} / {testResult.model}
+                          <button
+                            onClick={() => setTestResult(null)}
+                            className="ml-auto text-slate-700 hover:text-slate-400"
+                          >
+                            <X size={9} />
+                          </button>
+                        </div>
+                        {testResult.response}
+                      </div>
+                    )}
                   </div>
               )
             })}
