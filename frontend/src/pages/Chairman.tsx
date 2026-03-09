@@ -1,12 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Send, Loader2, ArrowRight, CheckCircle, Building2,
-  Eye, X, Plus, ChevronRight,
+  Eye, X, Plus, ChevronRight, WifiOff, Wifi, Settings,
 } from 'lucide-react'
-import { chatApi, orgApi, companiesApi } from '../api/client'
+import { chatApi, orgApi, companiesApi, modelsApi } from '../api/client'
 import type { ChatSession, ChatMessage } from '../types'
 import { format } from 'date-fns'
+
+interface OllamaStatus {
+  base_url: string
+  model: string
+  reachable: boolean
+  needs_setup: boolean
+}
 
 interface OrgNode {
   id: number
@@ -79,10 +86,26 @@ export default function Chairman() {
   const [delegationSteps, setDelegationSteps] = useState<DelegationStep[]>([])
   const [newCompanyId, setNewCompanyId] = useState<number | null>(null)
   const [previewCompany, setPreviewCompany] = useState<PreviewCompany | null>(null)
+  const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null)
+  const [ollamaChecking, setOllamaChecking] = useState(true)
+  const [ollamaBannerDismissed, setOllamaBannerDismissed] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const delegTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  const checkOllama = useCallback(async () => {
+    setOllamaChecking(true)
+    try {
+      const res = await modelsApi.ollamaStatus()
+      setOllamaStatus(res.data as OllamaStatus)
+    } catch {
+      // backend not ready yet
+    } finally {
+      setOllamaChecking(false)
+    }
+  }, [])
+
   useEffect(() => {
+    checkOllama()
     orgApi.nodes().then((r) => {
       const nodes = (r.data as OrgNode[]).filter((n) => n.company_id === null)
       const ch = nodes.find((n) => n.level === 'chairman') || nodes[0]
@@ -276,6 +299,25 @@ export default function Chairman() {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            {/* Ollama status dot */}
+            {!ollamaChecking && ollamaStatus && (
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium cursor-pointer"
+                style={
+                  ollamaStatus.reachable
+                    ? { background: 'rgba(16,185,129,0.1)', color: '#34d399', border: '1px solid rgba(16,185,129,0.2)' }
+                    : { background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }
+                }
+                onClick={() => ollamaStatus.reachable ? checkOllama() : navigate('/admin')}
+                title={ollamaStatus.reachable ? `Ollama 연결됨 (${ollamaStatus.base_url})` : 'Ollama 미연결 — 클릭하여 설정'}
+              >
+                {ollamaStatus.reachable
+                  ? <><Wifi size={10} />Ollama</>
+                  : <><WifiOff size={10} />Ollama 미연결</>
+                }
+              </div>
+            )}
+
             {newCompanyId && (
               <button
                 onClick={() => navigate('/live-office')}
@@ -300,6 +342,52 @@ export default function Chairman() {
             </button>
           </div>
         </div>
+
+        {/* Ollama connection banner */}
+        {!ollamaChecking && ollamaStatus?.needs_setup && !ollamaBannerDismissed && (
+          <div
+            className="flex items-center gap-3 px-5 py-2.5 flex-shrink-0"
+            style={{
+              background: 'linear-gradient(90deg, rgba(245,158,11,0.08) 0%, rgba(245,158,11,0.04) 100%)',
+              borderBottom: '1px solid rgba(245,158,11,0.2)',
+            }}
+          >
+            <WifiOff size={13} className="text-amber-400 flex-shrink-0" />
+            <div className="flex-1 text-[11px] text-amber-300">
+              {!ollamaStatus.base_url
+                ? 'Ollama가 설정되지 않았습니다. AI 기능을 사용하려면 연결해주세요.'
+                : `Ollama(${ollamaStatus.base_url})에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.`
+              }
+              <span className="font-mono text-amber-500 ml-2">
+                ollama serve &amp;&amp; ollama pull {ollamaStatus.model}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <button
+                onClick={checkOllama}
+                className="text-[10px] px-2.5 py-1 rounded flex items-center gap-1 text-amber-400 hover:text-amber-200"
+                style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)' }}
+              >
+                <Loader2 size={9} className={ollamaChecking ? 'animate-spin' : ''} />
+                재확인
+              </button>
+              <button
+                onClick={() => navigate('/admin')}
+                className="text-[10px] px-2.5 py-1 rounded flex items-center gap-1 text-amber-400 hover:text-amber-200"
+                style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)' }}
+              >
+                <Settings size={9} />
+                설정
+              </button>
+              <button
+                onClick={() => setOllamaBannerDismissed(true)}
+                className="text-slate-600 hover:text-slate-400 ml-1"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
