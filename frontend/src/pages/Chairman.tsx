@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Send, Loader2, ArrowRight, CheckCircle, Building2,
   Eye, X, Plus, ChevronRight, WifiOff, Wifi, Settings,
+  MessageSquare, Zap, AlertCircle,
 } from 'lucide-react'
 import { chatApi, orgApi, companiesApi, modelsApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
@@ -60,14 +61,12 @@ const QUICK_PROMPTS = [
   '미디어 계열사를 설립해줘',
 ]
 
-// Parse created company from AI response
 function parseCreatedCompany(text: string): { id: number; name: string } | null {
   const m = text.match(/계열사 설립 완료[^—]*—\s*(.+?)\s*\(ID #(\d+)\)/)
   if (m) return { name: m[1].trim(), id: parseInt(m[2]) }
   return null
 }
 
-// Detect if a company is being queried
 function detectCompanyQuery(text: string, companies: Company[]): Company | null {
   for (const c of companies) {
     if (text.includes(c.name)) return c
@@ -85,11 +84,22 @@ export default function Chairman() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [panelMode, setPanelMode] = useState<PanelMode>('companies')
   const [delegationSteps, setDelegationSteps] = useState<DelegationStep[]>([])
+  const [briefingAnswer, setBriefingAnswer] = useState<string | null>(null)
   const [newCompanyId, setNewCompanyId] = useState<number | null>(null)
   const [previewCompany, setPreviewCompany] = useState<PreviewCompany | null>(null)
+  const [previewConfirming, setPreviewConfirming] = useState(false)
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null)
   const [ollamaChecking, setOllamaChecking] = useState(true)
   const [ollamaBannerDismissed, setOllamaBannerDismissed] = useState(false)
+
+  // CEO direct chat state
+  const [ceoChatCompany, setCeoChatCompany] = useState<Company | null>(null)
+  const [ceoChatSession, setCeoChatSession] = useState<ChatSession | null>(null)
+  const [ceoChatMessages, setCeoChatMessages] = useState<ChatMessage[]>([])
+  const [ceoChatInput, setCeoChatInput] = useState('')
+  const [ceoChatLoading, setCeoChatLoading] = useState(false)
+  const ceoChatEndRef = useRef<HTMLDivElement>(null)
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const delegTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -120,7 +130,10 @@ export default function Chairman() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Cleanup delegation timer on unmount
+  useEffect(() => {
+    ceoChatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [ceoChatMessages])
+
   useEffect(() => () => { if (delegTimerRef.current) clearInterval(delegTimerRef.current) }, [])
 
   const loadCompanies = () => {
@@ -157,8 +170,163 @@ export default function Chairman() {
     setSession(newS.data as ChatSession)
     setMessages([])
     setNewCompanyId(null)
+    setPreviewCompany(null)
   }
 
+  // ── Company preview confirm/cancel ────────────────────────────────────────
+  const confirmCompany = async () => {
+    if (!previewCompany) return
+    setPreviewConfirming(true)
+    try {
+      const res = await chatApi.confirmCompany(previewCompany)
+      const created = res.data as { id: number; name: string; industry: string }
+      setNewCompanyId(created.id)
+      setPreviewCompany(null)
+      loadCompanies()
+
+      // Start briefing animation
+      const briefSteps: DelegationStep[] = [
+        { from: '회장', to: `${created.name} CEO`, message: '설립 축하 및 전략 브리핑 전달 중…', status: 'active' },
+        { from: `${created.name} CEO`, to: '경영팀', message: '전략 방향 수립 착수', status: 'pending' },
+        { from: `${created.name} CEO`, to: '회장', message: '100일 계획 보고', status: 'pending' },
+      ]
+      setDelegationSteps(briefSteps)
+      setBriefingAnswer(null)
+      setPanelMode('delegation')
+
+      const briefRes = await chatApi.briefCeo(created.id)
+      const brief = briefRes.data as { ceo_name: string; answer: string; delegation: DelegationStep[] }
+
+      setDelegationSteps(brief.delegation.map((s) => ({ ...s, status: 'done' as const })))
+      setBriefingAnswer(brief.answer)
+
+      // Add CEO briefing response to main chat as a synthetic message
+      const syntheticMsg: ChatMessage = {
+        id: Date.now(),
+        session_id: session?.id ?? 0,
+        role: 'assistant',
+        content: `📋 [${brief.ceo_name} 초기 보고]\n\n${brief.answer}`,
+        sender_name: brief.ceo_name,
+        created_at: new Date().toISOString(),
+      }
+      setMessages((prev) => [...prev, syntheticMsg])
+    } catch {
+      // ignore
+    } finally {
+      setPreviewConfirming(false)
+    }
+  }
+
+  const cancelPreview = () => {
+    setPreviewCompany(null)
+    setPanelMode('companies')
+  }
+
+  // ── CEO direct chat ───────────────────────────────────────────────────────
+  const openCeoChat = async (company: Company) => {
+    setCeoChatCompany(company)
+    setCeoChatMessages([])
+    setCeoChatSession(null)
+    try {
+      const res = await chatApi.sessions('ceo')
+      const sessions = res.data as ChatSession[]
+      const existing = sessions.find((s) => s.company_id === company.id)
+      if (existing) {
+        setCeoChatSession(existing)
+        const msgs = await chatApi.messages(existing.id)
+        setCeoChatMessages(msgs.data)
+      } else {
+        const newS = await chatApi.createSession({
+          session_type: 'ceo',
+          title: `${company.name} CEO 대화`,
+          company_id: company.id,
+        })
+        setCeoChatSession(newS.data as ChatSession)
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const closeCeoChat = () => {
+    setCeoChatCompany(null)
+    setCeoChatSession(null)
+    setCeoChatMessages([])
+    setCeoChatInput('')
+  }
+
+  const sendCeoMessage = async () => {
+    if (!ceoChatInput.trim() || !ceoChatSession || ceoChatLoading) return
+    const content = ceoChatInput.trim()
+    setCeoChatInput('')
+    setCeoChatLoading(true)
+
+    const userMsgId = Date.now()
+    const tempUser: ChatMessage = {
+      id: userMsgId,
+      session_id: ceoChatSession.id,
+      role: 'user',
+      content,
+      sender_name: '회장',
+      created_at: new Date().toISOString(),
+    }
+    setCeoChatMessages((prev) => [...prev, tempUser])
+
+    const streamMsgId = userMsgId + 1
+    const streamMsg: ChatMessage = {
+      id: streamMsgId,
+      session_id: ceoChatSession.id,
+      role: 'assistant',
+      content: '',
+      sender_name: ceoChatCompany ? `${ceoChatCompany.name} CEO` : 'CEO',
+      created_at: new Date().toISOString(),
+    }
+    setCeoChatMessages((prev) => [...prev, streamMsg])
+
+    try {
+      const token = useAuthStore.getState().token
+      const response = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ session_id: ceoChatSession.id, content }),
+      })
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const evt = JSON.parse(line.slice(6))
+            if (evt.chunk && !evt.done) {
+              setCeoChatMessages((prev) =>
+                prev.map((m) => m.id === streamMsgId ? { ...m, content: m.content + evt.chunk } : m)
+              )
+            }
+            if (evt.done && evt.final_content !== undefined) {
+              setCeoChatMessages((prev) =>
+                prev.map((m) => m.id === streamMsgId ? { ...m, content: evt.final_content, id: evt.message_id ?? streamMsgId } : m)
+              )
+            }
+          } catch { /* skip */ }
+        }
+      }
+    } catch {
+      setCeoChatMessages((prev) => prev.filter((m) => m.id !== streamMsgId))
+    } finally {
+      setCeoChatLoading(false)
+    }
+  }
+
+  // ── Main chairman sendMessage ──────────────────────────────────────────────
   const sendMessage = async () => {
     if (!input.trim() || !session || loading) return
     const content = input.trim()
@@ -176,7 +344,7 @@ export default function Chairman() {
     }
     setMessages((prev) => [...prev, tempUser])
 
-    // Company-query path (delegation chain) — no streaming
+    // Company-query path (delegation chain)
     const queriedCompany = detectCompanyQuery(content, companies)
     const isCreation = ['만들', '설립', '창설', '시작'].some((kw) => content.includes(kw))
 
@@ -202,7 +370,7 @@ export default function Chairman() {
       return
     }
 
-    // Streaming path — chairman chat
+    // Streaming path
     const streamMsgId = userMsgId + 1
     const streamMsg: ChatMessage = {
       id: streamMsgId,
@@ -218,13 +386,9 @@ export default function Chairman() {
       const token = useAuthStore.getState().token
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ session_id: session.id, content }),
       })
-
       if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
 
       const reader = response.body.getReader()
@@ -235,7 +399,6 @@ export default function Chairman() {
         const { done, value } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
-
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
 
@@ -246,35 +409,43 @@ export default function Chairman() {
 
             if (evt.chunk && !evt.done) {
               setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === streamMsgId ? { ...m, content: m.content + evt.chunk } : m
-                )
+                prev.map((m) => m.id === streamMsgId ? { ...m, content: m.content + evt.chunk } : m)
               )
             }
 
-            if (evt.done && evt.final_content !== undefined) {
-              // Replace with server-saved final (includes action results)
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === streamMsgId
-                    ? { ...m, content: evt.final_content, id: evt.message_id ?? streamMsgId }
-                    : m
+            if (evt.done) {
+              if (evt.type === 'preview' && evt.company_data) {
+                // Show preview card — don't execute yet
+                setPreviewCompany(evt.company_data as PreviewCompany)
+                setPanelMode('preview')
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === streamMsgId
+                      ? { ...m, content: evt.final_content, id: evt.message_id ?? streamMsgId }
+                      : m
+                  )
                 )
-              )
-              const created = parseCreatedCompany(evt.final_content)
-              if (created) {
-                setNewCompanyId(created.id)
-                loadCompanies()
-                setPanelMode('companies')
-                if (delegTimerRef.current) clearInterval(delegTimerRef.current)
+              } else if (evt.final_content !== undefined) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === streamMsgId
+                      ? { ...m, content: evt.final_content, id: evt.message_id ?? streamMsgId }
+                      : m
+                  )
+                )
+                const created = parseCreatedCompany(evt.final_content)
+                if (created) {
+                  setNewCompanyId(created.id)
+                  loadCompanies()
+                  setPanelMode('companies')
+                  if (delegTimerRef.current) clearInterval(delegTimerRef.current)
+                }
               }
             }
-          } catch {
-            // malformed SSE line — skip
-          }
+          } catch { /* skip */ }
         }
       }
-    } catch (err) {
+    } catch {
       setMessages((prev) => prev.filter((m) => m.id !== streamMsgId))
     } finally {
       setLoading(false)
@@ -283,6 +454,7 @@ export default function Chairman() {
 
   const showDelegation = (company: Company, question: string) => {
     if (delegTimerRef.current) clearInterval(delegTimerRef.current)
+    setBriefingAnswer(null)
     const steps: DelegationStep[] = [
       { from: '회장', to: `${company.name} CEO`, message: `"${question.slice(0, 24)}…" 확인 요청`, status: 'active' },
       { from: `${company.name} CEO`, to: '운영팀장', message: '데이터 수집 지시', status: 'pending' },
@@ -308,15 +480,16 @@ export default function Chairman() {
   }
 
   const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendMessage()
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
+  }
+
+  const handleCeoKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendCeoMessage() }
   }
 
   return (
     <div className="flex h-[calc(100vh-4rem)] animate-fade-in overflow-hidden">
-      {/* ── Main Chat ─────────────────────────────────────────── */}
+      {/* ── Main Chat ────────────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-3 border-b border-bg-border flex-shrink-0">
@@ -342,7 +515,6 @@ export default function Chairman() {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            {/* Ollama status dot */}
             {!ollamaChecking && ollamaStatus && (
               <div
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium cursor-pointer"
@@ -354,34 +526,26 @@ export default function Chairman() {
                 onClick={() => ollamaStatus.reachable ? checkOllama() : navigate('/admin')}
                 title={ollamaStatus.reachable ? `Ollama 연결됨 (${ollamaStatus.base_url})` : 'Ollama 미연결 — 클릭하여 설정'}
               >
-                {ollamaStatus.reachable
-                  ? <><Wifi size={10} />Ollama</>
-                  : <><WifiOff size={10} />Ollama 미연결</>
-                }
+                {ollamaStatus.reachable ? <><Wifi size={10} />Ollama</> : <><WifiOff size={10} />Ollama 미연결</>}
               </div>
             )}
-
             {newCompanyId && (
               <button
                 onClick={() => navigate('/live-office')}
                 className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5"
                 style={{
-                  background: 'rgba(16,185,129,0.15)',
-                  color: '#34d399',
-                  border: '1px solid rgba(16,185,129,0.3)',
-                  animation: 'pulse 2s infinite',
+                  background: 'rgba(16,185,129,0.15)', color: '#34d399',
+                  border: '1px solid rgba(16,185,129,0.3)', animation: 'pulse 2s infinite',
                 }}
               >
-                <CheckCircle size={12} />
-                AI 오피스 보기
+                <CheckCircle size={12} />AI 오피스 보기
               </button>
             )}
             <button
               onClick={newSession}
               className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 text-slate-500 hover:text-slate-300 bg-bg-elevated border border-bg-border"
             >
-              <Plus size={12} />
-              새 대화
+              <Plus size={12} />새 대화
             </button>
           </div>
         </div>
@@ -419,13 +583,9 @@ export default function Chairman() {
                 className="text-[10px] px-2.5 py-1 rounded flex items-center gap-1 text-amber-400 hover:text-amber-200"
                 style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)' }}
               >
-                <Settings size={9} />
-                설정
+                <Settings size={9} />설정
               </button>
-              <button
-                onClick={() => setOllamaBannerDismissed(true)}
-                className="text-slate-600 hover:text-slate-400 ml-1"
-              >
+              <button onClick={() => setOllamaBannerDismissed(true)} className="text-slate-600 hover:text-slate-400 ml-1">
                 <X size={12} />
               </button>
             </div>
@@ -458,22 +618,14 @@ export default function Chairman() {
           )}
 
           {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}
-            >
+            <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
               <div
                 className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-sm font-bold"
-                style={{
-                  background: msg.role === 'user' ? '#334155' : '#e24c4b',
-                  color: 'white',
-                }}
+                style={{ background: msg.role === 'user' ? '#334155' : '#e24c4b', color: 'white' }}
               >
                 {msg.role === 'user' ? '🫵' : '👔'}
               </div>
-              <div
-                className={`max-w-[72%] space-y-1 flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
-              >
+              <div className={`max-w-[72%] space-y-1 flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                 <div className="text-[10px] text-slate-600">
                   {msg.sender_name} · {format(new Date(msg.created_at), 'HH:mm')}
                 </div>
@@ -497,15 +649,9 @@ export default function Chairman() {
             </div>
           ))}
 
-          {/* Removed old standalone loading indicator — streaming msg shows inline dots */}
           {loading && messages.every((m) => m.role === 'user') && (
             <div className="flex gap-3">
-              <div
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0"
-                style={{ background: '#e24c4b' }}
-              >
-                👔
-              </div>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0" style={{ background: '#e24c4b' }}>👔</div>
               <div className="chat-ai flex items-center gap-1.5 px-4 py-3">
                 <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                 <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
@@ -540,7 +686,7 @@ export default function Chairman() {
         </div>
       </div>
 
-      {/* ── Right Live Panel ──────────────────────────────────── */}
+      {/* ── Right Live Panel ─────────────────────────────────────────────────── */}
       <div className="w-72 flex-shrink-0 flex flex-col border-l border-bg-border bg-bg-card overflow-hidden">
         {/* Panel tabs */}
         <div className="flex border-b border-bg-border flex-shrink-0">
@@ -548,21 +694,108 @@ export default function Chairman() {
             onClick={() => setPanelMode('companies')}
             className={`flex-1 py-2.5 text-xs font-medium transition-colors ${panelMode === 'companies' ? 'text-brand-light border-b-2 border-brand' : 'text-slate-500 hover:text-slate-300'}`}
           >
-            <span className="flex items-center justify-center gap-1.5">
-              <Building2 size={11} />계열사
-            </span>
+            <span className="flex items-center justify-center gap-1.5"><Building2 size={11} />계열사</span>
           </button>
           <button
             onClick={() => setPanelMode('delegation')}
             className={`flex-1 py-2.5 text-xs font-medium transition-colors ${panelMode === 'delegation' ? 'text-brand-light border-b-2 border-brand' : 'text-slate-500 hover:text-slate-300'}`}
           >
-            <span className="flex items-center justify-center gap-1.5">
-              <ArrowRight size={11} />지시 체인
-            </span>
+            <span className="flex items-center justify-center gap-1.5"><ArrowRight size={11} />지시 체인</span>
           </button>
+          {previewCompany && (
+            <button
+              onClick={() => setPanelMode('preview')}
+              className={`flex-1 py-2.5 text-xs font-medium transition-colors ${panelMode === 'preview' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-amber-500 hover:text-amber-300'}`}
+            >
+              <span className="flex items-center justify-center gap-1.5"><AlertCircle size={11} />승인 대기</span>
+            </button>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
+
+          {/* ── Preview panel ── */}
+          {panelMode === 'preview' && previewCompany && (
+            <div>
+              <div className="text-[10px] text-amber-500 uppercase tracking-widest font-mono px-1 mb-2 flex items-center gap-1">
+                <AlertCircle size={9} />설립 승인 대기
+              </div>
+              <div
+                style={{
+                  background: 'linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(245,158,11,0.04) 100%)',
+                  border: '1px solid rgba(245,158,11,0.3)',
+                  borderRadius: 12,
+                  padding: '14px',
+                }}
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <div
+                    style={{
+                      width: 32, height: 32, borderRadius: 8,
+                      background: 'rgba(245,158,11,0.15)',
+                      border: '1px solid rgba(245,158,11,0.3)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 16,
+                    }}
+                  >
+                    🏢
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold text-slate-100">{previewCompany.name}</div>
+                    <div className="text-[10px] text-amber-400">{previewCompany.industry}</div>
+                  </div>
+                </div>
+
+                {previewCompany.vision && (
+                  <div className="text-[10px] text-slate-400 italic mb-2 leading-relaxed">
+                    "{previewCompany.vision}"
+                  </div>
+                )}
+                {previewCompany.description && (
+                  <div className="text-[10px] text-slate-500 mb-3 leading-relaxed">
+                    {previewCompany.description}
+                  </div>
+                )}
+
+                <div
+                  className="text-[10px] text-slate-500 mb-3 p-2 rounded"
+                  style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.05)' }}
+                >
+                  <div className="flex items-center gap-1 mb-1">
+                    <Zap size={9} className="text-amber-400" />
+                    <span className="text-amber-400 font-medium">설립 후 자동 처리</span>
+                  </div>
+                  <div>• 역할별 AI 조직 자동 구성</div>
+                  <div>• CEO 초기 전략 브리핑 발송</div>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={confirmCompany}
+                    disabled={previewConfirming}
+                    className="flex-1 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5"
+                    style={{
+                      background: 'rgba(16,185,129,0.15)',
+                      color: '#34d399',
+                      border: '1px solid rgba(16,185,129,0.35)',
+                    }}
+                  >
+                    {previewConfirming ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />}
+                    설립 승인
+                  </button>
+                  <button
+                    onClick={cancelPreview}
+                    disabled={previewConfirming}
+                    className="flex-1 py-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 text-slate-500 hover:text-slate-300"
+                    style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+                  >
+                    <X size={11} />취소
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── Companies panel ── */}
           {panelMode === 'companies' && (
             <>
@@ -572,36 +805,45 @@ export default function Chairman() {
               {companies.length === 0 ? (
                 <div className="text-[11px] text-slate-600 text-center py-10 space-y-1">
                   <div>아직 계열사가 없습니다</div>
-                  <div className="text-slate-700 text-[10px]">
-                    회장님께 설립을 지시해보세요
-                  </div>
+                  <div className="text-slate-700 text-[10px]">회장님께 설립을 지시해보세요</div>
                 </div>
               ) : (
                 companies.map((c) => (
                   <div
                     key={c.id}
-                    onClick={() => navigate('/live-office')}
-                    className={`rounded-lg px-3 py-2.5 border cursor-pointer transition-all hover:border-brand/30 ${
+                    className={`rounded-lg border transition-all ${
                       c.id === newCompanyId
                         ? 'border-emerald-500/50 bg-emerald-500/5'
-                        : 'border-bg-border bg-bg-elevated hover:bg-bg-border/40'
+                        : 'border-bg-border bg-bg-elevated'
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-medium text-slate-200 truncate">{c.name}</div>
-                        <div className="text-[10px] text-slate-500 mt-0.5">{c.industry}</div>
-                        {c.vision && (
-                          <div className="text-[9px] text-slate-600 mt-1 truncate italic">
-                            "{c.vision}"
-                          </div>
-                        )}
+                    <div
+                      onClick={() => navigate('/live-office')}
+                      className="px-3 py-2.5 cursor-pointer hover:bg-bg-border/20 rounded-t-lg transition-colors"
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-medium text-slate-200 truncate">{c.name}</div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">{c.industry}</div>
+                          {c.vision && (
+                            <div className="text-[9px] text-slate-600 mt-1 truncate italic">"{c.vision}"</div>
+                          )}
+                        </div>
+                        {c.id === newCompanyId
+                          ? <CheckCircle size={13} className="text-emerald-400 flex-shrink-0" />
+                          : <ChevronRight size={11} className="text-slate-600 flex-shrink-0" />
+                        }
                       </div>
-                      {c.id === newCompanyId ? (
-                        <CheckCircle size={13} className="text-emerald-400 flex-shrink-0" />
-                      ) : (
-                        <ChevronRight size={11} className="text-slate-600 flex-shrink-0" />
-                      )}
+                    </div>
+                    {/* CEO chat button */}
+                    <div className="px-3 pb-2 border-t border-bg-border/50">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openCeoChat(c) }}
+                        className="w-full mt-1.5 py-1.5 rounded text-[10px] font-medium flex items-center justify-center gap-1.5 text-slate-400 hover:text-brand-light transition-colors"
+                        style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
+                      >
+                        <MessageSquare size={9} />CEO와 직접 대화
+                      </button>
                     </div>
                   </div>
                 ))
@@ -612,13 +854,11 @@ export default function Chairman() {
                   onClick={() => navigate('/live-office')}
                   className="w-full mt-2 py-2 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5"
                   style={{
-                    background: 'rgba(16,185,129,0.1)',
-                    color: '#34d399',
+                    background: 'rgba(16,185,129,0.1)', color: '#34d399',
                     border: '1px solid rgba(16,185,129,0.25)',
                   }}
                 >
-                  <Eye size={12} />
-                  설립 현장 보기 → AI 오피스
+                  <Eye size={12} />설립 현장 보기 → AI 오피스
                 </button>
               )}
             </>
@@ -633,9 +873,7 @@ export default function Chairman() {
               {delegationSteps.length === 0 ? (
                 <div className="text-[11px] text-slate-600 text-center py-10 space-y-1">
                   <div>계열사 이름을 포함해 질문하면</div>
-                  <div className="text-slate-700 text-[10px]">
-                    지시 체인을 실시간으로 볼 수 있습니다
-                  </div>
+                  <div className="text-slate-700 text-[10px]">지시 체인을 실시간으로 볼 수 있습니다</div>
                 </div>
               ) : (
                 <div className="space-y-0.5">
@@ -663,19 +901,154 @@ export default function Chairman() {
                         <div className="text-[9px] text-slate-600 leading-relaxed">{step.message}</div>
                       </div>
                       {i < delegationSteps.length - 1 && (
-                        <div
-                          className="ml-4 w-px bg-bg-border"
-                          style={{ height: 6 }}
-                        />
+                        <div className="ml-4 w-px bg-bg-border" style={{ height: 6 }} />
                       )}
                     </div>
                   ))}
+
+                  {/* CEO briefing answer preview */}
+                  {briefingAnswer && (
+                    <div
+                      className="mt-3 rounded-lg p-3"
+                      style={{
+                        background: 'rgba(99,102,241,0.06)',
+                        border: '1px solid rgba(99,102,241,0.2)',
+                      }}
+                    >
+                      <div className="text-[9px] text-indigo-400 font-medium mb-1.5 flex items-center gap-1">
+                        <MessageSquare size={9} />CEO 보고 요약
+                      </div>
+                      <div className="text-[10px] text-slate-400 leading-relaxed line-clamp-6">
+                        {briefingAnswer}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </>
           )}
         </div>
       </div>
+
+      {/* ── CEO Direct Chat Modal ─────────────────────────────────────────────── */}
+      {ceoChatCompany && (
+        <div
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(0,0,0,0.65)',
+            zIndex: 200,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeCeoChat() }}
+        >
+          <div
+            style={{
+              width: 500, height: 600,
+              background: 'linear-gradient(160deg, #0f172a 0%, #1a1535 100%)',
+              borderRadius: 16,
+              border: '1px solid rgba(99,102,241,0.3)',
+              boxShadow: '0 24px 64px rgba(0,0,0,0.7), 0 0 0 1px rgba(99,102,241,0.1)',
+              display: 'flex', flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              className="flex items-center gap-3 px-4 py-3 flex-shrink-0"
+              style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
+            >
+              <div
+                style={{
+                  width: 32, height: 32, borderRadius: 8,
+                  background: 'rgba(99,102,241,0.15)',
+                  border: '1px solid rgba(99,102,241,0.3)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 15,
+                }}
+              >
+                🤵
+              </div>
+              <div>
+                <div className="text-sm font-bold text-slate-100">{ceoChatCompany.name} CEO</div>
+                <div className="text-[10px] text-indigo-400">{ceoChatCompany.industry} · 직접 대화</div>
+              </div>
+              <button
+                onClick={closeCeoChat}
+                className="ml-auto text-slate-600 hover:text-slate-300 transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {ceoChatMessages.length === 0 && !ceoChatLoading && (
+                <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-600">
+                  <div style={{ fontSize: 36 }}>🤵</div>
+                  <div className="text-center">
+                    <div className="text-xs font-medium text-slate-400">{ceoChatCompany.name} CEO</div>
+                    <div className="text-[10px] text-slate-600 mt-1">회장님의 지시를 기다리고 있습니다</div>
+                  </div>
+                </div>
+              )}
+              {ceoChatMessages.map((msg) => (
+                <div key={msg.id} className={`flex gap-2.5 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                  <div
+                    className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs"
+                    style={{ background: msg.role === 'user' ? '#334155' : 'rgba(99,102,241,0.25)' }}
+                  >
+                    {msg.role === 'user' ? '👔' : '🤵'}
+                  </div>
+                  <div className={`max-w-[75%] ${msg.role === 'user' ? 'chat-user' : 'chat-ai'}`}>
+                    {msg.role === 'assistant' && ceoChatLoading && msg.content === '' ? (
+                      <div className="flex items-center gap-1.5 py-0.5">
+                        <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    ) : (
+                      <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed">
+                        {msg.content}
+                        {msg.role === 'assistant' && ceoChatLoading && msg.content !== '' && (
+                          <span className="inline-block w-0.5 h-3.5 bg-slate-400 ml-0.5 align-middle" style={{ animation: 'blink 1s step-end infinite' }} />
+                        )}
+                      </pre>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <div ref={ceoChatEndRef} />
+            </div>
+
+            {/* Input */}
+            <div className="px-4 py-3 flex-shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <div className="flex gap-2">
+                <textarea
+                  className="input resize-none flex-1 text-xs"
+                  rows={2}
+                  value={ceoChatInput}
+                  onChange={(e) => setCeoChatInput(e.target.value)}
+                  onKeyDown={handleCeoKey}
+                  placeholder={`${ceoChatCompany.name} CEO에게 지시… (Enter 전송)`}
+                  disabled={!ceoChatSession || ceoChatLoading}
+                />
+                <button
+                  onClick={sendCeoMessage}
+                  disabled={!ceoChatInput.trim() || !ceoChatSession || ceoChatLoading}
+                  className="btn-primary px-3 flex-shrink-0 flex items-center"
+                >
+                  {ceoChatLoading ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+        .line-clamp-6 { display:-webkit-box; -webkit-line-clamp:6; -webkit-box-orient:vertical; overflow:hidden; }
+      `}</style>
     </div>
   )
 }

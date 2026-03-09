@@ -10,6 +10,7 @@ from models.models import ChatSession, ChatMessage, User, AISuggestion, Company,
 from schemas.schemas import (
     ChatSessionCreate, ChatSessionOut,
     ChatMessageOut, ChatRequest, CompanyQueryRequest,
+    ConfirmCompanyRequest, BriefCeoRequest,
 )
 from services.ai_provider import (
     get_provider_from_db,
@@ -272,6 +273,28 @@ def stream_message(
             full_content = f"⚠️ 스트리밍 오류: {e}\n\nOllama가 실행 중인지 확인해주세요: `ollama serve`"
             yield f"data: {json.dumps({'chunk': full_content, 'done': False}, ensure_ascii=False)}\n\n"
 
+        # Check for CREATE_COMPANY — emit preview event instead of executing
+        preview_match = re.search(r'<<CREATE_COMPANY:(.*?)>>', full_content, re.DOTALL)
+        if preview_match:
+            raw = preview_match.group(1).strip()
+            try:
+                preview_data = json.loads(raw)
+                clean_text = re.sub(r'<<CREATE_COMPANY:.*?>>', '', full_content, flags=re.DOTALL).strip()
+                with SessionLocal() as new_db:
+                    ai_msg = ChatMessage(
+                        session_id=session_id,
+                        role="assistant",
+                        content=clean_text,
+                        sender_name=name,
+                    )
+                    new_db.add(ai_msg)
+                    new_db.commit()
+                    new_db.refresh(ai_msg)
+                yield f"data: {json.dumps({'type': 'preview', 'company_data': preview_data, 'chunk': '', 'done': True, 'message_id': ai_msg.id, 'final_content': clean_text}, ensure_ascii=False)}\n\n"
+                return
+            except (json.JSONDecodeError, Exception):
+                pass  # fall through to normal execution
+
         # Save complete AI message (new DB session since original is closed)
         with SessionLocal() as new_db:
             clean, action_results = _execute_actions(full_content, new_db, user_id)
@@ -341,6 +364,98 @@ def company_query(
         "ceo_name": ceo_name,
         "delegation": delegation,
         "answer": answer,
+    }
+
+
+@router.post("/confirm-company")
+def confirm_company(
+    req: ConfirmCompanyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Actually create a company that was previewed but not yet confirmed."""
+    company = Company(
+        name=req.name,
+        description=req.description,
+        industry=req.industry,
+        vision=req.vision,
+        status="active",
+        created_by=current_user.id,
+    )
+    db.add(company)
+    db.flush()
+    create_company_org(db, company.id, req.industry, "any")
+    db.commit()
+    db.refresh(company)
+    return {"id": company.id, "name": company.name, "industry": company.industry}
+
+
+@router.post("/brief-ceo")
+def brief_ceo(
+    req: BriefCeoRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Send an initial strategy briefing from chairman to newly founded company's CEO."""
+    company = db.query(Company).filter(Company.id == req.company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    ceo_node = (
+        db.query(OrgNode)
+        .filter(OrgNode.company_id == req.company_id, OrgNode.level == "ceo")
+        .first()
+    )
+    ceo_name = ceo_node.name if ceo_node else f"{company.name} CEO"
+
+    briefing = (
+        f"안녕하세요 {ceo_name}님. 한그룹 회장입니다.\n\n"
+        f"'{company.name}' 설립을 진심으로 축하합니다.\n\n"
+        f"회사 개요:\n"
+        f"- 산업: {company.industry}\n"
+        f"- 비전: {company.vision or '미정'}\n"
+        f"- 설명: {company.description or '미정'}\n\n"
+        f"초기 전략 방향을 수립하고 첫 100일 실행 계획을 간략히 보고해 주세요."
+    )
+
+    provider = get_provider_from_db(db, current_user.id)
+    answer = provider.chat(
+        [{"role": "user", "content": briefing}],
+        system=CEO_SYSTEM,
+        session_type="ceo",
+    )
+
+    # Find or create CEO session for this company
+    ceo_session = (
+        db.query(ChatSession)
+        .filter(ChatSession.company_id == req.company_id, ChatSession.session_type == "ceo")
+        .first()
+    )
+    if not ceo_session:
+        ceo_session = ChatSession(
+            company_id=req.company_id,
+            session_type="ceo",
+            title=f"{company.name} CEO 브리핑",
+            agent_name=ceo_name,
+            created_by=current_user.id,
+        )
+        db.add(ceo_session)
+        db.flush()
+
+    db.add(ChatMessage(session_id=ceo_session.id, role="user", content=briefing, sender_name="회장"))
+    db.add(ChatMessage(session_id=ceo_session.id, role="assistant", content=answer, sender_name=ceo_name))
+    db.commit()
+
+    return {
+        "company": {"id": company.id, "name": company.name},
+        "ceo_name": ceo_name,
+        "ceo_session_id": ceo_session.id,
+        "answer": answer,
+        "delegation": [
+            {"from": "회장", "to": ceo_name, "message": "설립 축하 및 초기 전략 브리핑 전달", "status": "done"},
+            {"from": ceo_name, "to": "경영팀", "message": "전략 방향 수립 착수", "status": "done"},
+            {"from": ceo_name, "to": "회장", "message": "100일 실행 계획 보고 완료", "status": "done"},
+        ],
     }
 
 

@@ -258,6 +258,17 @@ class CompanyQueryRequest(BaseModel):
     question: str
 
 
+class ConfirmCompanyRequest(BaseModel):
+    name: str
+    industry: str
+    description: str = ""
+    vision: str = ""
+
+
+class BriefCeoRequest(BaseModel):
+    company_id: int
+
+
 # ── Market ───────────────────────────────────────────────────────────────────
 class MarketAnalyzeRequest(BaseModel):
     industry: str
