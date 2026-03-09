@@ -1,9 +1,10 @@
 import re
 import json
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from core.database import get_db
+from core.database import get_db, SessionLocal
 from core.security import get_current_user
 from models.models import ChatSession, ChatMessage, User, AISuggestion, Company, OrgNode
 from schemas.schemas import (
@@ -177,6 +178,120 @@ def send_message(
     db.commit()
     db.refresh(ai_msg)
     return ai_msg
+
+
+@router.post("/stream")
+def stream_message(
+    req: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Stream AI response via Server-Sent Events (Ollama only; others fall back to single chunk)."""
+    session = db.query(ChatSession).filter(ChatSession.id == req.session_id).first()
+    if not session:
+        raise HTTPException(404, "Session not found")
+
+    # Save user message
+    user_msg = ChatMessage(
+        session_id=req.session_id,
+        role="user",
+        content=req.content,
+        sender_name=current_user.username,
+    )
+    db.add(user_msg)
+    db.flush()
+
+    # Build history
+    history = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == req.session_id)
+        .order_by(ChatMessage.created_at)
+        .all()
+    )
+    messages_list = [{"role": m.role, "content": m.content} for m in history]
+
+    provider = get_provider_from_db(db, current_user.id, req.provider_override)
+    if req.model_override:
+        provider.model = req.model_override
+
+    system_prompt = _get_system(session.session_type)
+    ai_name = session.agent_name or {
+        "chairman": "AI 회장",
+        "ceo": "AI CEO",
+        "committee": "AI 위원회",
+    }.get(session.session_type, "AI 어시스턴트")
+
+    # Capture values needed inside generator (DB session will be closed by then)
+    session_id = req.session_id
+    user_id = current_user.id
+    prov = provider
+    sys_prompt = system_prompt
+    msgs = messages_list
+    name = ai_name
+    db.commit()
+
+    def generate():
+        import httpx
+        full_content = ""
+
+        try:
+            if prov.provider == "ollama":
+                base_url = prov.base_url or __import__("core.config", fromlist=["settings"]).settings.OLLAMA_BASE_URL
+                full_msgs = []
+                if sys_prompt:
+                    full_msgs.append({"role": "system", "content": sys_prompt})
+                full_msgs.extend(msgs)
+
+                with httpx.stream(
+                    "POST",
+                    f"{base_url}/api/chat",
+                    json={"model": prov.model, "messages": full_msgs, "stream": True},
+                    timeout=120,
+                ) as r:
+                    for line in r.iter_lines():
+                        if not line:
+                            continue
+                        try:
+                            data = json.loads(line)
+                            chunk = data.get("message", {}).get("content", "")
+                            done = data.get("done", False)
+                            if chunk:
+                                full_content += chunk
+                                yield f"data: {json.dumps({'chunk': chunk, 'done': False}, ensure_ascii=False)}\n\n"
+                            if done:
+                                break
+                        except json.JSONDecodeError:
+                            continue
+            else:
+                # Non-streaming providers: call normally and emit as single chunk
+                response = prov.chat(msgs, system=sys_prompt, session_type="chairman")
+                full_content = response
+                yield f"data: {json.dumps({'chunk': response, 'done': False}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            full_content = f"⚠️ 스트리밍 오류: {e}\n\nOllama가 실행 중인지 확인해주세요: `ollama serve`"
+            yield f"data: {json.dumps({'chunk': full_content, 'done': False}, ensure_ascii=False)}\n\n"
+
+        # Save complete AI message (new DB session since original is closed)
+        with SessionLocal() as new_db:
+            clean, action_results = _execute_actions(full_content, new_db, user_id)
+            final = clean + "".join(action_results)
+            ai_msg = ChatMessage(
+                session_id=session_id,
+                role="assistant",
+                content=final,
+                sender_name=name,
+            )
+            new_db.add(ai_msg)
+            new_db.commit()
+            new_db.refresh(ai_msg)
+            yield f"data: {json.dumps({'chunk': '', 'done': True, 'message_id': ai_msg.id, 'final_content': final}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/company-query")

@@ -5,6 +5,7 @@ import {
   Eye, X, Plus, ChevronRight, WifiOff, Wifi, Settings,
 } from 'lucide-react'
 import { chatApi, orgApi, companiesApi, modelsApi } from '../api/client'
+import { useAuthStore } from '../store/useStore'
 import type { ChatSession, ChatMessage } from '../types'
 import { format } from 'date-fns'
 
@@ -164,8 +165,9 @@ export default function Chairman() {
     setInput('')
     setLoading(true)
 
+    const userMsgId = Date.now()
     const tempUser: ChatMessage = {
-      id: Date.now(),
+      id: userMsgId,
       session_id: session.id,
       role: 'user',
       content,
@@ -174,68 +176,109 @@ export default function Chairman() {
     }
     setMessages((prev) => [...prev, tempUser])
 
-    // Detect if querying a specific company (and not creating one)
+    // Company-query path (delegation chain) — no streaming
     const queriedCompany = detectCompanyQuery(content, companies)
     const isCreation = ['만들', '설립', '창설', '시작'].some((kw) => content.includes(kw))
 
     if (queriedCompany && !isCreation) {
-      // Use company-query endpoint for delegation chain
       showDelegation(queriedCompany, content)
       try {
         const res = await chatApi.companyQuery(queriedCompany.id, content)
         const data = res.data as { answer: string; ceo_name: string; delegation: DelegationStep[] }
-        // Mark all delegation steps as done
         setDelegationSteps(data.delegation.map((s) => ({ ...s, status: 'done' as const })))
-        // Inject AI answer as message
         const syntheticMsg: ChatMessage = {
-          id: Date.now() + 1,
+          id: userMsgId + 1,
           session_id: session.id,
           role: 'assistant',
           content: `[${data.ceo_name} 보고]\n\n${data.answer}`,
           sender_name: data.ceo_name,
           created_at: new Date().toISOString(),
         }
-        setMessages((prev) => [
-          ...prev.filter((m) => m.id !== tempUser.id),
-          tempUser,
-          syntheticMsg,
-        ])
+        setMessages((prev) => [...prev.filter((m) => m.id !== userMsgId), tempUser, syntheticMsg])
       } catch {
-        // Fallback to normal send
-        try {
-          const res = await chatApi.send({ session_id: session.id, content })
-          setMessages((prev) => [
-            ...prev.filter((m) => m.id !== tempUser.id),
-            tempUser,
-            res.data as ChatMessage,
-          ])
-        } catch {
-          setMessages((prev) => prev.filter((m) => m.id !== tempUser.id))
-        }
+        setMessages((prev) => prev.filter((m) => m.id !== userMsgId))
       }
-    } else {
-      try {
-        const res = await chatApi.send({ session_id: session.id, content })
-        const aiMsg = res.data as ChatMessage
-        setMessages((prev) => [
-          ...prev.filter((m) => m.id !== tempUser.id),
-          tempUser,
-          aiMsg,
-        ])
-
-        // Check if company was created
-        const created = parseCreatedCompany(aiMsg.content)
-        if (created) {
-          setNewCompanyId(created.id)
-          loadCompanies()
-          setPanelMode('companies')
-          if (delegTimerRef.current) clearInterval(delegTimerRef.current)
-        }
-      } catch {
-        setMessages((prev) => prev.filter((m) => m.id !== tempUser.id))
-      }
+      setLoading(false)
+      return
     }
 
+    // Streaming path — chairman chat
+    const streamMsgId = userMsgId + 1
+    const streamMsg: ChatMessage = {
+      id: streamMsgId,
+      session_id: session.id,
+      role: 'assistant',
+      content: '',
+      sender_name: chairman?.name || 'AI 회장',
+      created_at: new Date().toISOString(),
+    }
+    setMessages((prev) => [...prev, streamMsg])
+
+    try {
+      const token = useAuthStore.getState().token
+      const response = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ session_id: session.id, content }),
+      })
+
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const evt = JSON.parse(line.slice(6))
+
+            if (evt.chunk && !evt.done) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === streamMsgId ? { ...m, content: m.content + evt.chunk } : m
+                )
+              )
+            }
+
+            if (evt.done && evt.final_content !== undefined) {
+              // Replace with server-saved final (includes action results)
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === streamMsgId
+                    ? { ...m, content: evt.final_content, id: evt.message_id ?? streamMsgId }
+                    : m
+                )
+              )
+              const created = parseCreatedCompany(evt.final_content)
+              if (created) {
+                setNewCompanyId(created.id)
+                loadCompanies()
+                setPanelMode('companies')
+                if (delegTimerRef.current) clearInterval(delegTimerRef.current)
+              }
+            }
+          } catch {
+            // malformed SSE line — skip
+          }
+        }
+      }
+    } catch (err) {
+      setMessages((prev) => prev.filter((m) => m.id !== streamMsgId))
+    } finally {
+      setLoading(false)
+    }
   }
 
   const showDelegation = (company: Company, question: string) => {
@@ -435,15 +478,27 @@ export default function Chairman() {
                   {msg.sender_name} · {format(new Date(msg.created_at), 'HH:mm')}
                 </div>
                 <div className={msg.role === 'user' ? 'chat-user' : 'chat-ai'}>
-                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                    {msg.content}
-                  </pre>
+                  {msg.role === 'assistant' && loading && msg.content === '' ? (
+                    <div className="flex items-center gap-1.5 py-0.5">
+                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
+                  ) : (
+                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+                      {msg.content}
+                      {msg.role === 'assistant' && loading && msg.content !== '' && (
+                        <span className="inline-block w-0.5 h-4 bg-slate-400 ml-0.5 align-middle" style={{ animation: 'blink 1s step-end infinite' }} />
+                      )}
+                    </pre>
+                  )}
                 </div>
               </div>
             </div>
           ))}
 
-          {loading && (
+          {/* Removed old standalone loading indicator — streaming msg shows inline dots */}
+          {loading && messages.every((m) => m.role === 'user') && (
             <div className="flex gap-3">
               <div
                 className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0"
