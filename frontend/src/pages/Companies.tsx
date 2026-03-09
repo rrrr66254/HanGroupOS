@@ -423,6 +423,7 @@ function AiEditPanel({ companyId }: { companyId: number }) {
               )
             })}
           </div>
+        </div>
         )
       })}
     </div>
