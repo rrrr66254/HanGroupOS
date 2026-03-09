@@ -83,6 +83,9 @@ export const chatApi = {
     api.post('/chat/company-query', { company_id: companyId, question }),
   confirmCompany: (data: object) => api.post('/chat/confirm-company', data),
   briefCeo: (companyId: number) => api.post('/chat/brief-ceo', { company_id: companyId }),
+  groupKpi: () => api.get('/chat/group-kpi'),
+  collaborate: (companyAId: number, companyBId: number, task: string) =>
+    api.post('/chat/collaborate', { company_a_id: companyAId, company_b_id: companyBId, task }),
   suggestions: (companyId?: number) =>
     api.get('/chat/suggestions', { params: { company_id: companyId } }),
   dismissSuggestion: (id: number) => api.post(`/chat/suggestions/${id}/dismiss`),

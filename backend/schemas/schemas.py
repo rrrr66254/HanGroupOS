@@ -269,6 +269,12 @@ class BriefCeoRequest(BaseModel):
     company_id: int
 
 
+class CollaborateRequest(BaseModel):
+    company_a_id: int
+    company_b_id: int
+    task: str
+
+
 # ── Market ───────────────────────────────────────────────────────────────────
 class MarketAnalyzeRequest(BaseModel):
     industry: str

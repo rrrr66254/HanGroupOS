@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Send, Loader2, ArrowRight, CheckCircle, Building2,
   Eye, X, Plus, ChevronRight, WifiOff, Wifi, Settings,
-  MessageSquare, Zap, AlertCircle,
+  MessageSquare, Zap, AlertCircle, BarChart2, Users,
 } from 'lucide-react'
 import { chatApi, orgApi, companiesApi, modelsApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
@@ -51,7 +51,22 @@ interface DelegationStep {
   status: 'pending' | 'active' | 'done'
 }
 
-type PanelMode = 'companies' | 'delegation' | 'preview'
+interface CompanyKPI {
+  id: number
+  name: string
+  industry: string
+  ai_messages: number
+  org_nodes: number
+  strategies: number
+  ai_score: number
+}
+
+interface GroupKPI {
+  companies: CompanyKPI[]
+  totals: { total_companies: number; total_ai_messages: number; avg_ai_score: number }
+}
+
+type PanelMode = 'companies' | 'delegation' | 'preview' | 'kpi'
 
 const QUICK_PROMPTS = [
   '현재 계열사 현황을 보고해줘',
@@ -91,6 +106,10 @@ export default function Chairman() {
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null)
   const [ollamaChecking, setOllamaChecking] = useState(true)
   const [ollamaBannerDismissed, setOllamaBannerDismissed] = useState(false)
+
+  // KPI state
+  const [kpiData, setKpiData] = useState<GroupKPI | null>(null)
+  const [kpiLoading, setKpiLoading] = useState(false)
 
   // CEO direct chat state
   const [ceoChatCompany, setCeoChatCompany] = useState<Company | null>(null)
@@ -222,6 +241,71 @@ export default function Chairman() {
     setPanelMode('companies')
   }
 
+  // ── Group KPI ─────────────────────────────────────────────────────────────
+  const loadKpi = async () => {
+    setKpiLoading(true)
+    try {
+      const res = await chatApi.groupKpi()
+      setKpiData(res.data as GroupKPI)
+    } catch { /* ignore */ } finally {
+      setKpiLoading(false)
+    }
+  }
+
+  // ── Collaboration ─────────────────────────────────────────────────────────
+  const handleCollaboration = async (companyA: Company, companyB: Company, task: string) => {
+    // Show delegation animation immediately
+    if (delegTimerRef.current) clearInterval(delegTimerRef.current)
+    setBriefingAnswer(null)
+    const animSteps: DelegationStep[] = [
+      { from: '회장', to: `${companyA.name} CEO`, message: `협업 과제 전달 중…`, status: 'active' },
+      { from: `${companyA.name} CEO`, to: `${companyB.name} CEO`, message: '역할 및 제안 협의', status: 'pending' },
+      { from: `${companyB.name} CEO`, to: `${companyA.name} CEO`, message: '보완 및 계획 수립', status: 'pending' },
+      { from: `${companyA.name} CEO`, to: '회장', message: '공동 실행 계획 보고', status: 'pending' },
+    ]
+    setDelegationSteps(animSteps)
+    setPanelMode('delegation')
+
+    let step = 1
+    delegTimerRef.current = setInterval(() => {
+      setDelegationSteps((prev) =>
+        prev.map((s, i) => ({ ...s, status: i < step ? 'done' : i === step ? 'active' : 'pending' }))
+      )
+      step++
+      if (step >= animSteps.length && delegTimerRef.current) clearInterval(delegTimerRef.current)
+    }, 2200)
+
+    try {
+      const res = await chatApi.collaborate(companyA.id, companyB.id, task)
+      const data = res.data as {
+        company_a: { name: string }
+        company_b: { name: string }
+        ceo_a_name: string
+        ceo_b_name: string
+        response_a: string
+        response_b: string
+        combined: string
+        delegation: DelegationStep[]
+      }
+
+      if (delegTimerRef.current) clearInterval(delegTimerRef.current)
+      setDelegationSteps(data.delegation.map((s) => ({ ...s, status: 'done' as const })))
+      setBriefingAnswer(data.combined)
+
+      const syntheticMsg: ChatMessage = {
+        id: Date.now(),
+        session_id: session?.id ?? 0,
+        role: 'assistant',
+        content: `🤝 [${data.company_a.name} × ${data.company_b.name} 협업 계획]\n\n${data.combined}`,
+        sender_name: 'AI 협업 조정관',
+        created_at: new Date().toISOString(),
+      }
+      setMessages((prev) => [...prev, syntheticMsg])
+    } catch {
+      if (delegTimerRef.current) clearInterval(delegTimerRef.current)
+    }
+  }
+
   // ── CEO direct chat ───────────────────────────────────────────────────────
   const openCeoChat = async (company: Company) => {
     setCeoChatCompany(company)
@@ -343,6 +427,16 @@ export default function Chairman() {
       created_at: new Date().toISOString(),
     }
     setMessages((prev) => [...prev, tempUser])
+
+    // Collaboration path — two company names + collaboration keywords
+    const collabKeywords = ['협력', '협업', '함께', '공동', '같이', '연합', '합작', '같이']
+    const isCollab = collabKeywords.some((kw) => content.includes(kw))
+    const mentionedCos = companies.filter((c) => content.includes(c.name))
+    if (isCollab && mentionedCos.length >= 2) {
+      await handleCollaboration(mentionedCos[0], mentionedCos[1], content)
+      setLoading(false)
+      return
+    }
 
     // Company-query path (delegation chain)
     const queriedCompany = detectCompanyQuery(content, companies)
@@ -692,22 +786,28 @@ export default function Chairman() {
         <div className="flex border-b border-bg-border flex-shrink-0">
           <button
             onClick={() => setPanelMode('companies')}
-            className={`flex-1 py-2.5 text-xs font-medium transition-colors ${panelMode === 'companies' ? 'text-brand-light border-b-2 border-brand' : 'text-slate-500 hover:text-slate-300'}`}
+            className={`flex-1 py-2 text-[10px] font-medium transition-colors ${panelMode === 'companies' ? 'text-brand-light border-b-2 border-brand' : 'text-slate-500 hover:text-slate-300'}`}
           >
-            <span className="flex items-center justify-center gap-1.5"><Building2 size={11} />계열사</span>
+            <span className="flex items-center justify-center gap-1"><Building2 size={10} />계열사</span>
+          </button>
+          <button
+            onClick={() => { setPanelMode('kpi'); if (!kpiData) loadKpi() }}
+            className={`flex-1 py-2 text-[10px] font-medium transition-colors ${panelMode === 'kpi' ? 'text-brand-light border-b-2 border-brand' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            <span className="flex items-center justify-center gap-1"><BarChart2 size={10} />KPI</span>
           </button>
           <button
             onClick={() => setPanelMode('delegation')}
-            className={`flex-1 py-2.5 text-xs font-medium transition-colors ${panelMode === 'delegation' ? 'text-brand-light border-b-2 border-brand' : 'text-slate-500 hover:text-slate-300'}`}
+            className={`flex-1 py-2 text-[10px] font-medium transition-colors ${panelMode === 'delegation' ? 'text-brand-light border-b-2 border-brand' : 'text-slate-500 hover:text-slate-300'}`}
           >
-            <span className="flex items-center justify-center gap-1.5"><ArrowRight size={11} />지시 체인</span>
+            <span className="flex items-center justify-center gap-1"><ArrowRight size={10} />지시체인</span>
           </button>
           {previewCompany && (
             <button
               onClick={() => setPanelMode('preview')}
-              className={`flex-1 py-2.5 text-xs font-medium transition-colors ${panelMode === 'preview' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-amber-500 hover:text-amber-300'}`}
+              className={`flex-1 py-2 text-[10px] font-medium transition-colors ${panelMode === 'preview' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-amber-500 hover:text-amber-300'}`}
             >
-              <span className="flex items-center justify-center gap-1.5"><AlertCircle size={11} />승인 대기</span>
+              <span className="flex items-center justify-center gap-1"><AlertCircle size={10} />승인</span>
             </button>
           )}
         </div>
@@ -794,6 +894,114 @@ export default function Chairman() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* ── KPI panel ── */}
+          {panelMode === 'kpi' && (
+            <>
+              <div className="flex items-center justify-between px-1 mb-2">
+                <div className="text-[10px] text-slate-500 uppercase tracking-widest font-mono">그룹 KPI</div>
+                <button
+                  onClick={loadKpi}
+                  className="text-[9px] text-slate-600 hover:text-slate-400 flex items-center gap-0.5"
+                >
+                  {kpiLoading ? <Loader2 size={9} className="animate-spin" /> : <BarChart2 size={9} />}
+                  새로고침
+                </button>
+              </div>
+
+              {kpiLoading && !kpiData && (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 size={16} className="animate-spin text-slate-600" />
+                </div>
+              )}
+
+              {kpiData && (
+                <>
+                  {/* Group totals */}
+                  <div className="grid grid-cols-3 gap-1.5 mb-3">
+                    {[
+                      { label: '계열사', value: kpiData.totals.total_companies, icon: Building2 },
+                      { label: 'AI 대화', value: kpiData.totals.total_ai_messages, icon: MessageSquare },
+                      { label: '평균점수', value: `${kpiData.totals.avg_ai_score}`, icon: BarChart2 },
+                    ].map(({ label, value, icon: Icon }) => (
+                      <div
+                        key={label}
+                        className="rounded-lg p-2 text-center"
+                        style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
+                      >
+                        <Icon size={10} className="text-slate-500 mx-auto mb-1" />
+                        <div className="text-sm font-bold text-slate-200">{value}</div>
+                        <div className="text-[9px] text-slate-600">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Per-company rows */}
+                  {kpiData.companies.length === 0 ? (
+                    <div className="text-[11px] text-slate-600 text-center py-6">
+                      계열사 데이터 없음
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {kpiData.companies.map((c) => {
+                        const score = c.ai_score
+                        const barColor =
+                          score >= 80 ? '#34d399' :
+                          score >= 60 ? '#60a5fa' :
+                          score >= 30 ? '#fbbf24' : '#f87171'
+                        return (
+                          <div
+                            key={c.id}
+                            className="rounded-lg p-2.5"
+                            style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}
+                          >
+                            <div className="flex items-center justify-between mb-1.5">
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[11px] font-medium text-slate-200 truncate">{c.name}</div>
+                                <div className="text-[9px] text-slate-600">{c.industry}</div>
+                              </div>
+                              <div
+                                className="text-xs font-bold ml-2 flex-shrink-0"
+                                style={{ color: barColor }}
+                              >
+                                {score}
+                              </div>
+                            </div>
+                            {/* Score bar */}
+                            <div className="h-1 rounded-full bg-bg-border overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all"
+                                style={{ width: `${score}%`, background: barColor }}
+                              />
+                            </div>
+                            <div className="flex gap-2 mt-1.5">
+                              {[
+                                { icon: MessageSquare, val: c.ai_messages, label: '대화' },
+                                { icon: Users, val: c.org_nodes, label: '조직' },
+                                { icon: Zap, val: c.strategies, label: '전략' },
+                              ].map(({ icon: Icon, val, label }) => (
+                                <div key={label} className="flex items-center gap-0.5 text-[9px] text-slate-600">
+                                  <Icon size={8} />
+                                  <span>{val} {label}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {!kpiData && !kpiLoading && (
+                <div className="text-center py-10 space-y-2">
+                  <BarChart2 size={20} className="text-slate-700 mx-auto" />
+                  <div className="text-[11px] text-slate-600">KPI 탭을 클릭하면 로드됩니다</div>
+                </div>
+              )}
+            </>
           )}
 
           {/* ── Companies panel ── */}

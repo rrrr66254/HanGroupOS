@@ -6,11 +6,11 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from core.database import get_db, SessionLocal
 from core.security import get_current_user
-from models.models import ChatSession, ChatMessage, User, AISuggestion, Company, OrgNode
+from models.models import ChatSession, ChatMessage, User, AISuggestion, Company, OrgNode, StrategyItem
 from schemas.schemas import (
     ChatSessionCreate, ChatSessionOut,
     ChatMessageOut, ChatRequest, CompanyQueryRequest,
-    ConfirmCompanyRequest, BriefCeoRequest,
+    ConfirmCompanyRequest, BriefCeoRequest, CollaborateRequest,
 )
 from services.ai_provider import (
     get_provider_from_db,
@@ -455,6 +455,112 @@ def brief_ceo(
             {"from": "회장", "to": ceo_name, "message": "설립 축하 및 초기 전략 브리핑 전달", "status": "done"},
             {"from": ceo_name, "to": "경영팀", "message": "전략 방향 수립 착수", "status": "done"},
             {"from": ceo_name, "to": "회장", "message": "100일 실행 계획 보고 완료", "status": "done"},
+        ],
+    }
+
+
+@router.get("/group-kpi")
+def group_kpi(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Return AI activity KPI metrics for every active company."""
+    companies = db.query(Company).filter(Company.status == "active").all()
+    result = []
+    for company in companies:
+        sessions = db.query(ChatSession).filter(ChatSession.company_id == company.id).all()
+        session_ids = [s.id for s in sessions]
+        msg_count = (
+            db.query(ChatMessage).filter(ChatMessage.session_id.in_(session_ids)).count()
+            if session_ids else 0
+        )
+        node_count = db.query(OrgNode).filter(OrgNode.company_id == company.id).count()
+        strategy_count = db.query(StrategyItem).filter(StrategyItem.company_id == company.id).count()
+        ai_score = min(100, msg_count * 5 + node_count * 3 + strategy_count * 10)
+        result.append({
+            "id": company.id,
+            "name": company.name,
+            "industry": company.industry,
+            "ai_messages": msg_count,
+            "org_nodes": node_count,
+            "strategies": strategy_count,
+            "ai_score": ai_score,
+        })
+
+    total_msgs = sum(r["ai_messages"] for r in result)
+    avg_score = round(sum(r["ai_score"] for r in result) / len(result), 1) if result else 0
+    return {
+        "companies": sorted(result, key=lambda r: r["ai_score"], reverse=True),
+        "totals": {
+            "total_companies": len(result),
+            "total_ai_messages": total_msgs,
+            "avg_ai_score": avg_score,
+        },
+    }
+
+
+@router.post("/collaborate")
+def collaborate(
+    req: CollaborateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Have two company CEOs collaborate on a task assigned by the chairman."""
+    company_a = db.query(Company).filter(Company.id == req.company_a_id).first()
+    company_b = db.query(Company).filter(Company.id == req.company_b_id).first()
+    if not company_a or not company_b:
+        raise HTTPException(404, "Company not found")
+
+    ceo_a = db.query(OrgNode).filter(OrgNode.company_id == req.company_a_id, OrgNode.level == "ceo").first()
+    ceo_b = db.query(OrgNode).filter(OrgNode.company_id == req.company_b_id, OrgNode.level == "ceo").first()
+    ceo_a_name = ceo_a.name if ceo_a else f"{company_a.name} CEO"
+    ceo_b_name = ceo_b.name if ceo_b else f"{company_b.name} CEO"
+
+    provider = get_provider_from_db(db, current_user.id)
+
+    # Step 1: CEO A proposes its role
+    prompt_a = (
+        f"한그룹 회장의 협업 과제입니다.\n\n"
+        f"협업 과제: {req.task}\n\n"
+        f"협업 파트너: {company_b.name} ({company_b.industry})\n\n"
+        f"{company_a.name}의 CEO로서 이 협업에서 귀사의 역할, 강점, 구체적인 기여 방안을 제시해주세요. "
+        f"간결하게 작성해주세요."
+    )
+    response_a = provider.chat([{"role": "user", "content": prompt_a}], system=CEO_SYSTEM, session_type="ceo")
+
+    # Step 2: CEO B responds, seeing CEO A's proposal
+    prompt_b = (
+        f"한그룹 회장의 협업 과제입니다.\n\n"
+        f"협업 과제: {req.task}\n\n"
+        f"협업 파트너: {company_a.name} ({company_a.industry})\n\n"
+        f"{ceo_a_name}의 제안:\n{response_a}\n\n"
+        f"{company_b.name}의 CEO로서 위 제안을 바탕으로 귀사의 역할, 보완점, 공동 실행 계획을 제시해주세요. "
+        f"간결하게 작성해주세요."
+    )
+    response_b = provider.chat([{"role": "user", "content": prompt_b}], system=CEO_SYSTEM, session_type="ceo")
+
+    # Step 3: Synthesize combined plan
+    prompt_combined = (
+        f"다음 두 CEO의 협업 제안을 종합하여 최종 공동 실행 계획을 작성해주세요.\n\n"
+        f"[{ceo_a_name}]\n{response_a}\n\n"
+        f"[{ceo_b_name}]\n{response_b}\n\n"
+        f"명확하고 실행 가능한 공동 계획을 번호 목록으로 작성해주세요."
+    )
+    combined = provider.chat([{"role": "user", "content": prompt_combined}], system=CHAIRMAN_SYSTEM, session_type="chairman")
+
+    return {
+        "company_a": {"id": company_a.id, "name": company_a.name},
+        "company_b": {"id": company_b.id, "name": company_b.name},
+        "ceo_a_name": ceo_a_name,
+        "ceo_b_name": ceo_b_name,
+        "response_a": response_a,
+        "response_b": response_b,
+        "combined": combined,
+        "delegation": [
+            {"from": "회장", "to": ceo_a_name, "message": f"협업 과제 전달: {req.task[:28]}…", "status": "done"},
+            {"from": ceo_a_name, "to": ceo_b_name, "message": "역할 및 협업 방안 제안", "status": "done"},
+            {"from": ceo_b_name, "to": ceo_a_name, "message": "보완 및 공동 계획 수립", "status": "done"},
+            {"from": ceo_a_name, "to": "회장", "message": "최종 공동 실행 계획 보고", "status": "done"},
         ],
     }
 
