@@ -215,6 +215,20 @@ export const workApi = {
     api.post(`/work/weekly-report/${companyId}`),
 }
 
+// ── Sites ─────────────────────────────────────────────────────────────────────
+export const sitesApi = {
+  list: (status?: string) => api.get('/sites', { params: { status } }),
+  getCompanySite: (companyId: number) => api.get(`/sites/company/${companyId}`),
+  generate: (companyId: number, templateType = 'corporate') =>
+    api.post(`/sites/generate/${companyId}`, null, { params: { template_type: templateType } }),
+  getHtml: (siteId: number) => api.get(`/sites/${siteId}/html`),
+  updateHtml: (siteId: number, html: string) => api.patch(`/sites/${siteId}/html`, { html }),
+  deploy: (siteId: number) => api.post(`/sites/${siteId}/deploy`),
+  undeploy: (siteId: number) => api.post(`/sites/${siteId}/undeploy`),
+  submissions: (siteId: number) => api.get(`/sites/${siteId}/submissions`),
+  evaluate: () => api.post('/sites/evaluate'),
+}
+
 // ── Agent (personality + direct chat) ────────────────────────────────────────
 export const agentApi = {
   updatePersonality: (nodeId: number, personality: object) =>

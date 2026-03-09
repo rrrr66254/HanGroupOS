@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import init_db, SessionLocal
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites
 
 
 app = FastAPI(
@@ -33,6 +33,7 @@ app.include_router(memory.router)
 app.include_router(strategy.router)
 app.include_router(knowledge.router)
 app.include_router(work.router)
+app.include_router(sites.router)  # includes both /api/sites/* and public /sites/*
 
 
 @app.get("/health")

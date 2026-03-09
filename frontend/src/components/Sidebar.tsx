@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, MessageSquare, Building2, CheckSquare,
   Users, TrendingUp, Map, FlaskConical, Monitor,
-  Brain, Settings, ChevronLeft, ChevronRight, Zap, Home, Bell, FileText,
+  Brain, Settings, ChevronLeft, ChevronRight, Zap, Home, Bell, FileText, Globe, Star,
 } from 'lucide-react'
 import { useAppStore } from '../store/useStore'
 
@@ -20,6 +20,8 @@ const NAV = [
   { to: '/live-office', icon: Monitor, label: 'AI 오피스' },
   { to: '/memory', icon: Brain, label: '기업기억' },
   { to: '/weekly-report', icon: FileText, label: '주간보고서' },
+  { to: '/site-builder', icon: Globe, label: '웹사이트' },
+  { to: '/site-evaluator', icon: Star, label: '사이트평가' },
   { to: '/admin', icon: Settings, label: '관리자' },
 ]
 

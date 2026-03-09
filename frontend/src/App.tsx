@@ -18,6 +18,8 @@ import Memory from './pages/Memory'
 import Admin from './pages/Admin'
 import GroupHome from './pages/GroupHome'
 import WeeklyReport from './pages/WeeklyReport'
+import SiteBuilder from './pages/SiteBuilder'
+import SiteEvaluator from './pages/SiteEvaluator'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -68,6 +70,8 @@ export default function App() {
           <Route path="memory" element={<Memory />} />
           <Route path="admin" element={<Admin />} />
           <Route path="weekly-report" element={<WeeklyReport />} />
+          <Route path="site-builder" element={<SiteBuilder />} />
+          <Route path="site-evaluator" element={<SiteEvaluator />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>

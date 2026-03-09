@@ -337,3 +337,30 @@ class AgentMessage(Base):
     message = Column(Text, nullable=False)   # sender's message
     reply = Column(Text, default="")         # receiver's reply
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompanySite(Base):
+    __tablename__ = "company_sites"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    title = Column(String(200), nullable=False)
+    slug = Column(String(100), unique=True, nullable=False)       # URL: /sites/{slug}
+    description = Column(Text, default="")
+    html_content = Column(Text, default="")                       # full HTML page
+    status = Column(String(20), default="draft")                  # draft | live | archived
+    template_type = Column(String(50), default="corporate")       # corporate | product | portfolio | landing
+    ai_score = Column(Float, default=0.0)                         # chairman evaluation score
+    ai_feedback = Column(Text, default="")                        # chairman evaluation text
+    visits = Column(Integer, default=0)                           # page view count
+    created_at = Column(DateTime, default=datetime.utcnow)
+    deployed_at = Column(DateTime, nullable=True)
+
+
+class SiteSubmission(Base):
+    __tablename__ = "site_submissions"
+    id = Column(Integer, primary_key=True, index=True)
+    site_id = Column(Integer, ForeignKey("company_sites.id"), nullable=False)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    form_data = Column(JSON, default={})                          # submitted form fields
+    source = Column(String(100), default="contact")               # contact | newsletter | inquiry
+    created_at = Column(DateTime, default=datetime.utcnow)
