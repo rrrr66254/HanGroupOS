@@ -229,6 +229,12 @@ export const sitesApi = {
   evaluate: () => api.post('/sites/evaluate'),
 }
 
+// ── Synergy ───────────────────────────────────────────────────────────────────
+export const synergyApi = {
+  analyze: (companyIds: number[]) =>
+    api.post('/strategy/synergy', { company_ids: companyIds }),
+}
+
 // ── Agent (personality + direct chat) ────────────────────────────────────────
 export const agentApi = {
   updatePersonality: (nodeId: number, personality: object) =>

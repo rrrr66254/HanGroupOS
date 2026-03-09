@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, MessageSquare, Building2, CheckSquare,
   Users, TrendingUp, Map, FlaskConical, Monitor,
-  Brain, Settings, ChevronLeft, ChevronRight, Zap, Home, Bell, FileText, Globe, Star,
+  Brain, Settings, ChevronLeft, ChevronRight, Zap, Home, Bell, FileText, Globe, Star, GitMerge,
 } from 'lucide-react'
 import { useAppStore } from '../store/useStore'
 
@@ -22,6 +22,7 @@ const NAV = [
   { to: '/weekly-report', icon: FileText, label: '주간보고서' },
   { to: '/site-builder', icon: Globe, label: '웹사이트' },
   { to: '/site-evaluator', icon: Star, label: '사이트평가' },
+  { to: '/synergy', icon: GitMerge, label: '시너지분석' },
   { to: '/admin', icon: Settings, label: '관리자' },
 ]
 

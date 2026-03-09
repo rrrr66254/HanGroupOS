@@ -3,14 +3,28 @@ import { useNavigate } from 'react-router-dom'
 import {
   Building2, MessageSquare, BarChart2, Clock, Loader2,
   Zap, ChevronRight, ArrowRight, Trophy, RefreshCw,
-  TrendingUp, Users, Star, Wifi,
+  TrendingUp, Users, Star, Wifi, Radio,
 } from 'lucide-react'
 import { chatApi, companiesApi } from '../api/client'
 import WorkFeed from '../components/WorkFeed'
-import { useAppStore } from '../store/useStore'
+import { useAppStore, useAuthStore } from '../store/useStore'
 import { format } from 'date-fns'
 
 const POLL_INTERVAL = 30 // seconds
+
+interface LiveEvent {
+  type: string; icon: string; title: string; body: string
+  company_id?: number; created_at: string
+}
+
+const LIVE_EVENT_COLOR: Record<string, string> = {
+  work_done:      'rgba(52,211,153,0.12)',
+  form_submitted: 'rgba(99,102,241,0.12)',
+  agent_p2p:      'rgba(167,139,250,0.12)',
+  site_deployed:  'rgba(96,165,250,0.12)',
+  ready:          '',
+  ping:           '',
+}
 
 interface TimelineEvent {
   type: string; icon: string; title: string; description: string; created_at: string
@@ -37,6 +51,7 @@ const EVENT_COLOR: Record<string, string> = {
 
 export default function GroupHome() {
   const navigate = useNavigate()
+  const token = useAuthStore((s) => s.token)
   const [companyCount, setCompanyCount] = useState(0)
   const [kpiTop, setKpiTop] = useState<CompanyKPI[]>([])
   const [timeline, setTimeline] = useState<TimelineEvent[]>([])
@@ -48,6 +63,11 @@ export default function GroupHome() {
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // ── Live event stream ───────────────────────────────────────────────────
+  const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([])
+  const [sseConnected, setSseConnected] = useState(false)
+  const sseRef = useRef<{ close: () => void } | null>(null)
 
   const loadAll = async () => {
     setRefreshing(true)
@@ -95,6 +115,41 @@ export default function GroupHome() {
 
   const clearNewEvents = useAppStore((s) => s.clearNewEvents)
 
+  const connectSSE = () => {
+    if (sseRef.current) { sseRef.current.close() }
+    const ctrl = new AbortController()
+    fetch('/api/events/stream', {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: ctrl.signal,
+    }).then(async (res) => {
+      if (!res.ok) return
+      setSseConnected(true)
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const chunks = buf.split('\n\n')
+        buf = chunks.pop() || ''
+        for (const chunk of chunks) {
+          if (!chunk.startsWith('data: ')) continue
+          try {
+            const ev = JSON.parse(chunk.slice(6)) as LiveEvent
+            if (ev.type === 'ping' || ev.type === 'ready') continue
+            setLiveEvents((prev) => {
+              const next = [ev, ...prev].slice(0, 30)
+              return next
+            })
+          } catch { /* ignore */ }
+        }
+      }
+      setSseConnected(false)
+    }).catch(() => { setSseConnected(false) })
+    sseRef.current = { close: () => ctrl.abort() }
+  }
+
   useEffect(() => {
     // Mark all events as seen when the user visits this page
     clearNewEvents()
@@ -103,9 +158,11 @@ export default function GroupHome() {
     loadAll()
     loadActions()
     startPolling()
+    connectSSE()
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current)
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current)
+      if (sseRef.current) sseRef.current.close()
     }
   }, [])
 
@@ -343,6 +400,62 @@ export default function GroupHome() {
           </div>
         </div>
       )}
+
+      {/* ── Real-time Live Events ── */}
+      <div className="card p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            {sseConnected
+              ? <Radio size={13} className="text-emerald-400 animate-pulse" />
+              : <Radio size={13} className="text-slate-600" />}
+            <span className="text-xs font-semibold text-slate-200">실시간 그룹 이벤트</span>
+            <span
+              className="text-[9px] px-1.5 py-0.5 rounded-full"
+              style={sseConnected
+                ? { background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.3)' }
+                : { background: 'rgba(148,163,184,0.1)', color: '#94a3b8' }}
+            >
+              {sseConnected ? 'LIVE' : '연결 중…'}
+            </span>
+          </div>
+          <button
+            onClick={() => { setLiveEvents([]); connectSSE() }}
+            className="text-[9px] text-slate-600 hover:text-slate-400 flex items-center gap-1"
+          >
+            <RefreshCw size={9} /> 재연결
+          </button>
+        </div>
+        {liveEvents.length === 0 ? (
+          <div className="flex items-center gap-2 py-4 text-slate-600 text-xs justify-center">
+            <Loader2 size={13} className="animate-spin" />
+            이벤트를 기다리는 중…
+          </div>
+        ) : (
+          <div className="space-y-1 max-h-52 overflow-y-auto">
+            {liveEvents.map((ev, i) => (
+              <div
+                key={i}
+                className="flex gap-2.5 py-1.5 px-2 rounded-lg"
+                style={{ background: LIVE_EVENT_COLOR[ev.type] ?? 'rgba(255,255,255,0.02)' }}
+              >
+                <span className="text-sm flex-shrink-0">{ev.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] font-medium text-slate-300 truncate">{ev.title}</div>
+                  <div className="text-[9px] text-slate-600 flex gap-1.5 mt-0.5">
+                    <span className="truncate">{ev.body}</span>
+                    {ev.created_at && (
+                      <>
+                        <span className="text-slate-700">·</span>
+                        <span className="flex-shrink-0">{format(new Date(ev.created_at), 'HH:mm:ss')}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* ── Autonomous Work Feed ── */}
       <div className="card p-4">

@@ -291,3 +291,66 @@ def create_collaboration(
     db.commit()
     db.refresh(collab)
     return collab
+
+
+# ── AI Synergy Analysis ────────────────────────────────────────────────────────
+@router.post("/synergy")
+def analyze_synergy(
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """AI analyzes all (or selected) companies and suggests collaboration opportunities."""
+    company_ids = body.get("company_ids") or []
+    q = db.query(Company)
+    if company_ids:
+        q = q.filter(Company.id.in_(company_ids))
+    companies = q.all()
+
+    if len(companies) < 2:
+        return {"opportunities": [], "summary": "최소 2개 이상의 계열사가 필요합니다."}
+
+    company_list = "\n".join(
+        f"- {c.name} ({c.industry}): {c.description or c.vision or '설명 없음'}"
+        for c in companies
+    )
+
+    prompt = f"""한그룹 계열사 목록:
+{company_list}
+
+위 계열사들 간의 구체적인 시너지 기회를 JSON으로 제안하세요.
+반드시 아래 형식만 반환하세요:
+{{
+  "summary": "전체 시너지 분석 요약 (2-3문장)",
+  "opportunities": [
+    {{
+      "title": "협업 제목",
+      "company_a": "A사 이름",
+      "company_b": "B사 이름",
+      "category": "기술공유|마케팅|데이터|제품|운영",
+      "description": "구체적 협업 방안 (2-3문장)",
+      "expected_outcome": "기대 효과",
+      "priority": "high|medium|low"
+    }}
+  ]
+}}
+최소 3개, 최대 6개 기회를 제시하세요."""
+
+    provider = get_provider_from_db(db, current_user.id)
+    messages = [{"role": "user", "content": prompt}]
+    raw = provider.chat(messages, system="당신은 그룹 경영 전략 컨설턴트입니다.", session_type="general")
+
+    default = {
+        "summary": f"{len(companies)}개 계열사 시너지 분석 완료. AI 연결을 확인하세요.",
+        "opportunities": [],
+    }
+    try:
+        m = __import__("re").search(r"\{[\s\S]*\}", raw)
+        if m:
+            result = __import__("json").loads(m.group())
+        else:
+            result = default
+    except Exception:
+        result = default
+
+    return result

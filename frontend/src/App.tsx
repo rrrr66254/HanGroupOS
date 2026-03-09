@@ -20,6 +20,7 @@ import GroupHome from './pages/GroupHome'
 import WeeklyReport from './pages/WeeklyReport'
 import SiteBuilder from './pages/SiteBuilder'
 import SiteEvaluator from './pages/SiteEvaluator'
+import Synergy from './pages/Synergy'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -72,6 +73,7 @@ export default function App() {
           <Route path="weekly-report" element={<WeeklyReport />} />
           <Route path="site-builder" element={<SiteBuilder />} />
           <Route path="site-evaluator" element={<SiteEvaluator />} />
+          <Route path="synergy" element={<Synergy />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>
