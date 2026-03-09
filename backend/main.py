@@ -52,19 +52,47 @@ def startup():
 
 
 def _check_ollama():
-    """Check Ollama connectivity on startup and log the result."""
+    """Check Ollama connectivity and model responsiveness on startup."""
     import httpx
 
     base_url = settings.OLLAMA_BASE_URL or "http://localhost:11434"
+    model = settings.OLLAMA_MODEL
+
+    # Step 1: Check connectivity and list available models
     try:
         r = httpx.get(f"{base_url}/api/tags", timeout=3.0)
-        if r.status_code == 200:
-            models = [m["name"] for m in r.json().get("models", [])]
-            print(f"✓ Ollama 연결 성공 ({base_url}) — 사용 가능 모델: {', '.join(models) if models else '없음'}")
-        else:
-            print(f"⚠️  Ollama 응답 오류 (HTTP {r.status_code}) — 기본 제공자로 Ollama 사용 불가")
+        if r.status_code != 200:
+            print(f"⚠️  Ollama 응답 오류 (HTTP {r.status_code}) — Ollama 사용 불가")
+            return
+        models = [m["name"] for m in r.json().get("models", [])]
+        print(f"✓ Ollama 연결 성공 ({base_url}) — 사용 가능 모델: {', '.join(models) if models else '없음'}")
     except Exception:
-        print(f"⚠️  Ollama 미연결 ({base_url}) — Ollama가 실행 중이지 않습니다. `ollama serve` 로 실행하세요.")
+        print(f"⚠️  Ollama 미연결 ({base_url}) — `ollama serve` 로 실행하세요.")
+        return
+
+    # Step 2: Send a test prompt to verify the model actually responds
+    print(f"  → {model} 모델 응답 테스트 중...")
+    try:
+        r2 = httpx.post(
+            f"{base_url}/api/chat",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": "응답 테스트: 네 라고만 답하세요."}],
+                "stream": False,
+                "options": {"num_predict": 10},
+            },
+            timeout=60.0,
+        )
+        r2.raise_for_status()
+        reply = r2.json().get("message", {}).get("content", "").strip()
+        if reply:
+            print(f"✓ {model} 모델 정상 응답 확인 — \"{reply[:40]}\"")
+        else:
+            print(f"⚠️  {model} 모델이 빈 응답을 반환했습니다. 모델 상태를 확인하세요.")
+    except httpx.TimeoutException:
+        print(f"⚠️  {model} 모델 응답 시간 초과 (60초) — 모델 로딩이 오래 걸리거나 문제가 있습니다.")
+    except Exception as e:
+        print(f"⚠️  {model} 모델 테스트 실패: {e}")
 
 
 def _seed_data():
