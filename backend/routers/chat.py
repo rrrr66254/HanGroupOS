@@ -480,10 +480,9 @@ def _process_terminal_requests(content: str, db, company_id, user_id: int) -> tu
     return clean, req_ids
 
 
-def _process_video_requests(content: str, db, company_id, user_id: int) -> tuple:
+def _process_video_requests(content: str, db, company_id, user_id: int, session_id: int = 0) -> tuple:
     """Parse <<VIDEO_REQUEST:...>> blocks → pending VideoJob + ApprovalRequest."""
     from datetime import datetime as _dt
-    from routers.video_gen import SUPPORTED_MODELS
 
     req_ids = []
     pattern = re.compile(r'<<VIDEO_REQUEST:(.*?)>>', re.DOTALL)
@@ -503,7 +502,7 @@ def _process_video_requests(content: str, db, company_id, user_id: int) -> tuple
                 prompt=prompt,
                 model_id=model_id,
                 status="pending",
-                meta={"requested_by": "AI CEO", "reason": reason},
+                meta={"requested_by": "AI CEO", "reason": reason, "session_id": session_id},
                 created_by=user_id,
             )
             db.add(job)
@@ -517,7 +516,7 @@ def _process_video_requests(content: str, db, company_id, user_id: int) -> tuple
                 status="pending",
                 requester="AI CEO",
                 company_id=company_id,
-                meta={"video_job_id": job.id, "model_id": model_id},
+                meta={"video_job_id": job.id, "model_id": model_id, "session_id": session_id},
             )
             db.add(approval)
             db.flush()
@@ -632,7 +631,7 @@ def send_message(
     # Execute any embedded action blocks
     clean_response, api_key_results = _process_api_key_saves(ai_response, db)
     clean_response, terminal_req_ids = _process_terminal_requests(clean_response, db, session.company_id, current_user.id)
-    clean_response, video_reqs = _process_video_requests(clean_response, db, session.company_id, current_user.id)
+    clean_response, video_reqs = _process_video_requests(clean_response, db, session.company_id, current_user.id, session_id=session.id)
     clean_response, model_update_results = _process_model_updates(clean_response, db)
     clean_response, approval_results = _process_approval_actions(clean_response, db, current_user.id)
     clean_response, action_results = _execute_actions(clean_response, db, current_user.id)

@@ -232,6 +232,7 @@ export default function Chairman() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const delegTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [isDragOver, setIsDragOver] = useState(false)
 
   const checkOllama = useCallback(async () => {
     setOllamaChecking(true)
@@ -644,6 +645,33 @@ export default function Chairman() {
     }
     // reset input so same file can be reattached
     e.target.value = ''
+  }
+
+  // ── 드래그 & 드롭 이미지 처리 ─────────────────────────────────────────────
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    if (e.dataTransfer.types.includes('Files')) setIsDragOver(true)
+  }
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragOver(false)
+  }
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+    const file = e.dataTransfer.files?.[0]
+    if (!file) return
+    const MAX = 200_000
+    const isImage = file.type.startsWith('image/')
+    const reader = new FileReader()
+    reader.onload = (evt) => {
+      const text = evt.target?.result as string
+      setAttachedFile({ name: file.name, content: isImage ? text : text.slice(0, MAX), isImage })
+    }
+    if (isImage || !file.type.startsWith('text/')) {
+      reader.readAsDataURL(file)
+    } else {
+      reader.readAsText(file)
+    }
   }
 
   // ── Main sendMessage ──────────────────────────────────────────────────────
@@ -1165,7 +1193,19 @@ export default function Chairman() {
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+        <div
+          className={`flex-1 overflow-y-auto p-5 space-y-5 relative transition-all ${isDragOver ? 'ring-2 ring-inset ring-brand/60 bg-brand/5' : ''}`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {isDragOver && (
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-brand/10 backdrop-blur-sm pointer-events-none rounded">
+              <div className="text-4xl mb-2">🖼️</div>
+              <p className="text-brand-light text-sm font-semibold">이미지를 여기에 놓으세요</p>
+              <p className="text-slate-500 text-xs mt-1">Vision AI가 분석합니다 (gpt-4o-mini)</p>
+            </div>
+          )}
           {messages.length === 0 && !loading && (
             <div className="flex flex-col items-center justify-center h-full gap-5 text-slate-600">
               <div style={{ fontSize: 60 }}>{selectedExec?.emoji || '👔'}</div>

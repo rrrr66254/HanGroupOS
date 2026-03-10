@@ -96,6 +96,22 @@ class AIProvider:
             pass  # CE 실패해도 원본으로 계속 진행
         # ─────────────────────────────────────────────────────────────────────
 
+        # ── 이미지가 포함된 메시지는 무조건 gpt-4o-mini (Vision) 사용 ──────────
+        has_image = any(
+            'data:image/' in (m.get('content') or '')
+            for m in messages if m.get('role') == 'user'
+        )
+        if has_image:
+            openai_key = self.api_key if self.provider == "openai" else getattr(settings, "OPENAI_API_KEY", "")
+            if openai_key:
+                saved_provider, saved_model, saved_key = self.provider, self.model, self.api_key
+                self.provider, self.model, self.api_key = "openai", "gpt-4o-mini", openai_key
+                try:
+                    return self._call_openai(messages, system, max_tokens)
+                finally:
+                    self.provider, self.model, self.api_key = saved_provider, saved_model, saved_key
+        # ─────────────────────────────────────────────────────────────────────
+
         try:
             if self.provider == "anthropic":
                 return self._call_anthropic(messages, system, max_tokens)
