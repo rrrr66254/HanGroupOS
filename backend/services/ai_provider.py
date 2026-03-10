@@ -131,19 +131,82 @@ class AIProvider:
                 )
             return f"⚠️ AI 응답 오류: {err}"
 
+    def _to_anthropic_vision_messages(self, messages: List[Dict]) -> List[Dict]:
+        """이미지가 포함된 메시지를 Anthropic Vision 형식으로 변환."""
+        import re, base64
+        result = []
+        for msg in messages:
+            content = msg.get("content", "")
+            img_url = self._extract_image_from_content(content)
+            if img_url and msg["role"] == "user":
+                # Parse media_type and base64 data from data URL
+                m = re.match(r'data:(image/[^;]+);base64,(.+)', img_url, re.DOTALL)
+                if m:
+                    media_type = m.group(1)
+                    b64_data = m.group(2).strip()
+                    clean_text = self._strip_image_block(content)
+                    parts = [
+                        {"type": "image", "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": b64_data,
+                        }}
+                    ]
+                    if clean_text:
+                        parts.insert(0, {"type": "text", "text": clean_text})
+                    result.append({"role": "user", "content": parts})
+                else:
+                    result.append(msg)
+            else:
+                result.append(msg)
+        return result
+
     def _call_anthropic(
         self, messages: List[Dict], system: str, max_tokens: int
     ) -> str:
         import anthropic
 
         client = anthropic.Anthropic(api_key=self.api_key)
+        # Claude 3+ 모델은 Vision 지원
+        processed = self._to_anthropic_vision_messages(messages)
         response = client.messages.create(
             model=self.model,
             max_tokens=max_tokens,
             system=system or "You are an AI executive assistant for HAN Group.",
-            messages=messages,
+            messages=processed,
         )
         return response.content[0].text
+
+    @staticmethod
+    def _extract_image_from_content(text: str):
+        """첨부파일 블록에서 base64 이미지 data URL 추출. 없으면 None."""
+        import re
+        m = re.search(r'(data:image/[^;]+;base64,[A-Za-z0-9+/=]+)', text)
+        return m.group(1) if m else None
+
+    @staticmethod
+    def _strip_image_block(text: str) -> str:
+        """이미지 data URL 블록(첨부파일 마커 포함)을 텍스트에서 제거."""
+        import re
+        # Remove the entire 첨부파일 block with the base64 data
+        cleaned = re.sub(r'\[첨부파일:.*?\]\n```\ndata:image/.*?```\n*', '', text, flags=re.DOTALL)
+        return cleaned.strip()
+
+    def _to_openai_vision_messages(self, messages: List[Dict]) -> List[Dict]:
+        """메시지 목록에서 이미지가 포함된 메시지를 GPT-4o Vision 형식으로 변환."""
+        result = []
+        for msg in messages:
+            content = msg.get("content", "")
+            img_url = self._extract_image_from_content(content)
+            if img_url and msg["role"] == "user":
+                clean_text = self._strip_image_block(content)
+                parts = [{"type": "image_url", "image_url": {"url": img_url, "detail": "auto"}}]
+                if clean_text:
+                    parts.insert(0, {"type": "text", "text": clean_text})
+                result.append({"role": "user", "content": parts})
+            else:
+                result.append(msg)
+        return result
 
     def _call_openai(
         self, messages: List[Dict], system: str, max_tokens: int
@@ -154,7 +217,13 @@ class AIProvider:
         full_messages = []
         if system:
             full_messages.append({"role": "system", "content": system})
-        full_messages.extend(messages)
+
+        # Vision 지원 모델일 때만 이미지 변환 (gpt-4o, gpt-4o-mini, gpt-4-turbo 등)
+        vision_models = ("gpt-4o", "gpt-4-turbo", "gpt-4-vision")
+        if any(self.model.startswith(m) for m in vision_models):
+            full_messages.extend(self._to_openai_vision_messages(messages))
+        else:
+            full_messages.extend(messages)
 
         response = client.chat.completions.create(
             model=self.model,
@@ -548,11 +617,28 @@ CEO_SYSTEM = """당신은 한그룹 계열사의 AI CEO입니다.
 - 파일 확인: <<TERMINAL_REQUEST:{"cmd":"ls -la /home/user/han-group-os","reason":"프로젝트 구조 확인"}>>
 - 환경변수: <<TERMINAL_REQUEST:{"cmd":"echo $PATH","reason":"환경 변수 확인"}>>
 
+【영상 생성 요청】
+마케팅 영상, 홍보 영상, 제품 소개 영상 등이 필요하다고 판단될 때, 아래 형식을 응답에 포함하면 영상 생성 요청이 실제로 제출됩니다.
+형식: <<VIDEO_REQUEST:{"prompt":"English video description","reason":"요청 이유","model_id":"Lightricks/LTX-Video-0.9.8-13B-distilled"}>>
+
+⚠️ 핵심: "영상을 만들 수 없습니다"라고 말하지 마세요. 이 형식으로 요청하면 HuggingFace AI가 영상을 생성합니다.
+
+지원 모델:
+- Lightricks/LTX-Video-0.9.8-13B-distilled (기본값, 빠름, 고품질)
+- ali-vilab/text-to-video-ms-1.7b (경량)
+- THUDM/CogVideoX-2b (고품질)
+
+예시:
+- 마케팅 영상: <<VIDEO_REQUEST:{"prompt":"A sleek tech company office with AI robots working alongside humans, futuristic and professional","reason":"계열사 한테크 홍보 영상 제작","model_id":"Lightricks/LTX-Video-0.9.8-13B-distilled"}>>
+- 제품 소개: <<VIDEO_REQUEST:{"prompt":"An elegant smartphone rotating 360 degrees with glowing screen effects on dark background","reason":"신제품 런칭 영상"}>>
+
+중요: 프롬프트는 **반드시 영어**로 작성하세요 (HuggingFace 모델이 영어 입력만 지원).
+
 === 정직성 원칙 ===
 - 직접 파일을 읽거나 외부 인터넷에 스스로 접속할 수 없습니다.
 - 실제로 확인하지 않은 수치·현황을 사실처럼 보고하지 마세요.
 - 전략적 분석과 계획은 AI 의견임을 명확히 하세요.
-- **단, <<TERMINAL_REQUEST:...>> 형식은 실제 시스템 메커니즘입니다. 이것은 사용 가능합니다.**
+- **단, <<TERMINAL_REQUEST:...>>, <<VIDEO_REQUEST:...>> 형식은 실제 시스템 메커니즘입니다. 이것은 사용 가능합니다.**
 
 한국어로 실무적이고 명확하게 답변하세요."""
 

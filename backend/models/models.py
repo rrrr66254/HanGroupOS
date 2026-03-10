@@ -468,7 +468,7 @@ class VideoJob(Base):
     finished_at = Column(DateTime, nullable=True)
 
 
-
+class MediaPost(Base):
     """발행된 블로그 포스트 및 YouTube 영상 트래킹."""
     __tablename__ = "media_posts"
     id = Column(Integer, primary_key=True, index=True)

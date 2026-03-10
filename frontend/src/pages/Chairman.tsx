@@ -184,7 +184,7 @@ export default function Chairman() {
   const [session, setSession] = useState<ChatSession | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
-  const [attachedFile, setAttachedFile] = useState<{ name: string; content: string } | null>(null)
+  const [attachedFile, setAttachedFile] = useState<{ name: string; content: string; isImage: boolean } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(false)
   const [companies, setCompanies] = useState<Company[]>([])
@@ -630,13 +630,14 @@ export default function Chairman() {
     if (!file) return
     const MAX = 200_000  // 200KB text limit
     const reader = new FileReader()
+    const isImage = file.type.startsWith('image/')
     reader.onload = (evt) => {
       const text = evt.target?.result as string
-      setAttachedFile({ name: file.name, content: text.slice(0, MAX) })
+      setAttachedFile({ name: file.name, content: isImage ? text : text.slice(0, MAX), isImage })
     }
     reader.onerror = () => setAttachedFile(null)
-    // Read as text for text files; base64 for others
-    if (file.type.startsWith('text/') || /\.(txt|md|csv|json|py|js|ts|tsx|jsx|xml|yaml|yml|log|sh|sql)$/.test(file.name)) {
+    // Read as text for text files; base64 data URL for images/others
+    if (!isImage && (file.type.startsWith('text/') || /\.(txt|md|csv|json|py|js|ts|tsx|jsx|xml|yaml|yml|log|sh|sql)$/.test(file.name))) {
       reader.readAsText(file)
     } else {
       reader.readAsDataURL(file)
@@ -665,7 +666,12 @@ export default function Chairman() {
 
     let content = input.trim()
     if (attachedFile) {
-      content = `[첨부파일: ${attachedFile.name}]\n\`\`\`\n${attachedFile.content}\n\`\`\`\n\n${content}`
+      if (attachedFile.isImage) {
+        // 이미지: Vision API가 처리할 수 있도록 data URL을 코드블록에 포함
+        content = `[첨부파일: ${attachedFile.name}]\n\`\`\`\n${attachedFile.content}\n\`\`\`\n\n${content || '이 이미지를 분석해줘.'}`
+      } else {
+        content = `[첨부파일: ${attachedFile.name}]\n\`\`\`\n${attachedFile.content}\n\`\`\`\n\n${content}`
+      }
       setAttachedFile(null)
     }
     setInput('')
@@ -1273,10 +1279,17 @@ export default function Chairman() {
         <div className="px-5 py-4 border-t border-bg-border flex-shrink-0">
           {/* Attached file badge */}
           {attachedFile && (
-            <div className="flex items-center gap-2 mb-2 px-2 py-1 bg-brand/10 border border-brand/25 rounded text-xs text-brand-light w-fit max-w-full">
-              <Paperclip size={11} />
-              <span className="truncate max-w-[200px]">{attachedFile.name}</span>
-              <button onClick={() => setAttachedFile(null)} className="text-slate-400 hover:text-red-400 flex-shrink-0">
+            <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-brand/10 border border-brand/25 rounded text-xs text-brand-light w-fit max-w-full">
+              {attachedFile.isImage ? (
+                <img src={attachedFile.content} alt={attachedFile.name} className="h-8 w-8 object-cover rounded" />
+              ) : (
+                <Paperclip size={11} />
+              )}
+              <div className="flex flex-col min-w-0">
+                <span className="truncate max-w-[180px]">{attachedFile.name}</span>
+                {attachedFile.isImage && <span className="text-[10px] text-slate-500">이미지 분석 (Vision AI)</span>}
+              </div>
+              <button onClick={() => setAttachedFile(null)} className="text-slate-400 hover:text-red-400 flex-shrink-0 ml-1">
                 <X size={11} />
               </button>
             </div>

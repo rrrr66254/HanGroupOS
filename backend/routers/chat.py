@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from core.database import get_db, SessionLocal
 from core.security import get_current_user
-from models.models import ChatSession, ChatMessage, User, AISuggestion, Company, OrgNode, StrategyItem, TerminalRequest, ApprovalRequest
+from models.models import ChatSession, ChatMessage, User, AISuggestion, Company, OrgNode, StrategyItem, TerminalRequest, ApprovalRequest, VideoJob
 from schemas.schemas import (
     ChatSessionCreate, ChatSessionOut,
     ChatMessageOut, ChatRequest, CompanyQueryRequest,
@@ -480,6 +480,54 @@ def _process_terminal_requests(content: str, db, company_id, user_id: int) -> tu
     return clean, req_ids
 
 
+def _process_video_requests(content: str, db, company_id, user_id: int) -> tuple:
+    """Parse <<VIDEO_REQUEST:...>> blocks → pending VideoJob + ApprovalRequest."""
+    from datetime import datetime as _dt
+    from routers.video_gen import SUPPORTED_MODELS
+
+    req_ids = []
+    pattern = re.compile(r'<<VIDEO_REQUEST:(.*?)>>', re.DOTALL)
+    for match in pattern.finditer(content):
+        raw = match.group(1).strip()
+        try:
+            data = json.loads(raw)
+            prompt = data.get("prompt", "").strip()
+            model_id = data.get("model_id", "Lightricks/LTX-Video-0.9.8-13B-distilled")
+            reason = data.get("reason", "")
+            if not prompt:
+                continue
+
+            # VideoJob in pending state — actual generation starts after HF token check
+            job = VideoJob(
+                company_id=company_id,
+                prompt=prompt,
+                model_id=model_id,
+                status="pending",
+                meta={"requested_by": "AI CEO", "reason": reason},
+                created_by=user_id,
+            )
+            db.add(job)
+            db.flush()
+
+            # ApprovalRequest so admin can confirm before generation
+            approval = ApprovalRequest(
+                title=f"영상 생성 요청: {prompt[:60]}",
+                description=f"AI CEO가 영상 생성을 요청했습니다.\n\n프롬프트: {prompt}\n\n이유: {reason}",
+                request_type="video_gen",
+                status="pending",
+                requester="AI CEO",
+                company_id=company_id,
+                meta={"video_job_id": job.id, "model_id": model_id},
+            )
+            db.add(approval)
+            db.flush()
+            req_ids.append((job.id, prompt))
+        except Exception:
+            pass
+    clean = pattern.sub("", content).strip()
+    return clean, req_ids
+
+
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
@@ -584,6 +632,7 @@ def send_message(
     # Execute any embedded action blocks
     clean_response, api_key_results = _process_api_key_saves(ai_response, db)
     clean_response, terminal_req_ids = _process_terminal_requests(clean_response, db, session.company_id, current_user.id)
+    clean_response, video_reqs = _process_video_requests(clean_response, db, session.company_id, current_user.id)
     clean_response, model_update_results = _process_model_updates(clean_response, db)
     clean_response, approval_results = _process_approval_actions(clean_response, db, current_user.id)
     clean_response, action_results = _execute_actions(clean_response, db, current_user.id)
@@ -595,7 +644,11 @@ def send_message(
         tr = db.query(TerminalRequest).filter(TerminalRequest.id == rid).first()
         if tr:
             terminal_notes += f"\n\n📋 **터미널 명령 요청 제출됨** (요청 #{tr.id})\n`{tr.command}`\n사유: {tr.reason}\nAdmin이 승인하면 터미널 페이지에서 실행됩니다."
-    final_content = clean_response + "".join(action_results) + "".join(api_key_results) + "".join(model_update_results) + "".join(approval_results) + "".join(code_results) + terminal_notes
+    # Video request notifications
+    video_notes = ""
+    for job_id, prompt in video_reqs:
+        video_notes += f"\n\n🎬 **영상 생성 요청 제출됨** (작업 #{job_id})\n프롬프트: `{prompt[:80]}`\n승인함에서 확인 후 영상 스튜디오에서 생성됩니다."
+    final_content = clean_response + "".join(action_results) + "".join(api_key_results) + "".join(model_update_results) + "".join(approval_results) + "".join(code_results) + terminal_notes + video_notes
 
     # Save AI response
     ai_name = session.agent_name or {
@@ -778,8 +831,10 @@ def stream_message(
             content_after_apikey, api_key_results = _process_api_key_saves(full_content, new_db)
             # Handle terminal requests
             content_after_terminal, terminal_req_ids = _process_terminal_requests(content_after_apikey, new_db, company_id, user_id)
+            # Handle video requests
+            content_after_video, video_reqs = _process_video_requests(content_after_terminal, new_db, company_id, user_id)
             # Handle model updates
-            content_after_model, model_update_results = _process_model_updates(content_after_terminal, new_db)
+            content_after_model, model_update_results = _process_model_updates(content_after_video, new_db)
             # Handle approval actions (APPROVE_REQUEST / REJECT_REQUEST / APPROVE_TERMINAL / REJECT_TERMINAL)
             content_after_approval, approval_results = _process_approval_actions(content_after_model, new_db, user_id)
             # Handle company creation
@@ -792,7 +847,11 @@ def stream_message(
                 tr = new_db.query(TerminalRequest).filter(TerminalRequest.id == rid).first()
                 if tr:
                     terminal_notes += f"\n\n⏳ **터미널 명령 요청 제출됨** (ID #{tr.id})\n`{tr.command}`\n사유: {tr.reason}\n관리자 승인 대기 중..."
-            final = clean + "".join(action_results) + "".join(model_update_results) + "".join(approval_results) + terminal_notes + "".join(api_key_results) + "".join(code_results)
+            # Append video request notifications
+            video_notes = ""
+            for job_id, prompt in video_reqs:
+                video_notes += f"\n\n🎬 **영상 생성 요청 제출됨** (작업 #{job_id})\n프롬프트: `{prompt[:80]}`\n승인함 확인 후 영상 스튜디오에서 생성됩니다."
+            final = clean + "".join(action_results) + "".join(model_update_results) + "".join(approval_results) + terminal_notes + video_notes + "".join(api_key_results) + "".join(code_results)
             ai_msg = ChatMessage(
                 session_id=session_id,
                 role="assistant",
