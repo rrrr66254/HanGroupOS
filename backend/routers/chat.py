@@ -275,6 +275,49 @@ def _process_code_actions(content: str, provider, system_prompt: str, max_retrie
     return content.strip(), results
 
 
+def _process_model_updates(content: str, db) -> tuple:
+    """Parse <<UPDATE_MODEL:...>> blocks, update OrgNode AI model/provider, return (clean_text, result_lines).
+    Format: <<UPDATE_MODEL:{"node_id":1,"provider":"openai","model":"gpt-4o-mini"}>>
+    Or by name: <<UPDATE_MODEL:{"name":"CEO","company":"한테크","provider":"anthropic","model":"claude-sonnet-4-6"}>>
+    """
+    results = []
+    pattern = re.compile(r'<<UPDATE_MODEL:(.*?)>>', re.DOTALL)
+    for match in pattern.finditer(content):
+        raw = match.group(1).strip()
+        try:
+            data = json.loads(raw)
+            node = None
+            # Find by node_id
+            if "node_id" in data:
+                node = db.query(OrgNode).filter(OrgNode.id == int(data["node_id"])).first()
+            # Find by name + company name
+            elif "name" in data:
+                q = db.query(OrgNode).filter(OrgNode.name.ilike(f"%{data['name']}%"))
+                if "company" in data:
+                    comp = db.query(Company).filter(Company.name.ilike(f"%{data['company']}%")).first()
+                    if comp:
+                        q = q.filter(OrgNode.company_id == comp.id)
+                node = q.first()
+            if not node:
+                results.append(f"\n\n⚠️ 모델 변경 실패: 해당 조직원을 찾을 수 없습니다 ({data})")
+                continue
+            old_provider = node.ai_provider
+            old_model = node.ai_model
+            if "provider" in data:
+                node.ai_provider = data["provider"]
+            if "model" in data:
+                node.ai_model = data["model"]
+            db.flush()
+            results.append(
+                f"\n\n✅ **모델 변경 완료** — {node.name} ({node.role})\n"
+                f"{old_provider}/{old_model} → {node.ai_provider}/{node.ai_model}"
+            )
+        except Exception as exc:
+            results.append(f"\n\n❌ 모델 변경 오류: {exc}")
+    clean = pattern.sub("", content).strip()
+    return clean, results
+
+
 def _process_terminal_requests(content: str, db, company_id, user_id: int) -> tuple:
     """Parse <<TERMINAL_REQUEST:...>> blocks, create DB records, return (clean_text, req_ids)."""
     req_ids = []
@@ -402,10 +445,18 @@ def send_message(
 
     # Execute any embedded action blocks
     clean_response, api_key_results = _process_api_key_saves(ai_response, db)
+    clean_response, terminal_req_ids = _process_terminal_requests(clean_response, db, session.company_id, current_user.id)
+    clean_response, model_update_results = _process_model_updates(clean_response, db)
     clean_response, action_results = _execute_actions(clean_response, db, current_user.id)
     # Code execution actions (INSTALL_PACKAGE / SQL_QUERY / EXECUTE_CODE with debug loop)
     clean_response, code_results = _process_code_actions(clean_response, provider, system_prompt)
-    final_content = clean_response + "".join(action_results) + "".join(api_key_results) + "".join(code_results)
+    # Terminal request notifications
+    terminal_notes = ""
+    for rid in terminal_req_ids:
+        tr = db.query(TerminalRequest).filter(TerminalRequest.id == rid).first()
+        if tr:
+            terminal_notes += f"\n\n📋 **터미널 명령 요청 제출됨** (요청 #{tr.id})\n`{tr.command}`\n사유: {tr.reason}\nAdmin이 승인하면 터미널 페이지에서 실행됩니다."
+    final_content = clean_response + "".join(action_results) + "".join(api_key_results) + "".join(model_update_results) + "".join(code_results) + terminal_notes
 
     # Save AI response
     ai_name = session.agent_name or {
@@ -588,8 +639,10 @@ def stream_message(
             content_after_apikey, api_key_results = _process_api_key_saves(full_content, new_db)
             # Handle terminal requests
             content_after_terminal, terminal_req_ids = _process_terminal_requests(content_after_apikey, new_db, company_id, user_id)
+            # Handle model updates
+            content_after_model, model_update_results = _process_model_updates(content_after_terminal, new_db)
             # Handle company creation
-            clean, action_results = _execute_actions(content_after_terminal, new_db, user_id)
+            clean, action_results = _execute_actions(content_after_model, new_db, user_id)
             # Handle code execution (INSTALL_PACKAGE / SQL_QUERY / EXECUTE_CODE + debug loop)
             clean, code_results = _process_code_actions(clean, prov, sys_prompt)
             # Append terminal request notifications
@@ -598,7 +651,7 @@ def stream_message(
                 tr = new_db.query(TerminalRequest).filter(TerminalRequest.id == rid).first()
                 if tr:
                     terminal_notes += f"\n\n⏳ **터미널 명령 요청 제출됨** (ID #{tr.id})\n`{tr.command}`\n사유: {tr.reason}\n관리자 승인 대기 중..."
-            final = clean + "".join(action_results) + terminal_notes + "".join(api_key_results) + "".join(code_results)
+            final = clean + "".join(action_results) + "".join(model_update_results) + terminal_notes + "".join(api_key_results) + "".join(code_results)
             ai_msg = ChatMessage(
                 session_id=session_id,
                 role="assistant",
