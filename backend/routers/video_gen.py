@@ -365,33 +365,58 @@ def _start_video_job(job_id: int, db: Session) -> bool:
 
 
 def _notify_chat(db, job):
-    """VideoJob 완료/실패 후 연관된 채팅 세션에 알림 메시지를 추가한다."""
+    """VideoJob 완료/실패 후 채팅 알림 + DB 알림 생성."""
+    # 채팅 세션 알림
     try:
         from models.models import ChatMessage
         session_id = (job.meta or {}).get("session_id")
-        if not session_id:
-            return
-        if job.status == "done":
-            text = (
-                f"🎬 **영상 생성 완료!** (작업 #{job.id})\n"
-                f"프롬프트: `{job.prompt[:80]}`\n"
-                f"영상 스튜디오에서 확인하고 다운로드하세요."
+        if session_id:
+            if job.status == "done":
+                text = (
+                    f"🎬 **영상 생성 완료!** (작업 #{job.id})\n"
+                    f"프롬프트: `{job.prompt[:80]}`\n"
+                    f"영상 스튜디오에서 확인하고 다운로드하세요."
+                )
+            else:
+                text = (
+                    f"❌ **영상 생성 실패** (작업 #{job.id})\n"
+                    f"오류: {job.error_msg[:200] if job.error_msg else '알 수 없는 오류'}"
+                )
+            msg = ChatMessage(
+                session_id=session_id,
+                role="assistant",
+                content=text,
+                sender_name="AI CEO",
             )
-        else:
-            text = (
-                f"❌ **영상 생성 실패** (작업 #{job.id})\n"
-                f"오류: {job.error_msg[:200] if job.error_msg else '알 수 없는 오류'}"
-            )
-        msg = ChatMessage(
-            session_id=session_id,
-            role="assistant",
-            content=text,
-            sender_name="AI CEO",
-        )
-        db.add(msg)
-        db.commit()
+            db.add(msg)
+            db.commit()
     except Exception as e:
         print(f"[video_gen] 채팅 알림 실패 (무시): {e}")
+
+    # DB 알림 생성 (NotificationPoller가 감지)
+    try:
+        from routers.notifications import create_notification
+        if job.status == "done":
+            create_notification(
+                db,
+                title=f"🎬 영상 생성 완료 (#{job.id})",
+                body=f"프롬프트: {job.prompt[:80]}",
+                notif_type="success",
+                icon="🎬",
+                company_id=job.company_id,
+                link="/video-studio",
+            )
+        else:
+            create_notification(
+                db,
+                title=f"❌ 영상 생성 실패 (#{job.id})",
+                body=job.error_msg[:150] if job.error_msg else "알 수 없는 오류",
+                notif_type="error",
+                icon="❌",
+                company_id=job.company_id,
+            )
+    except Exception as e:
+        print(f"[video_gen] DB 알림 생성 실패 (무시): {e}")
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────

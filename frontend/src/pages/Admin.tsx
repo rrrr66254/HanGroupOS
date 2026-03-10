@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe } from 'lucide-react'
+import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe, FlaskConical, Loader2 } from 'lucide-react'
 import { modelsApi, externalKeyApi } from '../api/client'
 import type { ModelCatalog, ProviderConfig } from '../types'
 
@@ -40,6 +40,8 @@ export default function Admin() {
   const [extKeys, setExtKeys] = useState<ExternalKey[]>([])
   const [newExtKey, setNewExtKey] = useState({ service: '', label: '', api_key: '' })
   const [extError, setExtError] = useState('')
+  const [testResults, setTestResults] = useState<Record<number, { status: string; message: string }>>({})
+  const [testingId, setTestingId] = useState<number | null>(null)
 
   const loadAll = async () => {
     modelsApi.catalog().then((r) => setCatalog(r.data))
@@ -80,6 +82,18 @@ export default function Admin() {
   const deleteExtKey = async (id: number) => {
     await externalKeyApi.delete(id)
     loadExtKeys()
+  }
+
+  const testExtKey = async (id: number) => {
+    setTestingId(id)
+    try {
+      const r = await externalKeyApi.test(id)
+      setTestResults((prev) => ({ ...prev, [id]: { status: r.data.status, message: r.data.message } }))
+    } catch (e: any) {
+      setTestResults((prev) => ({ ...prev, [id]: { status: 'error', message: e.response?.data?.detail || '테스트 실패' } }))
+    } finally {
+      setTestingId(null)
+    }
   }
 
   return (
@@ -298,19 +312,41 @@ export default function Admin() {
               <h3 className="text-xs font-semibold text-slate-300 mb-3">등록된 외부 API 키</h3>
               <div className="space-y-2">
                 {extKeys.map((k) => (
-                  <div key={k.id} className="flex items-center justify-between bg-bg-elevated rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-2 h-2 rounded-full shrink-0 ${k.is_active ? 'bg-success' : 'bg-slate-600'}`} />
-                      <div>
-                        <div className={`text-xs font-semibold font-mono ${EXT_SERVICE_INFO[k.service]?.color || 'text-slate-300'}`}>
-                          {k.service}
+                  <div key={k.id} className="flex flex-col gap-1 bg-bg-elevated rounded-lg px-3 py-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${k.is_active ? 'bg-success' : 'bg-slate-600'}`} />
+                        <div>
+                          <div className={`text-xs font-semibold font-mono ${EXT_SERVICE_INFO[k.service]?.color || 'text-slate-300'}`}>
+                            {k.service}
+                          </div>
+                          <div className="text-[9px] text-slate-500">{k.label}</div>
                         </div>
-                        <div className="text-[9px] text-slate-500">{k.label}</div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => testExtKey(k.id)}
+                          disabled={testingId === k.id}
+                          className="flex items-center gap-1 text-[10px] px-2 py-1 rounded bg-brand/20 text-brand-light hover:bg-brand/30 disabled:opacity-50"
+                        >
+                          {testingId === k.id ? <Loader2 size={10} className="animate-spin" /> : <FlaskConical size={10} />}
+                          테스트
+                        </button>
+                        <button onClick={() => deleteExtKey(k.id)} className="text-slate-600 hover:text-danger p-1">
+                          <Trash2 size={13} />
+                        </button>
                       </div>
                     </div>
-                    <button onClick={() => deleteExtKey(k.id)} className="text-slate-600 hover:text-danger p-1">
-                      <Trash2 size={13} />
-                    </button>
+                    {testResults[k.id] && (
+                      <div className={`text-[10px] flex items-center gap-1.5 mt-0.5 ml-5 ${
+                        testResults[k.id].status === 'ok' ? 'text-success' :
+                        testResults[k.id].status === 'test_not_supported' ? 'text-slate-400' :
+                        'text-red-400'
+                      }`}>
+                        {testResults[k.id].status === 'ok' ? <Check size={10} /> : testResults[k.id].status === 'test_not_supported' ? null : <X size={10} />}
+                        {testResults[k.id].message}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

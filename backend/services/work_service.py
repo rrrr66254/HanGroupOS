@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any, Generator
 from sqlalchemy.orm import Session
 
-from models.models import OrgNode, Company, WorkLog, CorporateMemory, ProviderConfig, AgentMessage
-from services.ai_provider import AIProvider
+from models.models import OrgNode, Company, WorkLog, CorporateMemory, ProviderConfig, AgentMessage, CompanyCapability
+from services.ai_provider import AIProvider, get_system_for_role
 
 
 # ── Personality context builder ───────────────────────────────────────────────
@@ -38,6 +38,27 @@ def build_personality_context(node: OrgNode) -> str:
         return ""
 
     return "\n\n[에이전트 개성]\n" + "\n".join(parts)
+
+
+def get_active_capabilities_context(db: Session, company_id: Optional[int]) -> str:
+    """활성화된 회사 역량 목록을 컨텍스트 문자열로 반환."""
+    if not company_id:
+        return ""
+    from services.capability_analyzer import CAPABILITY_META
+    caps = (
+        db.query(CompanyCapability)
+        .filter(CompanyCapability.company_id == company_id, CompanyCapability.status == "active")
+        .all()
+    )
+    if not caps:
+        return ""
+    lines = ["[활성화된 역량]"]
+    for cap in caps:
+        meta = CAPABILITY_META.get(cap.capability_type, {})
+        name = meta.get("name", cap.capability_type)
+        desc = meta.get("description", "")
+        lines.append(f"- {name}: {desc}")
+    return "\n".join(lines)
 
 
 def get_relevant_memories(db: Session, company_id: Optional[int], limit: int = 3) -> str:
@@ -152,12 +173,14 @@ def run_specialist(
     import random
     task = random.choice(SPECIALIST_TASKS)
     personality_ctx = build_personality_context(node)
+    capability_ctx = get_active_capabilities_context(db, node.company_id)
 
     system = (
         f"당신은 {node.role} {node.name}입니다.\n"
         f"회사의 전문 실무자로서 담당 업무를 성실히 수행합니다."
-        f"{personality_ctx}"
+        + (f"\n{personality_ctx}" if personality_ctx else "")
         + (f"\n\n{memory_context}" if memory_context else "")
+        + (f"\n\n{capability_ctx}" if capability_ctx else "")
     )
 
     ai = get_node_ai_provider(db, node)
@@ -213,7 +236,7 @@ def run_chief(
     team_lead_logs: List[WorkLog],
     memory_context: str,
 ) -> WorkLog:
-    """Chief summarizes team lead reports."""
+    """Chief summarizes team lead reports using role-specific system prompt."""
     personality_ctx = build_personality_context(node)
 
     reports_text = "\n\n".join(
@@ -223,10 +246,12 @@ def run_chief(
     task = "팀장 보고 종합 및 부문 보고서 작성"
     prompt = CHIEF_PROMPT.format(reports=reports_text)
 
+    # 역할별 전문화된 시스템 프롬프트 선택
+    role_system = get_system_for_role(node.role, node.level)
     system = (
-        f"당신은 {node.role} {node.name}입니다.\n"
-        f"C레벨 임원으로서 부문 전체 성과를 종합하고 경영진에 보고합니다."
-        f"{personality_ctx}"
+        role_system
+        + f"\n\n[현재 임무] 당신은 {node.name}({node.role})입니다."
+        + (f"\n{personality_ctx}" if personality_ctx else "")
         + (f"\n\n{memory_context}" if memory_context else "")
     )
 

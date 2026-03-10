@@ -387,11 +387,12 @@ def get_youtube_auth_url(
 @router.post("/youtube/token-exchange", summary="YouTube 인증 코드를 토큰으로 교환")
 def exchange_youtube_token(
     req: YouTubeTokenExchangeRequest,
+    db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     """
-    Google에서 받은 인증 코드를 access_token으로 교환합니다.
-    반환된 access_token과 refresh_token을 외부 API 키에 저장하세요.
+    Google에서 받은 인증 코드를 access_token으로 교환하고 자동 저장합니다.
+    refresh_token이 있으면 extra_config에 함께 저장하여 자동 갱신 지원.
     """
     publisher = MediaPublisher()
     result = publisher.exchange_youtube_code(
@@ -402,13 +403,96 @@ def exchange_youtube_token(
     )
     if "error" in result:
         raise HTTPException(400, detail=result)
+
+    # 자동으로 DB에 저장 (access_token + refresh_token)
+    access_token = result.get("access_token", "")
+    refresh_token = result.get("refresh_token", "")
+    if access_token:
+        existing = db.query(ExternalApiKey).filter(ExternalApiKey.service == "youtube").first()
+        extra = dict(existing.extra_config or {}) if existing else {}
+        extra.update({
+            "client_id": req.client_id,
+            "client_secret": req.client_secret,
+        })
+        if refresh_token:
+            extra["refresh_token"] = refresh_token
+        if existing:
+            existing.api_key = access_token
+            existing.extra_config = extra
+            existing.is_active = True
+            existing.updated_at = datetime.utcnow()
+        else:
+            obj = ExternalApiKey(
+                service="youtube",
+                label="YouTube OAuth",
+                api_key=access_token,
+                extra_config=extra,
+                is_active=True,
+            )
+            db.add(obj)
+        db.commit()
+
     return {
         **result,
-        "next_step": (
-            "반환된 access_token을 POST /api/data/api-keys 에 "
-            "{service: 'youtube', api_key: '<access_token>'} 으로 저장하세요."
-        ),
+        "auto_saved": bool(access_token),
+        "refresh_token_saved": bool(refresh_token),
+        "message": "토큰이 자동으로 저장되었습니다." if access_token else "저장 실패: access_token 없음",
     }
+
+
+@router.post("/youtube/refresh-token", summary="YouTube access_token 자동 갱신")
+def refresh_youtube_token(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    저장된 refresh_token으로 YouTube access_token을 자동 갱신합니다.
+    extra_config에 client_id, client_secret, refresh_token이 있어야 합니다.
+    """
+    import requests as _req
+
+    row = db.query(ExternalApiKey).filter(
+        ExternalApiKey.service == "youtube",
+        ExternalApiKey.is_active == True,
+    ).first()
+    if not row:
+        raise HTTPException(404, "YouTube 자격증명이 없습니다.")
+
+    extra = row.extra_config or {}
+    refresh_token = extra.get("refresh_token")
+    client_id = extra.get("client_id")
+    client_secret = extra.get("client_secret")
+
+    if not all([refresh_token, client_id, client_secret]):
+        raise HTTPException(400, detail={
+            "message": "refresh_token, client_id, client_secret 중 일부가 없습니다.",
+            "missing": [k for k in ["refresh_token", "client_id", "client_secret"] if not extra.get(k)],
+        })
+
+    try:
+        r = _req.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+        new_token = data.get("access_token")
+        if not new_token:
+            raise HTTPException(400, f"갱신 실패: {data}")
+        row.api_key = new_token
+        row.updated_at = datetime.utcnow()
+        db.commit()
+        return {"ok": True, "message": "YouTube access_token 갱신 완료", "expires_in": data.get("expires_in")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"토큰 갱신 오류: {str(e)[:200]}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

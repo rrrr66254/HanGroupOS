@@ -3,15 +3,16 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from core.database import get_db
 from core.security import get_current_user
-from models.models import StrategyItem, CEOPerformance, Collaboration, User, Company
+from models.models import StrategyItem, CEOPerformance, Collaboration, User, Company, OrgNode
 from schemas.schemas import (
     StrategyItemCreate, StrategyItemUpdate, StrategyItemOut,
     CEOEvaluateRequest, CEOPerformanceOut,
     CollaborationCreate, CollaborationOut,
     StrategyGenerateRequest,
 )
-from services.ai_provider import get_provider_from_db
-import json, re
+from services.ai_provider import get_provider_from_db, CEO_SYSTEM
+from services.team_agent import run_team_discussion, format_team_discussion
+import json, re, asyncio
 
 router = APIRouter(prefix="/api/strategy", tags=["strategy"])
 
@@ -427,3 +428,101 @@ def talent_match(
         result = default
 
     return result
+
+
+# ── Team Agent 멀티 CEO 전략 토론 ───────────────────────────────────────────────
+@router.post("/team-discussion")
+def team_strategy_discussion(
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """여러 계열사 CEO들이 팀 에이전트로 전략 주제를 토론합니다.
+
+    body:
+      topic: str — 토론 주제 (필수)
+      company_ids: list[int] — 참여 회사 ID 목록 (없으면 전체 회사 CEO)
+      max_rounds: int — 토론 라운드 수 (기본 2)
+    """
+    from services.work_service import get_node_ai_provider
+
+    topic = (body.get("topic") or "").strip()
+    if not topic:
+        raise HTTPException(400, "topic 필드가 필요합니다.")
+
+    company_ids = body.get("company_ids") or []
+    max_rounds = int(body.get("max_rounds") or 2)
+    max_rounds = max(1, min(max_rounds, 3))  # 1~3 라운드 제한
+
+    # CEO 노드 수집
+    q = db.query(OrgNode).filter(OrgNode.level == "ceo")
+    if company_ids:
+        q = q.filter(OrgNode.company_id.in_(company_ids))
+    ceo_nodes = q.limit(6).all()  # 최대 6명
+
+    if not ceo_nodes:
+        return {
+            "topic": topic,
+            "summary": "참여 가능한 CEO가 없습니다. 먼저 계열사를 생성하세요.",
+            "discussion": None,
+        }
+
+    # 에이전트 목록 구성
+    agents = []
+    for node in ceo_nodes:
+        company = db.query(Company).filter(Company.id == node.company_id).first()
+        company_name = company.name if company else f"회사{node.company_id}"
+        provider = get_node_ai_provider(db, node)
+        system = (
+            CEO_SYSTEM
+            + f"\n\n[현재 역할] 당신은 {company_name}의 CEO {node.name}입니다."
+            + f"\n[소속 회사] {company_name} ({company.industry if company else ''})"
+            + (f"\n[회사 비전] {company.vision}" if company and company.vision else "")
+        )
+        agents.append({
+            "name": f"{node.name} ({company_name} CEO)",
+            "provider": provider,
+            "system": system,
+        })
+
+    # asyncio 루프에서 팀 토론 실행
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        discussion_result = loop.run_until_complete(
+            run_team_discussion(agents, topic, max_rounds=max_rounds)
+        )
+        loop.close()
+    except Exception as e:
+        return {"topic": topic, "summary": f"토론 실행 오류: {str(e)}", "discussion": None}
+
+    formatted = format_team_discussion(discussion_result)
+
+    # 토론 결과 기반 전략 인사이트 생성
+    provider = get_provider_from_db(db, current_user.id)
+    summary_prompt = f"""다음은 한그룹 계열사 CEO들의 전략 토론 내용입니다:
+
+{formatted[:3000]}
+
+이 토론에서 도출된 핵심 합의사항, 전략 방향, 실행 계획을 3~5문장으로 요약하세요."""
+
+    summary = ""
+    try:
+        summary = provider.chat(
+            [{"role": "user", "content": summary_prompt}],
+            system="당신은 그룹 전략 회의 서기입니다. 토론 내용을 간결하게 요약합니다.",
+            session_type="general",
+            max_tokens=400,
+        )
+    except Exception:
+        summary = "요약 생성 실패"
+
+    return {
+        "topic": topic,
+        "participant_count": len(agents),
+        "participants": [a["name"] for a in agents],
+        "rounds": max_rounds,
+        "summary": summary,
+        "discussion": discussion_result,
+        "formatted": formatted,
+    }
