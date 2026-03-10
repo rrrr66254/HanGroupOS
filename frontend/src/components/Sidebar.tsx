@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, MessageSquare, Building2, CheckSquare,
   Users, TrendingUp, Map, FlaskConical, Monitor,
-  Brain, Settings, ChevronLeft, ChevronRight, Zap, Home, Bell, FileText, Globe, Star, GitMerge, BarChart2, UserCheck, Terminal, Gamepad2,
+  Brain, Settings, ChevronLeft, ChevronRight, Zap, Home, Bell, FileText, Globe, Star, GitMerge, BarChart2, UserCheck, Terminal, Gamepad2, Shield,
 } from 'lucide-react'
 import { useAppStore } from '../store/useStore'
 
@@ -27,6 +27,7 @@ const NAV = [
   { to: '/talent-match', icon: UserCheck, label: '인재추천' },
   { to: '/terminal', icon: Terminal, label: '터미널' },
   { to: '/game', icon: Gamepad2, label: '게임 플랫폼' },
+  { to: '/audit', icon: Shield, label: '감사 로그' },
   { to: '/admin', icon: Settings, label: '관리자' },
 ]
 

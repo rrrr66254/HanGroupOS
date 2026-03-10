@@ -286,3 +286,10 @@ export const agentApi = {
   chat: (nodeId: number, message: string) =>
     api.post('/chat/agent-chat', { node_id: nodeId, message }),
 }
+
+// ── Audit Log ──────────────────────────────────────────────────────────────────
+export const auditApi = {
+  log: (params?: { kind?: string; status?: string; limit?: number; offset?: number }) =>
+    api.get('/audit/log', { params }),
+  stats: () => api.get('/audit/stats'),
+}

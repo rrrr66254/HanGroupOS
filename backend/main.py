@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import init_db, SessionLocal
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit
 
 
 app = FastAPI(
@@ -41,6 +41,7 @@ app.include_router(media.router)          # 미디어 발행 (블로그/YouTube)
 app.include_router(executor.router)       # 코드 실행 환경 (Python + pip + 워크스페이스 DB)
 app.include_router(capabilities.router)   # 회사 역량 관리 (자동 분석 + 승인)
 app.include_router(game.router)           # 게임 회사 전용 (트렌딩/분석/아이디어/프로젝트)
+app.include_router(audit.router)          # 감사 로그 (승인/반려/터미널 이력 통합 조회)
 
 
 @app.get("/health")
