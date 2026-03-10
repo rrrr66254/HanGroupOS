@@ -313,6 +313,59 @@ def _process_approval_actions(content: str, db, user_id: int) -> tuple:
                 results.append(f"\n\n❌ {action} 처리 오류: {exc}")
         content = pattern.sub("", content)
 
+    # Bulk ApprovalRequest handling
+    for action, is_approve in [("APPROVE_ALL_REQUESTS", True), ("REJECT_ALL_REQUESTS", False)]:
+        pattern = re.compile(rf'<<{action}:(.*?)>>', re.DOTALL)
+        for match in pattern.finditer(content):
+            try:
+                data = json.loads(match.group(1).strip())
+                req_type = data.get("type", "")
+                note = data.get("note", "일괄 처리")
+                q = db.query(ApprovalRequest).filter(ApprovalRequest.status == "pending")
+                if req_type:
+                    q = q.filter(ApprovalRequest.request_type == req_type)
+                pending_list = q.all()
+                count = 0
+                for approval in pending_list:
+                    approval.status = "approved" if is_approve else "rejected"
+                    approval.reviewer_note = note
+                    approval.reviewed_by = user_id
+                    approval.reviewed_at = _dt.utcnow()
+                    if is_approve and approval.request_type == "capability_update":
+                        try:
+                            from services.capability_analyzer import activate_capabilities
+                            activate_capabilities(approval.id, db)
+                        except Exception:
+                            pass
+                    count += 1
+                db.flush()
+                label = "✅ 일괄 승인" if is_approve else "❌ 일괄 반려"
+                type_label = f" [{req_type}]" if req_type else ""
+                results.append(f"\n\n{label}{type_label} — {count}건 처리 완료")
+            except Exception as exc:
+                results.append(f"\n\n❌ {action} 처리 오류: {exc}")
+        content = pattern.sub("", content)
+
+    # Bulk TerminalRequest handling
+    approve_all_term_pat = re.compile(r'<<APPROVE_ALL_TERMINALS:(.*?)>>', re.DOTALL)
+    for match in approve_all_term_pat.finditer(content):
+        try:
+            pending_terms = db.query(TerminalRequest).filter(TerminalRequest.status == "pending").all()
+            count = 0
+            for tr in pending_terms:
+                tr.status = "approved"; tr.approved_by = user_id; tr.decided_at = _dt.utcnow()
+                db.flush()
+                result = subprocess.run(tr.command, shell=True, capture_output=True, text=True,
+                    timeout=30, cwd="/home/user/han-group-os")
+                tr.output = (result.stdout or "") + (("\n[stderr]\n" + result.stderr) if result.stderr else "")
+                tr.exit_code = result.returncode; tr.status = "executed"; tr.executed_at = _dt.utcnow()
+                db.flush()
+                count += 1
+            results.append(f"\n\n✅ 터미널 일괄 승인 & 실행 — {count}건 완료")
+        except Exception as exc:
+            results.append(f"\n\n❌ APPROVE_ALL_TERMINALS 처리 오류: {exc}")
+    content = approve_all_term_pat.sub("", content)
+
     # TerminalRequest handling
     for action, is_approve in [("APPROVE_TERMINAL", True), ("REJECT_TERMINAL", False)]:
         pattern = re.compile(rf'<<{action}:(.*?)>>', re.DOTALL)

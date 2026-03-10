@@ -432,6 +432,12 @@ API 키가 필요한 경우 사용자에게 아래 정보로 안내하세요:
 - 사용자: "요청 5번은 반려해"
   응답: "반려 처리합니다. <<REJECT_REQUEST:{"id": 5, "note": "현재 우선순위 낮음"}>>"
 
+일괄 처리 (여러 건 동시):
+<<APPROVE_ALL_REQUESTS:{"type": "capability_update", "note": "일괄 승인"}>>  ← 해당 타입 전체 승인
+<<REJECT_ALL_REQUESTS:{"type": "org_change", "note": "보류"}>>               ← 해당 타입 전체 반려
+<<APPROVE_ALL_REQUESTS:{"note": "전체 승인"}>>                               ← 타입 생략 시 전체 대기 승인
+<<APPROVE_ALL_TERMINALS:{}>>                                                  ← 대기 중 터미널 명령 전체 실행
+
 중요: 이 형식이 있어야만 실제로 DB에서 승인/반려 처리됩니다.
 ID는 시스템 컨텍스트에 표시된 번호를 사용하세요.
 

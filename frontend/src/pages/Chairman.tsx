@@ -835,6 +835,63 @@ export default function Chairman() {
     return `${selectedExec.name}에게 질문… (Enter 전송)`
   }
 
+  // Parse AI message content and render approval/terminal result lines as colored cards
+  const renderChatContent = (content: string, showCursor: boolean) => {
+    // Split content into regular text segments and action result lines
+    const lines = content.split('\n')
+    const segments: { type: 'text' | 'approve' | 'reject' | 'terminal_ok' | 'terminal_fail' | 'warn'; text: string }[] = []
+    let textBuffer: string[] = []
+
+    const flushText = () => {
+      if (textBuffer.length > 0) {
+        segments.push({ type: 'text', text: textBuffer.join('\n') })
+        textBuffer = []
+      }
+    }
+
+    for (const line of lines) {
+      if (/^✅ 승인 — /.test(line)) {
+        flushText(); segments.push({ type: 'approve', text: line })
+      } else if (/^❌ 반려 — /.test(line)) {
+        flushText(); segments.push({ type: 'reject', text: line })
+      } else if (/^✅ 터미널 #\d+ 승인 & 실행 완료/.test(line)) {
+        flushText(); segments.push({ type: 'terminal_ok', text: line })
+      } else if (/^❌ 터미널 #\d+ 거부됨/.test(line)) {
+        flushText(); segments.push({ type: 'terminal_fail', text: line })
+      } else if (/^⚠️ /.test(line) && (line.includes('승인 요청') || line.includes('터미널 요청'))) {
+        flushText(); segments.push({ type: 'warn', text: line })
+      } else {
+        textBuffer.push(line)
+      }
+    }
+    flushText()
+
+    return segments.map((seg, i) => {
+      if (seg.type === 'text') {
+        return (
+          <pre key={i} className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
+            {seg.text}
+            {showCursor && i === segments.length - 1 && (
+              <span className="inline-block w-0.5 h-4 bg-slate-400 ml-0.5 align-middle" style={{ animation: 'blink 1s step-end infinite' }} />
+            )}
+          </pre>
+        )
+      }
+      const colors: Record<string, string> = {
+        approve: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300',
+        reject: 'bg-red-500/10 border-red-500/30 text-red-300',
+        terminal_ok: 'bg-blue-500/10 border-blue-500/30 text-blue-300',
+        terminal_fail: 'bg-red-500/10 border-red-500/30 text-red-300',
+        warn: 'bg-amber-500/10 border-amber-500/30 text-amber-300',
+      }
+      return (
+        <div key={i} className={`rounded-lg border px-3 py-2 text-xs font-medium ${colors[seg.type]}`}>
+          {seg.text}
+        </div>
+      )
+    })
+  }
+
   return (
     <div className="flex h-[calc(100vh-4rem)] animate-fade-in overflow-hidden">
 
@@ -1162,12 +1219,9 @@ export default function Chairman() {
                       <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
                   ) : (
-                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-                      {msg.content}
-                      {msg.role === 'assistant' && loading && msg.content !== '' && (
-                        <span className="inline-block w-0.5 h-4 bg-slate-400 ml-0.5 align-middle" style={{ animation: 'blink 1s step-end infinite' }} />
-                      )}
-                    </pre>
+                    <div className="space-y-2">
+                      {renderChatContent(msg.content, msg.role === 'assistant' && loading && msg.content !== '')}
+                    </div>
                   )}
                 </div>
               </div>
