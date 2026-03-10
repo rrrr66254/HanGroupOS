@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Film, Play, Plus, Trash2, RefreshCw, AlertCircle, CheckCircle, Clock, Loader2 } from 'lucide-react'
 import { videoApi } from '../api/client'
+import { useAuthStore } from '../store/useStore'
 
 interface VideoModel {
   id: string
@@ -53,6 +54,9 @@ export default function VideoStudio() {
   const [j2vConfig, setJ2vConfig] = useState({ template: 'basic', logo: '', bgImageUrl: '', bgm: false })
   const [now, setNow] = useState(Date.now())
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const [wsProgress, setWsProgress] = useState<{ progress: number; message: string } | null>(null)
+  const token = useAuthStore((s) => s.token)
 
   const formatElapsed = (createdAt: string) => {
     const elapsed = Math.floor((now - new Date(createdAt).getTime()) / 1000)
@@ -99,6 +103,37 @@ export default function VideoStudio() {
     const iv = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(iv)
   }, [jobs])
+
+  // WebSocket 연결: 선택된 잡이 실행 중일 때 실시간 진행률 수신
+  useEffect(() => {
+    if (wsRef.current) {
+      wsRef.current.close()
+      wsRef.current = null
+    }
+    setWsProgress(null)
+
+    if (!selected || (selected.status !== 'pending' && selected.status !== 'running') || !token) return
+
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(`${proto}//${window.location.host}/api/video/ws/${selected.id}?token=${token}`)
+    wsRef.current = ws
+
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (data.type === 'progress') {
+          setWsProgress({ progress: data.progress, message: data.message })
+        } else if (data.type === 'done') {
+          setWsProgress(null)
+          loadJobs()
+        }
+      } catch { /* ignore */ }
+    }
+    ws.onerror = () => { wsRef.current = null }
+    ws.onclose = () => { wsRef.current = null }
+
+    return () => { ws.close() }
+  }, [selected?.id, selected?.status, token])
 
   const loadJobs = () =>
     videoApi.jobs().then((r) => {
@@ -378,18 +413,22 @@ export default function VideoStudio() {
                 {selected.status === 'running' && (
                   <div className="space-y-1.5">
                     <div className="flex justify-between text-[10px] text-slate-600">
-                      <span>진행률 (예상)</span>
-                      <span>{getProgress(selected)}%</span>
+                      <span>{wsProgress ? '진행률 (실시간)' : '진행률 (예상)'}</span>
+                      <span>{wsProgress ? wsProgress.progress : getProgress(selected)}%</span>
                     </div>
                     <div className="w-full bg-bg-border rounded-full h-1.5">
                       <div
-                        className="bg-brand h-1.5 rounded-full transition-all duration-1000"
-                        style={{ width: `${getProgress(selected)}%` }}
+                        className="bg-brand h-1.5 rounded-full transition-all duration-500"
+                        style={{ width: `${wsProgress ? wsProgress.progress : getProgress(selected)}%` }}
                       />
                     </div>
-                    <div className="text-[10px] text-slate-600">
-                      예상 완료: 약 {EST_SECONDS[selected.provider] ?? 180}초 ({selected.provider})
-                    </div>
+                    {wsProgress ? (
+                      <div className="text-[10px] text-brand-light">{wsProgress.message}</div>
+                    ) : (
+                      <div className="text-[10px] text-slate-600">
+                        예상 완료: 약 {EST_SECONDS[selected.provider] ?? 180}초 ({selected.provider})
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

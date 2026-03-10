@@ -5,7 +5,7 @@ import {
   TrendingUp, Map, FlaskConical, Monitor,
   Brain, Settings, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Zap, Home, Bell, FileText, Globe, Star, GitMerge, BarChart2, UserCheck,
-  Terminal, Gamepad2, Shield, Briefcase, Users, Film,
+  Terminal, Gamepad2, Shield, Briefcase, Users, Film, ListVideo,
 } from 'lucide-react'
 import { useAppStore } from '../store/useStore'
 import { approvalsApi, terminalApi } from '../api/client'
@@ -63,6 +63,7 @@ const NAV_GROUPS = [
       { to: '/site-evaluator', icon: Star, label: '사이트평가' },
       { to: '/game', icon: Gamepad2, label: '게임 플랫폼' },
       { to: '/video-studio', icon: Film, label: '영상 스튜디오' },
+      { to: '/video-jobs', icon: ListVideo, label: '영상 잡 관리' },
     ],
   },
   {

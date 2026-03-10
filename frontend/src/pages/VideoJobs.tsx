@@ -1,0 +1,362 @@
+import { useEffect, useRef, useState } from 'react'
+import {
+  Film, Trash2, RefreshCw, AlertCircle, CheckCircle,
+  Loader2, Play, Download, Filter, Search, ExternalLink,
+} from 'lucide-react'
+import { videoApi } from '../api/client'
+import { useNavigate } from 'react-router-dom'
+
+interface VideoJob {
+  id: number
+  prompt: string
+  model_id: string
+  provider: string
+  status: 'pending' | 'running' | 'done' | 'failed'
+  video_url: string | null
+  error_msg: string
+  duration_sec: number | null
+  created_at: string
+  finished_at: string | null
+}
+
+const STATUS_COLOR: Record<string, string> = {
+  pending: 'text-yellow-400',
+  running: 'text-blue-400',
+  done: 'text-green-400',
+  failed: 'text-red-400',
+}
+const STATUS_BG: Record<string, string> = {
+  pending: 'bg-yellow-500/10 border-yellow-500/20',
+  running: 'bg-blue-500/10 border-blue-500/20',
+  done: 'bg-green-500/10 border-green-500/20',
+  failed: 'bg-red-500/10 border-red-500/20',
+}
+const STATUS_LABEL: Record<string, string> = {
+  pending: '대기 중',
+  running: '생성 중',
+  done: '완료',
+  failed: '실패',
+}
+
+type StatusFilter = 'all' | 'pending' | 'running' | 'done' | 'failed'
+
+export default function VideoJobs() {
+  const [jobs, setJobs] = useState<VideoJob[]>([])
+  const [loading, setLoading] = useState(true)
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [search, setSearch] = useState('')
+  const [previewJob, setPreviewJob] = useState<VideoJob | null>(null)
+  const [deleting, setDeleting] = useState<number | null>(null)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const navigate = useNavigate()
+
+  const loadJobs = async () => {
+    try {
+      const r = await videoApi.jobs(undefined, 100)
+      setJobs(r.data)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadJobs()
+  }, [])
+
+  // 활성 잡 폴링
+  useEffect(() => {
+    const hasActive = jobs.some((j) => j.status === 'pending' || j.status === 'running')
+    if (hasActive) {
+      pollRef.current = setInterval(loadJobs, 4000)
+    } else {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+    }
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [jobs])
+
+  const handleDelete = async (job: VideoJob) => {
+    setDeleting(job.id)
+    try {
+      await videoApi.deleteJob(job.id)
+      if (previewJob?.id === job.id) setPreviewJob(null)
+      await loadJobs()
+    } finally {
+      setDeleting(null)
+    }
+  }
+
+  const filtered = jobs.filter((j) => {
+    if (statusFilter !== 'all' && j.status !== statusFilter) return false
+    if (search && !j.prompt.toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  })
+
+  const counts: Record<string, number> = { all: jobs.length }
+  for (const s of ['pending', 'running', 'done', 'failed']) {
+    counts[s] = jobs.filter((j) => j.status === s).length
+  }
+
+  const formatDate = (iso: string) => new Date(iso).toLocaleString('ko-KR')
+
+  return (
+    <div className="flex h-full">
+      {/* Main list */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-bg-border bg-bg-card flex items-center gap-4 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Film size={18} className="text-brand-light" />
+            <h1 className="text-sm font-semibold text-slate-100">영상 잡 관리</h1>
+            <span className="text-xs text-slate-500">({jobs.length}건)</span>
+          </div>
+
+          {/* Search */}
+          <div className="relative flex-1 max-w-xs">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="프롬프트 검색..."
+              className="w-full pl-7 pr-3 py-1.5 bg-bg-base border border-bg-border rounded text-xs text-slate-200 focus:outline-none focus:border-brand/60 placeholder:text-slate-600"
+            />
+          </div>
+
+          <div className="flex items-center gap-1 ml-auto">
+            <button
+              onClick={loadJobs}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-slate-400 hover:text-slate-200 hover:bg-bg-elevated transition-colors"
+            >
+              <RefreshCw size={12} /> 새로고침
+            </button>
+            <button
+              onClick={() => navigate('/video-studio')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium bg-brand/80 hover:bg-brand text-white transition-colors"
+            >
+              <Film size={12} /> 영상 생성
+            </button>
+          </div>
+        </div>
+
+        {/* Status filter tabs */}
+        <div className="flex items-center gap-1 px-6 py-2 border-b border-bg-border bg-bg-card">
+          <Filter size={11} className="text-slate-600 mr-1" />
+          {(['all', 'running', 'pending', 'done', 'failed'] as StatusFilter[]).map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s)}
+              className={`px-2.5 py-1 rounded text-[10px] font-medium transition-colors border ${
+                statusFilter === s
+                  ? s === 'all'
+                    ? 'bg-brand/20 text-brand-light border-brand/30'
+                    : `${STATUS_BG[s]} ${STATUS_COLOR[s]} border-current`
+                  : 'text-slate-500 border-transparent hover:text-slate-300'
+              }`}
+            >
+              {s === 'all' ? '전체' : STATUS_LABEL[s]}
+              <span className="ml-1 opacity-70">({counts[s] ?? 0})</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Job table */}
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 size={20} className="animate-spin text-slate-500" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3 text-slate-600">
+              <Film size={32} strokeWidth={1} />
+              <p className="text-sm">조건에 맞는 영상 잡이 없습니다</p>
+            </div>
+          ) : (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-bg-border text-left">
+                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium w-10">#</th>
+                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium">프롬프트</th>
+                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium w-28">모델</th>
+                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium w-20">상태</th>
+                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium w-36">생성 시간</th>
+                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium w-36">완료 시간</th>
+                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium w-28 text-right">액션</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((job) => (
+                  <tr
+                    key={job.id}
+                    onClick={() => setPreviewJob(previewJob?.id === job.id ? null : job)}
+                    className={`border-b border-bg-border cursor-pointer transition-colors ${
+                      previewJob?.id === job.id ? 'bg-bg-elevated' : 'hover:bg-bg-elevated/50'
+                    }`}
+                  >
+                    <td className="px-4 py-3 text-slate-500">{job.id}</td>
+                    <td className="px-4 py-3 text-slate-200 max-w-0">
+                      <p className="truncate">{job.prompt}</p>
+                      {job.status === 'failed' && job.error_msg && (
+                        <p className="text-[10px] text-red-400 truncate mt-0.5">{job.error_msg}</p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-400">
+                      {job.model_id.split('/').pop()}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`flex items-center gap-1 ${STATUS_COLOR[job.status]}`}>
+                        {(job.status === 'pending' || job.status === 'running') && (
+                          <Loader2 size={10} className="animate-spin" />
+                        )}
+                        {job.status === 'done' && <CheckCircle size={10} />}
+                        {job.status === 'failed' && <AlertCircle size={10} />}
+                        {STATUS_LABEL[job.status]}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-500">{formatDate(job.created_at)}</td>
+                    <td className="px-4 py-3 text-slate-500">
+                      {job.finished_at ? formatDate(job.finished_at) : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                        {job.status === 'done' && job.video_url && (
+                          <>
+                            <button
+                              onClick={() => setPreviewJob(job)}
+                              className="p-1.5 rounded text-slate-500 hover:text-green-400 hover:bg-green-500/10 transition-colors"
+                              title="미리보기"
+                            >
+                              <Play size={12} />
+                            </button>
+                            <a
+                              href={job.video_url}
+                              download={`video_${job.id}.mp4`}
+                              className="p-1.5 rounded text-slate-500 hover:text-brand-light hover:bg-brand/10 transition-colors"
+                              title="다운로드"
+                            >
+                              <Download size={12} />
+                            </a>
+                          </>
+                        )}
+                        <button
+                          onClick={() => navigate('/video-studio')}
+                          className="p-1.5 rounded text-slate-500 hover:text-slate-300 hover:bg-bg-elevated transition-colors"
+                          title="스튜디오에서 보기"
+                        >
+                          <ExternalLink size={12} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(job)}
+                          disabled={deleting === job.id}
+                          className="p-1.5 rounded text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                          title="삭제"
+                        >
+                          {deleting === job.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* Right preview panel */}
+      {previewJob && (
+        <div className="w-96 border-l border-bg-border flex flex-col bg-bg-card">
+          <div className="px-4 py-3 border-b border-bg-border flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-200">미리보기 #{previewJob.id}</span>
+            <button
+              onClick={() => setPreviewJob(null)}
+              className="text-slate-500 hover:text-slate-300 text-xs"
+            >
+              닫기
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {/* Status */}
+            <div className={`flex items-center gap-2 px-3 py-2 rounded border text-xs ${STATUS_BG[previewJob.status]} ${STATUS_COLOR[previewJob.status]}`}>
+              {previewJob.status === 'done' && <CheckCircle size={13} />}
+              {previewJob.status === 'failed' && <AlertCircle size={13} />}
+              {(previewJob.status === 'pending' || previewJob.status === 'running') && (
+                <Loader2 size={13} className="animate-spin" />
+              )}
+              {STATUS_LABEL[previewJob.status]}
+            </div>
+
+            {/* Prompt */}
+            <div className="bg-bg-base border border-bg-border rounded p-3">
+              <p className="text-[10px] text-slate-500 mb-1">프롬프트</p>
+              <p className="text-xs text-slate-200 leading-relaxed">{previewJob.prompt}</p>
+            </div>
+
+            {/* Meta */}
+            <div className="grid grid-cols-2 gap-2 text-[10px]">
+              <div className="bg-bg-base rounded p-2">
+                <p className="text-slate-500 mb-0.5">모델</p>
+                <p className="text-slate-300">{previewJob.model_id.split('/').pop()}</p>
+              </div>
+              <div className="bg-bg-base rounded p-2">
+                <p className="text-slate-500 mb-0.5">Provider</p>
+                <p className="text-slate-300">{previewJob.provider}</p>
+              </div>
+              <div className="bg-bg-base rounded p-2">
+                <p className="text-slate-500 mb-0.5">생성 시간</p>
+                <p className="text-slate-300">{formatDate(previewJob.created_at)}</p>
+              </div>
+              <div className="bg-bg-base rounded p-2">
+                <p className="text-slate-500 mb-0.5">완료 시간</p>
+                <p className="text-slate-300">{previewJob.finished_at ? formatDate(previewJob.finished_at) : '—'}</p>
+              </div>
+            </div>
+
+            {/* Video player */}
+            {previewJob.status === 'done' && previewJob.video_url && (
+              <div className="space-y-2">
+                <p className="text-[10px] text-slate-500">생성된 영상</p>
+                <div className="bg-black rounded overflow-hidden aspect-video flex items-center justify-center">
+                  <video
+                    key={previewJob.id}
+                    src={previewJob.video_url}
+                    controls
+                    autoPlay
+                    loop
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+                <a
+                  href={previewJob.video_url}
+                  download={`video_${previewJob.id}.mp4`}
+                  className="flex items-center gap-1.5 text-xs text-brand-light hover:underline"
+                >
+                  <Download size={12} /> MP4 다운로드
+                </a>
+              </div>
+            )}
+
+            {/* Error */}
+            {previewJob.status === 'failed' && previewJob.error_msg && (
+              <div className="bg-red-500/10 border border-red-500/20 rounded p-3">
+                <p className="text-[10px] text-red-400 font-medium mb-1">오류 메시지</p>
+                <p className="text-xs text-red-300">{previewJob.error_msg}</p>
+              </div>
+            )}
+
+            {/* Running indicator */}
+            {(previewJob.status === 'pending' || previewJob.status === 'running') && (
+              <div className="flex flex-col items-center justify-center py-8 gap-3">
+                <Loader2 size={24} className="animate-spin text-blue-400" />
+                <p className="text-xs text-slate-400">
+                  {previewJob.status === 'pending' ? '큐 대기 중...' : '영상 생성 중...'}
+                </p>
+                <p className="text-[10px] text-slate-600">영상 스튜디오에서 실시간 진행률을 확인하세요</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

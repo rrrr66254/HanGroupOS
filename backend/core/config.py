@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 from typing import Optional
 
 
@@ -48,8 +49,7 @@ class Settings(BaseSettings):
     # 이 메시지 수 이상이면 시스템 프롬프트 튜토리얼 섹션 제거 (~30% 절약)
     CONTEXT_SLIM_AFTER: int = 10
 
-    class Config:
-        env_file = ".env"
+    model_config = ConfigDict(env_file=".env")
 
 
 settings = Settings()

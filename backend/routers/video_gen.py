@@ -2,18 +2,78 @@
 영상 생성 라우터 — HuggingFace Inference API + JSON2Video API
 지원 모델: LTX-Video, CogVideoX, Text-to-Video-MS, JSON2Video 프레젠테이션
 """
-from fastapi import APIRouter, Depends, HTTPException
+import asyncio
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
 from pathlib import Path
 import os
 
 from core.database import get_db
-from core.security import get_current_user
+from core.security import get_current_user, decode_token
 from models.models import VideoJob, ExternalApiKey, User
 from pydantic import BaseModel
+
+
+# ── WebSocket 영상 진행률 관리자 ────────────────────────────────────────────
+
+class VideoProgressManager:
+    def __init__(self):
+        self.connections: Dict[int, List[WebSocket]] = {}
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._progress: Dict[int, dict] = {}
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop):
+        self._loop = loop
+
+    async def connect(self, job_id: int, ws: WebSocket):
+        await ws.accept()
+        self.connections.setdefault(job_id, []).append(ws)
+        # 마지막 진행률 즉시 전송
+        if job_id in self._progress:
+            await ws.send_json(self._progress[job_id])
+
+    def disconnect(self, job_id: int, ws: WebSocket):
+        conns = self.connections.get(job_id, [])
+        if ws in conns:
+            conns.remove(ws)
+
+    async def _broadcast(self, job_id: int, data: dict):
+        dead = []
+        for ws in list(self.connections.get(job_id, [])):
+            try:
+                await ws.send_json(data)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(job_id, ws)
+
+    def notify_sync(self, job_id: int, progress: int, message: str):
+        """동기 스레드에서 호출 — WebSocket으로 진행률 브로드캐스트."""
+        data = {"type": "progress", "job_id": job_id, "progress": progress, "message": message}
+        self._progress[job_id] = data
+        if not self._loop or self._loop.is_closed():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self._broadcast(job_id, data), self._loop)
+        except Exception:
+            pass
+
+    def done_sync(self, job_id: int, status: str):
+        """완료/실패 알림 전송."""
+        data = {"type": "done", "job_id": job_id, "status": status, "progress": 100}
+        self._progress.pop(job_id, None)
+        if not self._loop or self._loop.is_closed():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self._broadcast(job_id, data), self._loop)
+        except Exception:
+            pass
+
+
+video_progress = VideoProgressManager()
 
 router = APIRouter(prefix="/api/video", tags=["video-generation"])
 
@@ -127,22 +187,22 @@ def _run_generation(job_id: int, token: str):
 
         job.status = "running"
         db.commit()
-
-        # 모델 provider 확인
-        model_info = next((m for m in SUPPORTED_MODELS if m["id"] == job.model_id), None)
-        provider = (model_info or {}).get("provider", "hf-inference")
+        video_progress.notify_sync(job_id, 5, "모델 초기화 중...")
 
         try:
             from huggingface_hub import InferenceClient
 
             client = InferenceClient(api_key=token)
+            video_progress.notify_sync(job_id, 15, "API 연결 완료, 영상 생성 시작...")
 
             # 영상 생성 (반환값: bytes)
             kwargs: dict = {"model": job.model_id}
             if job.meta.get("num_frames"):
                 kwargs["num_frames"] = job.meta["num_frames"]
 
+            video_progress.notify_sync(job_id, 20, "영상 생성 중 (모델 추론)...")
             video_bytes = client.text_to_video(job.prompt, **kwargs)
+            video_progress.notify_sync(job_id, 85, "영상 저장 중...")
 
             # 파일 저장
             out_path = VIDEO_DIR / f"video_{job.id}.mp4"
@@ -156,14 +216,17 @@ def _run_generation(job_id: int, token: str):
             job.status = "done"
             job.video_path = str(out_path)
             job.finished_at = datetime.utcnow()
+            video_progress.done_sync(job_id, "done")
 
         except ImportError:
             job.status = "failed"
             job.error_msg = "huggingface_hub 패키지가 설치되지 않았습니다. pip install huggingface_hub"
+            video_progress.done_sync(job_id, "failed")
         except Exception as e:
             job.status = "failed"
             job.error_msg = str(e)[:500]
             job.finished_at = datetime.utcnow()
+            video_progress.done_sync(job_id, "failed")
 
         db.commit()
 
@@ -188,6 +251,7 @@ def _run_json2video_generation(job_id: int, api_key: str):
 
         job.status = "running"
         db.commit()
+        video_progress.notify_sync(job_id, 5, "JSON2Video API 연결 중...")
 
         try:
             # 프롬프트를 제목(첫 줄)과 부제목(나머지)으로 분리
@@ -297,8 +361,10 @@ def _run_json2video_generation(job_id: int, api_key: str):
             if not project_id:
                 raise ValueError(f"project ID 없음: {r.text[:200]}")
 
+            video_progress.notify_sync(job_id, 15, "렌더링 대기 중...")
+
             # 완료 폴링 — 최대 5분 (60회 × 5초)
-            for _ in range(60):
+            for poll_idx in range(60):
                 time.sleep(5)
                 sr = requests.get(
                     f"https://api.json2video.com/v2/movies?project={project_id}",
@@ -308,12 +374,16 @@ def _run_json2video_generation(job_id: int, api_key: str):
                 sr.raise_for_status()
                 data = sr.json()
                 st = data.get("status", "")
+                # 진행률: 15% ~ 90% (폴링 횟수 기반)
+                pct = 15 + int((poll_idx / 60) * 75)
+                video_progress.notify_sync(job_id, pct, f"렌더링 중... ({poll_idx * 5}초 경과)")
                 if st == "done":
                     movie = data.get("movie") or {}
                     video_url = movie.get("url") or data.get("url", "")
                     job.status = "done"
                     job.video_path = video_url
                     job.finished_at = datetime.utcnow()
+                    video_progress.done_sync(job_id, "done")
                     break
                 elif st == "error":
                     raise ValueError(data.get("message", "json2video 렌더링 오류"))
@@ -324,6 +394,7 @@ def _run_json2video_generation(job_id: int, api_key: str):
             job.status = "failed"
             job.error_msg = str(e)[:500]
             job.finished_at = datetime.utcnow()
+            video_progress.done_sync(job_id, "failed")
 
         db.commit()
         _notify_chat(db, job)
@@ -421,6 +492,28 @@ def _notify_chat(db, job):
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
+
+@router.websocket("/ws/{job_id}")
+async def video_progress_ws(
+    job_id: int,
+    websocket: WebSocket,
+    token: str = Query(default=""),
+):
+    """영상 생성 진행률 실시간 WebSocket."""
+    if not token or not decode_token(token):
+        await websocket.close(code=4001)
+        return
+
+    video_progress.set_loop(asyncio.get_running_loop())
+    await video_progress.connect(job_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        video_progress.disconnect(job_id, websocket)
+
 
 @router.get("/models")
 def list_models():
