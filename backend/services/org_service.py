@@ -34,6 +34,31 @@ AI_TIER: Dict[str, Dict[str, Tuple[str, str]]] = {
 # ── Role-based specialization descriptions ────────────────────────────────
 # ── Specialist definitions per team_lead role ────────────────────────────────
 SPECIALIST_DEFS: Dict[str, List[Dict]] = {
+    "게임 디렉터": [
+        {"name": "시니어 기획자",   "role": "게임 기획자"},
+        {"name": "레벨 디자이너",   "role": "레벨 디자이너"},
+        {"name": "내러티브 작가",   "role": "스토리 작가"},
+    ],
+    "클라이언트 개발 팀장": [
+        {"name": "클라이언트 개발자 A", "role": "클라이언트 개발자"},
+        {"name": "클라이언트 개발자 B", "role": "클라이언트 개발자"},
+        {"name": "그래픽 엔지니어",     "role": "그래픽 엔지니어"},
+    ],
+    "서버 개발 팀장": [
+        {"name": "백엔드 개발자 A",  "role": "게임 서버 개발자"},
+        {"name": "백엔드 개발자 B",  "role": "게임 서버 개발자"},
+        {"name": "DB 엔지니어",      "role": "데이터베이스 엔지니어"},
+    ],
+    "QA 팀장": [
+        {"name": "QA 테스터 A",     "role": "QA 테스터"},
+        {"name": "QA 테스터 B",     "role": "QA 테스터"},
+        {"name": "자동화 엔지니어", "role": "QA 자동화 엔지니어"},
+    ],
+    "아트 팀장": [
+        {"name": "2D 아티스트",   "role": "2D 아티스트"},
+        {"name": "3D 모델러",     "role": "3D 모델러"},
+        {"name": "UI/UX 디자이너", "role": "게임 UI/UX 디자이너"},
+    ],
     "콘텐츠 제작 팀장": [
         {"name": "콘텐츠 작가",  "role": "콘텐츠 작가"},
         {"name": "에디터",       "role": "콘텐츠 에디터"},
@@ -107,6 +132,11 @@ ROLE_DESC: Dict[str, str] = {
     "데이터 총괄":            "데이터 파이프라인 및 분석 총괄 — 수치 분석 특화",
     "전략 총괄":              "비즈니스 전략 및 시장 분석 총괄 — 전략 수립 특화",
     "운영 총괄":              "운영 최적화 및 프로세스 관리 총괄 — 효율화 특화",
+    "게임 디렉터":            "게임 기획 총괄 리더 — 게임플레이 및 내러티브 특화",
+    "클라이언트 개발 팀장":   "클라이언트(앱/PC) 개발 실무 리더 — 렌더링·최적화 특화",
+    "서버 개발 팀장":         "게임 서버 및 인프라 실무 리더 — 대규모 동시접속 특화",
+    "QA 팀장":                "게임 품질 보증 실무 리더 — 버그 탐지·자동화 특화",
+    "아트 팀장":              "게임 아트 실무 리더 — 2D/3D 그래픽·UI 특화",
     "콘텐츠 제작 팀장":       "콘텐츠 제작 실무 리더 — 창작 및 편집 특화",
     "배포 전략 팀장":         "콘텐츠 배포·채널 전략 리더 — 유통 최적화 특화",
     "플랫폼 개발 팀장":       "플랫폼 개발 실무 리더 — 시스템 설계 특화",
@@ -122,6 +152,20 @@ ROLE_DESC: Dict[str, str] = {
 
 
 DEFAULT_TEMPLATES = {
+    "game": {
+        "name": "게임 기업 조직",
+        "nodes": [
+            {"name": "CEO",          "role": "최고경영자",       "level": "ceo"},
+            {"name": "게임 Chief",   "role": "게임 디렉터",      "level": "chief",     "parent": "CEO"},
+            {"name": "기술 Chief",   "role": "기술 총괄",        "level": "chief",     "parent": "CEO"},
+            {"name": "성장 Chief",   "role": "성장 총괄",        "level": "chief",     "parent": "CEO"},
+            {"name": "클라이언트 팀장", "role": "클라이언트 개발 팀장", "level": "team_lead", "parent": "기술 Chief"},
+            {"name": "서버 팀장",    "role": "서버 개발 팀장",   "level": "team_lead", "parent": "기술 Chief"},
+            {"name": "QA 팀장",      "role": "QA 팀장",          "level": "team_lead", "parent": "기술 Chief"},
+            {"name": "아트 팀장",    "role": "아트 팀장",        "level": "team_lead", "parent": "게임 Chief"},
+            {"name": "마케팅 팀장",  "role": "마케팅 팀장",      "level": "team_lead", "parent": "성장 Chief"},
+        ],
+    },
     "media": {
         "name": "미디어 기업 조직",
         "nodes": [
@@ -172,6 +216,7 @@ DEFAULT_TEMPLATES = {
 
 def get_org_template(industry: str) -> Dict:
     industry_map = {
+        "게임": "game", "게임개발": "game", "게임 개발": "game", "game": "game",
         "미디어": "media", "media": "media",
         "소프트웨어": "software", "software": "software", "saas": "software",
         "데이터": "data", "data": "data",

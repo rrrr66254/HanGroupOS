@@ -253,6 +253,30 @@ export const terminalApi = {
   execute: (id: number) => api.post(`/terminal/requests/${id}/execute`),
 }
 
+// ── Capabilities ──────────────────────────────────────────────────────────────
+export const capabilitiesApi = {
+  company: (companyId: number) => api.get(`/capabilities/company/${companyId}`),
+  pending: () => api.get('/capabilities/pending'),
+  analyze: (companyId: number) => api.get(`/capabilities/analyze/${companyId}`),
+  request: (companyId: number) => api.post(`/capabilities/request/${companyId}`),
+  activate: (capabilityId: number) => api.post(`/capabilities/${capabilityId}/activate`),
+}
+
+// ── Game ──────────────────────────────────────────────────────────────────────
+export const gameApi = {
+  trending: (query = '', platform = 'all') =>
+    api.get('/game/trending', { params: { query, platform } }),
+  analytics: (gameTitle: string, companyId?: number) =>
+    api.post('/game/analytics', { game_title: gameTitle, company_id: companyId }),
+  generateIdeas: (companyId: number, genre = '', platform = '', count = 3) =>
+    api.post('/game/ideas/generate', { company_id: companyId, genre, platform, count }),
+  saveIdea: (data: object) => api.post('/game/ideas/save', data),
+  projects: (companyId: number) => api.get(`/game/projects/${companyId}`),
+  createProject: (data: object) => api.post('/game/projects', data),
+  updateProject: (id: number, data: object) => api.patch(`/game/projects/${id}`, data),
+  permits: (country = 'KR') => api.get('/game/permits', { params: { country } }),
+}
+
 // ── Agent (personality + direct chat) ────────────────────────────────────────
 export const agentApi = {
   updatePersonality: (nodeId: number, personality: object) =>

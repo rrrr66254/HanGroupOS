@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Building2, Plus, X, RefreshCw, ChevronRight, ChevronLeft, Bot, Check, Zap } from 'lucide-react'
-import { companiesApi, orgApi, modelsApi } from '../api/client'
+import { Building2, Plus, X, RefreshCw, ChevronRight, ChevronLeft, Bot, Check, Zap, Sparkles } from 'lucide-react'
+import { companiesApi, orgApi, modelsApi, capabilitiesApi } from '../api/client'
 import type { Company, OrgNode } from '../types'
 import OrgChart from '../components/OrgChart'
+
+type Capability = { id: number; capability_type: string; name: string; status: string }
 
 // ── AI tier mapping (mirrors backend/services/org_service.py) ─────────────
 type Budget = 'any' | 'low' | 'free'
@@ -443,8 +445,17 @@ export default function Companies() {
   const [showModal, setShowModal] = useState(false)
   const [filter, setFilter] = useState('')
   const [tab, setTab] = useState<'chart' | 'ai'>('chart')
+  const [capabilities, setCapabilities] = useState<Record<number, Capability[]>>({})
 
-  const load = () => companiesApi.list().then((r) => setCompanies(r.data))
+  const load = () => companiesApi.list().then((r) => {
+    setCompanies(r.data)
+    // 각 회사의 역량 로드
+    r.data.forEach((c: Company) => {
+      capabilitiesApi.company(c.id).then((cr) => {
+        setCapabilities((prev) => ({ ...prev, [c.id]: cr.data }))
+      }).catch(() => {})
+    })
+  })
 
   useEffect(() => { load() }, [])
 
@@ -508,6 +519,24 @@ export default function Companies() {
               </div>
               {c.description && (
                 <p className="text-xs text-slate-500 mt-2 line-clamp-2">{c.description}</p>
+              )}
+              {/* 역량 뱃지 */}
+              {capabilities[c.id] && capabilities[c.id].length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {capabilities[c.id].filter((cap) => cap.status === 'active').slice(0, 3).map((cap) => (
+                    <span
+                      key={cap.id}
+                      className="flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-400/10 text-emerald-400 border border-emerald-400/20"
+                    >
+                      <Sparkles size={8} /> {cap.name}
+                    </span>
+                  ))}
+                  {capabilities[c.id].filter((cap) => cap.status === 'pending').length > 0 && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-warning/10 text-warning border border-warning/20">
+                      승인대기 {capabilities[c.id].filter((cap) => cap.status === 'pending').length}
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           ))}

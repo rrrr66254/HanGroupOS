@@ -9,6 +9,7 @@ const TYPE_LABELS: Record<string, string> = {
   org_change: '조직 변경',
   strategy: '전략 결정',
   market_briefing: '시장 분석 보고',
+  capability_update: '역량 활성화',
   general: '일반',
 }
 
@@ -17,6 +18,7 @@ const TYPE_COLORS: Record<string, string> = {
   org_change: 'badge-pending',
   strategy: 'bg-purple-400/15 text-purple-300 badge',
   market_briefing: 'bg-teal-400/15 text-teal-300 badge',
+  capability_update: 'bg-emerald-400/15 text-emerald-300 badge',
   general: 'badge-inactive',
 }
 
@@ -54,18 +56,24 @@ function ApprovalDetail({
           <button onClick={onClose} className="text-slate-500 hover:text-slate-300"><X size={16} /></button>
         </div>
 
-        <div className="bg-bg-elevated rounded-lg p-3 mb-4 text-xs text-slate-400 leading-relaxed">
-          {approval.description || '설명이 없습니다.'}
-        </div>
-
-        {Object.keys(approval.meta).length > 0 && (
-          <div className="bg-bg-elevated rounded-lg p-3 mb-4">
-            <div className="text-[10px] text-slate-500 mb-1">메타데이터</div>
-            {Object.entries(approval.meta).map(([k, v]) => (
-              <div key={k} className="text-xs text-slate-400">
-                <span className="text-slate-500">{k}:</span> {String(v)}
-              </div>
-            ))}
+        {/* 역량 활성화 요청 전용 UI */}
+        {approval.request_type === 'capability_update' && approval.meta?.cap_types ? (
+          <div className="mb-4 space-y-2">
+            <div className="text-[10px] text-slate-500 font-medium uppercase tracking-wide">활성화 요청 역량</div>
+            <div className="flex flex-wrap gap-1.5">
+              {(approval.meta.cap_types as string[]).map((cap: string) => (
+                <span key={cap} className="bg-emerald-400/10 text-emerald-300 border border-emerald-400/20 text-[10px] px-2 py-0.5 rounded-full">
+                  {cap}
+                </span>
+              ))}
+            </div>
+            <div className="bg-bg-elevated rounded-lg p-3 text-xs text-slate-400 leading-relaxed whitespace-pre-line">
+              {approval.description}
+            </div>
+          </div>
+        ) : (
+          <div className="bg-bg-elevated rounded-lg p-3 mb-4 text-xs text-slate-400 leading-relaxed">
+            {approval.description || '설명이 없습니다.'}
           </div>
         )}
 
