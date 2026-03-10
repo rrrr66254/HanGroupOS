@@ -106,6 +106,7 @@ export const chatApi = {
 export const approvalsApi = {
   inbox: () => api.get('/approvals/inbox'),
   list: (status?: string) => api.get('/approvals', { params: { status } }),
+  counts: () => api.get('/approvals/counts'),
   create: (data: object) => api.post('/approvals', data),
   review: (id: number, data: object) => api.post(`/approvals/${id}/review`, data),
   delete: (id: number) => api.delete(`/approvals/${id}`),

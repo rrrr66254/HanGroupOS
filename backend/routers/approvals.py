@@ -25,6 +25,24 @@ def list_approvals(
     return q.order_by(ApprovalRequest.created_at.desc()).all()
 
 
+@router.get("/counts")
+def get_approval_counts(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """pending 승인 요청을 request_type별 카운트로 반환."""
+    from sqlalchemy import func
+    rows = (
+        db.query(ApprovalRequest.request_type, func.count(ApprovalRequest.id))
+        .filter(ApprovalRequest.status == "pending")
+        .group_by(ApprovalRequest.request_type)
+        .all()
+    )
+    counts = {rtype: cnt for rtype, cnt in rows}
+    total = sum(counts.values())
+    return {"total": total, "by_type": counts}
+
+
 @router.get("/inbox", response_model=List[ApprovalOut])
 def inbox(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return (

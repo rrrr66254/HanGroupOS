@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CheckSquare, X, Check, Mail, Clock, AlertCircle, Terminal } from 'lucide-react'
 import { approvalsApi, terminalApi } from '../api/client'
+import { useAppStore } from '../store/useStore'
 import type { ApprovalRequest } from '../types'
 import { format } from 'date-fns'
 
@@ -203,6 +204,7 @@ function TerminalDetail({ tr, onDecide, onClose }: {
 }
 
 export default function Approvals() {
+  const { triggerBadgeRefresh } = useAppStore()
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([])
   const [terminals, setTerminals] = useState<TerminalRequest[]>([])
   const [mainTab, setMainTab] = useState<'approvals' | 'terminal'>('approvals')
@@ -222,6 +224,7 @@ export default function Approvals() {
 
   const handleReview = async (id: number, status: string, note: string) => {
     await approvalsApi.review(id, { status, reviewer_note: note })
+    triggerBadgeRefresh()
     setSelected(null)
     loadApprovals()
   }
@@ -232,6 +235,7 @@ export default function Approvals() {
     } else {
       await terminalApi.decide(id, 'reject')
     }
+    triggerBadgeRefresh()
     setSelectedTerm(null)
     loadTerminals()
   }

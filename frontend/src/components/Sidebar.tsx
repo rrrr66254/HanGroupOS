@@ -104,17 +104,20 @@ export default function Sidebar() {
     sidebarOpen, toggleSidebar, newEventCount,
     pendingApprovals, pendingTerminals,
     setPendingApprovals, setPendingTerminals,
+    badgeTick,
   } = useAppStore()
+  const [approvalsByType, setApprovalsByType] = useState<Record<string, number>>({})
   const [logoError, setLogoError] = useState(false)
   const location = useLocation()
 
-  // Poll pending counts every 30 seconds
+  // Poll pending counts every 30 seconds; also refreshes when badgeTick changes
   useEffect(() => {
     const fetchCounts = async () => {
       try {
-        const [approvals, terminals] = await Promise.allSettled([
+        const [approvals, terminals, counts] = await Promise.allSettled([
           approvalsApi.list('pending'),
           terminalApi.list('pending'),
+          approvalsApi.counts(),
         ])
         if (approvals.status === 'fulfilled') {
           setPendingApprovals(approvals.value.data?.length ?? 0)
@@ -122,12 +125,15 @@ export default function Sidebar() {
         if (terminals.status === 'fulfilled') {
           setPendingTerminals(terminals.value.data?.length ?? 0)
         }
+        if (counts.status === 'fulfilled') {
+          setApprovalsByType(counts.value.data?.by_type ?? {})
+        }
       } catch { /* silent */ }
     }
     fetchCounts()
     const iv = setInterval(fetchCounts, 30_000)
     return () => clearInterval(iv)
-  }, [])
+  }, [badgeTick])
 
   // Open groups: auto-open the group that contains the active route
   const getInitialOpen = () => {
@@ -385,6 +391,17 @@ export default function Sidebar() {
                 </NavLink>
               )
             })}
+            {/* Approval type breakdown for management group */}
+            {group.id === 'management' && Object.keys(approvalsByType).length > 0 && (
+              <div className="mx-3 mt-1 pt-1 border-t border-bg-border space-y-0.5">
+                {Object.entries(approvalsByType).map(([type, cnt]) => (
+                  <div key={type} className="flex items-center justify-between text-[10px] text-slate-600 px-0.5">
+                    <span className="truncate">{type}</span>
+                    <span className="text-amber-500 font-medium ml-2">{cnt}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )
       })()}

@@ -27,6 +27,7 @@ interface AppState {
   newEventCount: number
   pendingApprovals: number
   pendingTerminals: number
+  badgeTick: number
   theme: 'dark' | 'light'
   setSelectedCompany: (company: Company | null) => void
   toggleSidebar: () => void
@@ -34,6 +35,7 @@ interface AppState {
   clearNewEvents: () => void
   setPendingApprovals: (n: number) => void
   setPendingTerminals: (n: number) => void
+  triggerBadgeRefresh: () => void
   toggleTheme: () => void
 }
 
@@ -43,6 +45,7 @@ export const useAppStore = create<AppState>((set) => ({
   newEventCount: 0,
   pendingApprovals: 0,
   pendingTerminals: 0,
+  badgeTick: 0,
   theme: (localStorage.getItem('han-theme') as 'dark' | 'light') ?? 'dark',
   setSelectedCompany: (company) => set({ selectedCompany: company }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -50,6 +53,7 @@ export const useAppStore = create<AppState>((set) => ({
   clearNewEvents: () => set({ newEventCount: 0 }),
   setPendingApprovals: (n) => set({ pendingApprovals: n }),
   setPendingTerminals: (n) => set({ pendingTerminals: n }),
+  triggerBadgeRefresh: () => set((s) => ({ badgeTick: s.badgeTick + 1 })),
   toggleTheme: () => set((s) => {
     const next = s.theme === 'dark' ? 'light' : 'dark'
     localStorage.setItem('han-theme', next)

@@ -375,6 +375,7 @@ class TerminalRequest(Base):
     requested_by_name = Column(String(100), default="")      # CEO name
     command = Column(Text, nullable=False)                   # shell command to run
     reason = Column(Text, default="")                        # why it's needed
+    working_dir = Column(String(500), default="")            # working directory for execution
     status = Column(String(20), default="pending")           # pending | approved | rejected | executed
     approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     output = Column(Text, default="")                        # stdout/stderr after execution

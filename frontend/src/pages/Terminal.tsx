@@ -8,7 +8,7 @@ import {
   Clock, CheckCircle, XCircle, Zap, Activity, ChevronDown,
 } from 'lucide-react'
 import { terminalApi } from '../api/client'
-import { useAuthStore } from '../store/useStore'
+import { useAuthStore, useAppStore } from '../store/useStore'
 import { format } from 'date-fns'
 
 interface TerminalReq {
@@ -18,6 +18,7 @@ interface TerminalReq {
   requested_by_name: string
   command: string
   reason: string
+  working_dir: string
   status: 'pending' | 'approved' | 'rejected' | 'executed'
   output: string | null
   exit_code: number | null
@@ -168,6 +169,7 @@ function LivePanel() {
 // ── 메인 페이지 ──────────────────────────────────────────────────────────────
 export default function Terminal() {
   const { user } = useAuthStore()
+  const { triggerBadgeRefresh } = useAppStore()
   const isAdmin = user?.role === 'admin'
 
   const [requests, setRequests] = useState<TerminalReq[]>([])
@@ -195,6 +197,7 @@ export default function Terminal() {
     setActionLoading(true)
     try {
       await terminalApi.decide(req.id, 'approve')
+      triggerBadgeRefresh()
       await load()
       setSelected(null)
     } finally {
@@ -207,6 +210,7 @@ export default function Terminal() {
     try {
       const res = await terminalApi.approveAndExecute(req.id)
       setSelected(res.data)
+      triggerBadgeRefresh()
       await load()
     } finally {
       setActionLoading(false)
@@ -219,6 +223,7 @@ export default function Terminal() {
       await terminalApi.decide(req.id, 'reject', rejectNote || undefined)
       setRejectNote('')
       setShowRejectInput(false)
+      triggerBadgeRefresh()
       await load()
       setSelected(null)
     } finally {
@@ -231,6 +236,7 @@ export default function Terminal() {
     try {
       const res = await terminalApi.execute(req.id)
       setSelected(res.data)
+      triggerBadgeRefresh()
       await load()
     } finally {
       setActionLoading(false)
@@ -389,6 +395,14 @@ export default function Terminal() {
                     <p className="text-[10px] text-slate-500 mb-1">실행 사유</p>
                     <p className="text-xs text-slate-300 leading-relaxed">{selected.reason || '이유 없음'}</p>
                   </div>
+
+                  {/* Working directory */}
+                  {selected.working_dir && (
+                    <div>
+                      <p className="text-[10px] text-slate-500 mb-1">작업 디렉토리</p>
+                      <code className="text-xs font-mono text-slate-400">{selected.working_dir}</code>
+                    </div>
+                  )}
 
                   {/* Metadata */}
                   <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-500">

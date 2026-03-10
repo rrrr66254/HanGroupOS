@@ -52,6 +52,7 @@ class TerminalRequestCreate(BaseModel):
     requested_by_name: str
     command: str
     reason: str = ""
+    working_dir: Optional[str] = None
 
 
 class TerminalDecision(BaseModel):
@@ -78,6 +79,7 @@ def create_terminal_request(
         requested_by_name=data.requested_by_name,
         command=data.command.strip(),
         reason=data.reason,
+        working_dir=data.working_dir.strip() if data.working_dir else "",
         status="pending",
     )
     db.add(req)
@@ -158,6 +160,7 @@ def execute_request(
         db.commit()
         raise HTTPException(400, req.output)
 
+    cwd = req.working_dir.strip() if req.working_dir else os.path.expanduser("~")
     try:
         result = subprocess.run(
             req.command,
@@ -165,7 +168,7 @@ def execute_request(
             capture_output=True,
             text=True,
             timeout=30,
-            cwd=os.path.expanduser("~"),
+            cwd=cwd,
         )
         req.output = (result.stdout or "") + (("\n[stderr]\n" + result.stderr) if result.stderr else "")
         req.exit_code = result.returncode
@@ -214,6 +217,7 @@ def approve_and_execute(
     db.flush()
 
     # Execute immediately
+    cwd = req.working_dir.strip() if req.working_dir else os.path.expanduser("~")
     try:
         result = subprocess.run(
             req.command,
@@ -221,7 +225,7 @@ def approve_and_execute(
             capture_output=True,
             text=True,
             timeout=30,
-            cwd=os.path.expanduser("~"),
+            cwd=cwd,
         )
         req.output = (result.stdout or "") + (("\n[stderr]\n" + result.stderr) if result.stderr else "")
         req.exit_code = result.returncode
@@ -266,6 +270,7 @@ def _format(req: TerminalRequest) -> dict:
         "requested_by_name": req.requested_by_name,
         "command": req.command,
         "reason": req.reason,
+        "working_dir": req.working_dir or "",
         "status": req.status,
         "output": req.output,
         "exit_code": req.exit_code,
