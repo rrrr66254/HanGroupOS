@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Loader2, MessageCircle, Send, ChevronDown, ChevronUp } from 'lucide-react'
+import { Loader2, MessageCircle, Send, ChevronDown, ChevronUp, Monitor, Users } from 'lucide-react'
 import { orgApi, companiesApi, agentApi, workApi } from '../api/client'
 import { useProviderHealth } from '../components/ProviderStatusBanner'
 import type { OrgNode } from '../types'
+import Meetings from './Meetings'
 
 // Available models per provider
 const PROVIDER_MODELS: Record<string, string[]> = {
@@ -381,6 +382,7 @@ function PixelChar({
 const TICK_MS = 4000
 
 export default function LiveOffice() {
+  const [activeTab, setActiveTab] = useState<'office' | 'meetings'>('office')
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [companies, setCompanies] = useState<Company[]>([])
   const [selectedId, setSelectedId] = useState<'chairman' | number>('chairman')
@@ -593,6 +595,30 @@ export default function LiveOffice() {
 
   return (
     <div className="space-y-3 animate-fade-in">
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b border-bg-border pb-3">
+        {([
+          { id: 'office', label: '오피스 공간', icon: Monitor },
+          { id: 'meetings', label: '회의실', icon: Users },
+        ] as const).map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              activeTab === id
+                ? 'bg-brand/15 text-brand-light'
+                : 'text-slate-500 hover:text-slate-300 hover:bg-bg-elevated'
+            }`}
+          >
+            <Icon size={13} />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'meetings' && <Meetings />}
+
+      {activeTab === 'office' && <>
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
@@ -1030,6 +1056,7 @@ export default function LiveOffice() {
           50% { opacity: 0.3; }
         }
       `}</style>
+      </>}
     </div>
   )
 }

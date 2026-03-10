@@ -68,7 +68,7 @@ export default function App() {
           <Route path="chairman" element={<Chairman />} />
           <Route path="companies" element={<Companies />} />
           <Route path="approvals" element={<Approvals />} />
-          <Route path="meetings" element={<Meetings />} />
+          <Route path="meetings" element={<Navigate to="/live-office" replace />} />
           <Route path="market" element={<Market />} />
           <Route path="strategy" element={<Strategy />} />
           <Route path="simulation" element={<Simulation />} />
