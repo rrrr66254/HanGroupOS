@@ -79,6 +79,15 @@ def review_approval(
     approval.reviewed_at = datetime.utcnow()
     db.commit()
     db.refresh(approval)
+
+    # 역량 승인 시 자동 활성화
+    if review.status == "approved" and approval.request_type == "capability_update":
+        try:
+            from services.capability_analyzer import activate_capabilities
+            activate_capabilities(approval.id, db)
+        except Exception as e:
+            print(f"[CapabilityAnalyzer] 역량 활성화 실패 (무시): {e}")
+
     return approval
 
 

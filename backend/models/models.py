@@ -419,6 +419,36 @@ class CollectedData(Base):
 
 
 # ── Media Posts ───────────────────────────────────────────────────────────────
+class CompanyCapability(Base):
+    """회사별 활성화된 역량 목록."""
+    __tablename__ = "company_capabilities"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    capability_type = Column(String(100), nullable=False)
+    # game_upload | game_analytics | game_trend_search | game_idea_generator | blog_publish | ...
+    status = Column(String(20), default="pending")  # pending | active | inactive
+    config = Column(JSON, default={})               # 역량별 설정 (메타, API 안내 등)
+    approval_id = Column(Integer, ForeignKey("approval_requests.id"), nullable=True)
+    activated_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class GameProject(Base):
+    """게임 프로젝트."""
+    __tablename__ = "game_projects"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False)
+    title = Column(String(200), nullable=False)
+    genre = Column(String(100), default="")         # RPG | Puzzle | Action | Strategy | ...
+    platform = Column(String(100), default="")      # PC | Mobile | Console | Web
+    status = Column(String(50), default="concept")  # concept | development | released | archived
+    description = Column(Text, default="")
+    idea_source = Column(String(50), default="manual")  # ai_generated | manual
+    game_data = Column(JSON, default={})            # 외부 플랫폼 ID, 업로드 URL, 메트릭 등
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class MediaPost(Base):
     """발행된 블로그 포스트 및 YouTube 영상 트래킹."""
     __tablename__ = "media_posts"

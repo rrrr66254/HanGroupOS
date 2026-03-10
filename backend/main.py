@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import init_db, SessionLocal
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game
 
 
 app = FastAPI(
@@ -39,6 +39,8 @@ app.include_router(terminal.router)
 app.include_router(data_collect.router)   # 데이터 수집 (웹 검색/뉴스/스크래핑/무역)
 app.include_router(media.router)          # 미디어 발행 (블로그/YouTube)
 app.include_router(executor.router)       # 코드 실행 환경 (Python + pip + 워크스페이스 DB)
+app.include_router(capabilities.router)   # 회사 역량 관리 (자동 분석 + 승인)
+app.include_router(game.router)           # 게임 회사 전용 (트렌딩/분석/아이디어/프로젝트)
 
 
 @app.get("/health")
@@ -52,6 +54,7 @@ def startup():
     init_db()
     _seed_data()
     _check_ollama()
+    _check_ktransformers()
 
 
 def _check_ollama():
@@ -96,6 +99,24 @@ def _check_ollama():
         print(f"⚠️  {model} 모델 응답 시간 초과 (60초) — 모델 로딩이 오래 걸리거나 문제가 있습니다.")
     except Exception as e:
         print(f"⚠️  {model} 모델 테스트 실패: {e}")
+
+
+def _check_ktransformers():
+    """Check KTransformers server connectivity on startup."""
+    import httpx
+
+    base = settings.KTRANSFORMERS_BASE_URL.rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-3]
+    try:
+        r = httpx.get(f"{base}/health", timeout=2.0)
+        if r.status_code == 200:
+            print(f"✓ KTransformers 연결 성공 ({base})")
+        else:
+            print(f"⚠️  KTransformers 응답 오류 (HTTP {r.status_code}) → Ollama 폴백 활성")
+    except Exception:
+        print(f"⚠️  KTransformers 미실행 ({base}) → Ollama 자동 폴백 활성")
+        print("    실행: ktransformers --model <model> --port 30000")
 
 
 def _seed_data():

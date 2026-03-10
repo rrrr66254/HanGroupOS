@@ -238,6 +238,14 @@ def create_company_org(
                 created.append(sp_node)
 
     db.commit()
+
+    # 신규: 역량 분석 + 승인 요청 자동 생성
+    try:
+        from services.capability_analyzer import analyze_and_request_capabilities
+        analyze_and_request_capabilities(company_id, db)
+    except Exception as e:
+        print(f"[CapabilityAnalyzer] 역량 분석 실패 (무시): {e}")
+
     return created
 
 
