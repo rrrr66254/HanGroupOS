@@ -76,6 +76,7 @@ class VideoGenerateRequest(BaseModel):
     company_id: Optional[int] = None
     num_frames: Optional[int] = None       # 프레임 수 (모델마다 다름)
     fps: Optional[int] = None             # FPS
+    meta: Optional[dict] = None           # json2video 템플릿 설정 등
 
 
 class VideoJobOut(BaseModel):
@@ -193,46 +194,101 @@ def _run_json2video_generation(job_id: int, api_key: str):
             title = lines[0][:120] if lines else job.prompt[:120]
             subtitle = " ".join(lines[1:])[:200] if len(lines) > 1 else ""
 
-            scenes = [
-                {
-                    "comment": "title",
-                    "duration": 8,
-                    "elements": [
-                        {
-                            "type": "text",
-                            "text": title,
-                            "style": "center",
-                            "font-size": 60,
-                            "font-color": "#FFFFFF",
-                            "background": "#1a1a2e",
-                            "duration": 8,
-                        }
-                    ],
-                }
-            ]
-            if subtitle:
-                scenes.append(
+            # meta에서 템플릿 설정 읽기
+            cfg = job.meta or {}
+            template = cfg.get("template", "basic")
+            logo = (cfg.get("logo") or "").strip()
+            bg_image_url = (cfg.get("bgImageUrl") or "").strip()
+            bgm = bool(cfg.get("bgm", False))
+
+            if template == "corporate":
+                scenes = []
+                # 씬 1: 인트로 (로고 텍스트)
+                if logo:
+                    scenes.append({
+                        "comment": "intro",
+                        "duration": 3,
+                        "elements": [
+                            {"type": "text", "text": logo, "style": "center",
+                             "font-size": 40, "font-color": "#A0B4FF",
+                             "background": "#0d1117", "duration": 3}
+                        ]
+                    })
+                # 씬 2: 타이틀
+                title_elements = []
+                if bg_image_url:
+                    title_elements.append({"type": "image", "src": bg_image_url, "duration": 7})
+                title_elements.append({"type": "text", "text": title, "style": "center",
+                                        "font-size": 56, "font-color": "#FFFFFF", "duration": 7})
+                scenes.append({"comment": "title", "duration": 7, "elements": title_elements})
+                # 씬 3: 서브타이틀
+                if subtitle:
+                    scenes.append({
+                        "comment": "subtitle", "duration": 5,
+                        "elements": [
+                            {"type": "text", "text": subtitle, "style": "center",
+                             "font-size": 34, "font-color": "#C8D8FF",
+                             "background": "#111827", "duration": 5}
+                        ]
+                    })
+
+            elif template == "modern":
+                elements = []
+                if bg_image_url:
+                    elements.append({"type": "image", "src": bg_image_url, "duration": 10})
+                elements.append({"type": "text", "text": title, "style": "center",
+                                  "font-size": 64, "font-color": "#FFFFFF",
+                                  "background": "#000000", "duration": 10})
+                if subtitle:
+                    elements.append({"type": "text", "text": subtitle, "style": "lower-third",
+                                      "font-size": 28, "font-color": "#AABBFF", "duration": 10})
+                scenes = [{"comment": "main", "duration": 10, "elements": elements}]
+
+            else:  # basic (기본형)
+                scenes = [
                     {
-                        "comment": "subtitle",
-                        "duration": 5,
+                        "comment": "title",
+                        "duration": 8,
                         "elements": [
                             {
                                 "type": "text",
-                                "text": subtitle,
+                                "text": title,
                                 "style": "center",
-                                "font-size": 38,
-                                "font-color": "#CCDDFF",
-                                "background": "#16213e",
-                                "duration": 5,
+                                "font-size": 60,
+                                "font-color": "#FFFFFF",
+                                "background": "#1a1a2e",
+                                "duration": 8,
                             }
                         ],
                     }
-                )
+                ]
+                if subtitle:
+                    scenes.append(
+                        {
+                            "comment": "subtitle",
+                            "duration": 5,
+                            "elements": [
+                                {
+                                    "type": "text",
+                                    "text": subtitle,
+                                    "style": "center",
+                                    "font-size": 38,
+                                    "font-color": "#CCDDFF",
+                                    "background": "#16213e",
+                                    "duration": 5,
+                                }
+                            ],
+                        }
+                    )
+
+            payload: dict = {"resolution": "full-hd", "quality": 70, "scenes": scenes}
+            if bgm:
+                payload["audio"] = [{"type": "background-music", "volume": 0.3}]
 
             r = requests.post(
                 "https://api.json2video.com/v2/movies",
                 headers={"x-api-key": api_key, "Content-Type": "application/json"},
-                json={"resolution": "full-hd", "quality": 70, "scenes": scenes},
+                json=payload,
                 timeout=30,
             )
             r.raise_for_status()
@@ -368,9 +424,11 @@ def generate_video(
                        "관리자 → API 키 관리에서 'huggingface' 서비스로 등록하세요.",
             )
 
-    meta = {}
+    meta: dict = {}
     if req.num_frames:
         meta["num_frames"] = req.num_frames
+    if req.meta:
+        meta.update(req.meta)
 
     job = VideoJob(
         company_id=req.company_id,

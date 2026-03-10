@@ -36,6 +36,12 @@ const STATUS_LABEL: Record<string, string> = {
   failed: '실패',
 }
 
+const EST_SECONDS: Record<string, number> = {
+  'json2video': 60,
+  'hf-inference': 240,
+  'fal-ai': 180,
+}
+
 export default function VideoStudio() {
   const [models, setModels] = useState<VideoModel[]>([])
   const [jobs, setJobs] = useState<VideoJob[]>([])
@@ -44,7 +50,22 @@ export default function VideoStudio() {
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<VideoJob | null>(null)
+  const [j2vConfig, setJ2vConfig] = useState({ template: 'basic', logo: '', bgImageUrl: '', bgm: false })
+  const [now, setNow] = useState(Date.now())
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const formatElapsed = (createdAt: string) => {
+    const elapsed = Math.floor((now - new Date(createdAt).getTime()) / 1000)
+    const m = Math.floor(elapsed / 60)
+    const s = elapsed % 60
+    return m > 0 ? `${m}분 ${s}초` : `${s}초`
+  }
+
+  const getProgress = (job: VideoJob) => {
+    const est = EST_SECONDS[job.provider] ?? 180
+    const elapsed = (now - new Date(job.created_at).getTime()) / 1000
+    return Math.min(Math.round((elapsed / est) * 100), 95)
+  }
 
   useEffect(() => {
     videoApi.models().then((r) => {
@@ -71,6 +92,14 @@ export default function VideoStudio() {
     }
   }, [jobs])
 
+  // 1초마다 now 갱신 (진행률 타이머용)
+  useEffect(() => {
+    const hasActive = jobs.some((j) => j.status === 'pending' || j.status === 'running')
+    if (!hasActive) return
+    const iv = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(iv)
+  }, [jobs])
+
   const loadJobs = () =>
     videoApi.jobs().then((r) => {
       setJobs(r.data)
@@ -86,7 +115,11 @@ export default function VideoStudio() {
     setError('')
     setGenerating(true)
     try {
-      await videoApi.generate({ prompt: prompt.trim(), model_id: selectedModel })
+      await videoApi.generate({
+        prompt: prompt.trim(),
+        model_id: selectedModel,
+        ...(selectedModel === 'json2video/presentation' ? { meta: j2vConfig } : {}),
+      })
       setPrompt('')
       await loadJobs()
     } catch (e: any) {
@@ -165,6 +198,60 @@ export default function VideoStudio() {
               </div>
             )}
 
+            {/* json2video 고급 템플릿 설정 */}
+            {selectedModel === 'json2video/presentation' && (
+              <div className="border border-indigo-500/20 rounded p-2.5 space-y-2" style={{ background: 'rgba(99,102,241,0.05)' }}>
+                <p className="text-[10px] font-semibold text-indigo-300">고급 템플릿 설정</p>
+
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">템플릿 스타일</label>
+                  <select
+                    value={j2vConfig.template}
+                    onChange={(e) => setJ2vConfig((p) => ({ ...p, template: e.target.value }))}
+                    className="w-full bg-bg-base border border-bg-border rounded text-xs text-slate-200 p-1.5 focus:outline-none focus:border-brand/60"
+                  >
+                    <option value="basic">기본형 — 타이틀 + 서브타이틀</option>
+                    <option value="corporate">기업형 — 로고 인트로 + 타이틀 + 서브</option>
+                    <option value="modern">모던형 — 풀스크린 대형 타이포그래피</option>
+                  </select>
+                </div>
+
+                {j2vConfig.template === 'corporate' && (
+                  <div>
+                    <label className="text-[10px] text-slate-500 block mb-1">로고 텍스트 (선택)</label>
+                    <input
+                      type="text"
+                      value={j2vConfig.logo}
+                      onChange={(e) => setJ2vConfig((p) => ({ ...p, logo: e.target.value }))}
+                      placeholder="HAN Group"
+                      className="w-full bg-bg-base border border-bg-border rounded text-xs text-slate-200 p-1.5 focus:outline-none focus:border-brand/60 placeholder:text-slate-600"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label className="text-[10px] text-slate-500 block mb-1">배경 이미지 URL (선택)</label>
+                  <input
+                    type="text"
+                    value={j2vConfig.bgImageUrl}
+                    onChange={(e) => setJ2vConfig((p) => ({ ...p, bgImageUrl: e.target.value }))}
+                    placeholder="https://example.com/bg.jpg"
+                    className="w-full bg-bg-base border border-bg-border rounded text-xs text-slate-200 p-1.5 focus:outline-none focus:border-brand/60 placeholder:text-slate-600"
+                  />
+                </div>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={j2vConfig.bgm}
+                    onChange={(e) => setJ2vConfig((p) => ({ ...p, bgm: e.target.checked }))}
+                    className="accent-indigo-500"
+                  />
+                  <span className="text-[10px] text-slate-400">배경 음악 (BGM) 추가</span>
+                </label>
+              </div>
+            )}
+
             <button
               onClick={handleGenerate}
               disabled={generating || !prompt.trim() || !selectedModel}
@@ -204,6 +291,9 @@ export default function VideoStudio() {
                     {STATUS_LABEL[job.status]}
                     {(job.status === 'pending' || job.status === 'running') && (
                       <Loader2 size={10} className="inline ml-1 animate-spin" />
+                    )}
+                    {(job.status === 'pending' || job.status === 'running') && (
+                      <span className="text-[9px] text-slate-600 ml-1">{formatElapsed(job.created_at)}</span>
                     )}
                   </span>
                   <button
@@ -274,10 +364,34 @@ export default function VideoStudio() {
 
             {/* Running state */}
             {(selected.status === 'pending' || selected.status === 'running') && (
-              <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-500">
-                <Loader2 size={32} className="animate-spin text-brand/60" />
-                <p className="text-sm">영상을 생성하고 있습니다...</p>
-                <p className="text-xs text-slate-600">모델에 따라 1~5분 소요될 수 있습니다</p>
+              <div className="flex-1 flex flex-col justify-center gap-4 max-w-sm mx-auto w-full">
+                <div className="flex items-center gap-2 text-sm text-slate-300">
+                  <Loader2 size={16} className="animate-spin text-brand-light" />
+                  <span>{selected.status === 'pending' ? '대기 중...' : '영상 생성 중...'}</span>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <Clock size={12} />
+                  <span>경과: {formatElapsed(selected.created_at)}</span>
+                </div>
+
+                {selected.status === 'running' && (
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-[10px] text-slate-600">
+                      <span>진행률 (예상)</span>
+                      <span>{getProgress(selected)}%</span>
+                    </div>
+                    <div className="w-full bg-bg-border rounded-full h-1.5">
+                      <div
+                        className="bg-brand h-1.5 rounded-full transition-all duration-1000"
+                        style={{ width: `${getProgress(selected)}%` }}
+                      />
+                    </div>
+                    <div className="text-[10px] text-slate-600">
+                      예상 완료: 약 {EST_SECONDS[selected.provider] ?? 180}초 ({selected.provider})
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
