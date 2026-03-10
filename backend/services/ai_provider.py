@@ -1,7 +1,13 @@
 """
 AI Provider abstraction layer.
-Supports: anthropic | openai | gemini | ollama
+Supports: anthropic | openai | gemini | ollama | ktransformers | airllm
 Ollama is the default local provider (no API key required).
+
+저VRAM 옵션:
+  ktransformers — CPU-GPU 하이브리드 (DeepSeek-R1: 24GB VRAM + RAM)
+                  OpenAI 호환 서버 내장: http://localhost:30000/v1
+  airllm        — 레이어별 스트리밍 (70B → 4GB VRAM, 속도 느림)
+                  별도 서버 필요: python backend/airllm_server.py
 """
 import json
 from typing import Optional, List, Dict, Any
@@ -25,8 +31,9 @@ class AIProvider:
         self.model = model or self._get_default_model()
         self.base_url = base_url or ""
 
-        # Non-ollama providers require an API key; fall back to ollama
-        if not self.api_key and self.provider not in ("ollama",):
+        # ktransformers / airllm: no API key needed (local servers)
+        _local_providers = ("ollama", "ktransformers", "airllm")
+        if not self.api_key and self.provider not in _local_providers:
             self.provider = "ollama"
             self.model = settings.OLLAMA_MODEL
 
@@ -44,6 +51,8 @@ class AIProvider:
             "openai": settings.OPENAI_DEFAULT_MODEL,
             "gemini": settings.GEMINI_DEFAULT_MODEL,
             "ollama": settings.OLLAMA_MODEL,
+            "ktransformers": settings.KTRANSFORMERS_MODEL,
+            "airllm": settings.AIRLLM_MODEL,
         }
         return mapping.get(self.provider, settings.OLLAMA_MODEL)
 
@@ -54,6 +63,17 @@ class AIProvider:
         session_type: str = "general",
         max_tokens: int = 1024,
     ) -> str:
+        # ── Context Engineering: 토큰 최적화 (비용·속도 절감) ─────────────────
+        try:
+            from services.context_engineer import optimize as _ce_optimize
+            max_ctx = getattr(settings, "CONTEXT_MAX_TOKENS", 6000)
+            messages, system, _ctx_stats = _ce_optimize(
+                messages, system, max_ctx, max_tokens
+            )
+        except Exception as _ce_err:
+            pass  # CE 실패해도 원본으로 계속 진행
+        # ─────────────────────────────────────────────────────────────────────
+
         try:
             if self.provider == "anthropic":
                 return self._call_anthropic(messages, system, max_tokens)
@@ -61,6 +81,20 @@ class AIProvider:
                 return self._call_openai(messages, system, max_tokens)
             elif self.provider == "gemini":
                 return self._call_gemini(messages, system, max_tokens)
+            elif self.provider == "ktransformers":
+                return self._call_openai_compat(
+                    messages, system, max_tokens,
+                    base_url=self.base_url or settings.KTRANSFORMERS_BASE_URL,
+                    api_key=self.api_key or "ktransformers",
+                    provider_name="KTransformers",
+                )
+            elif self.provider == "airllm":
+                return self._call_openai_compat(
+                    messages, system, max_tokens,
+                    base_url=self.base_url or settings.AIRLLM_BASE_URL,
+                    api_key=self.api_key or "airllm",
+                    provider_name="AirLLM",
+                )
             else:
                 # Default: ollama
                 return self._call_ollama(messages, system, max_tokens)
@@ -109,13 +143,64 @@ class AIProvider:
         )
         return response.choices[0].message.content
 
+    def _call_openai_compat(
+        self,
+        messages: List[Dict],
+        system: str,
+        max_tokens: int,
+        base_url: str,
+        api_key: str,
+        provider_name: str = "Local",
+    ) -> str:
+        """
+        OpenAI 호환 API를 사용하는 범용 메서드.
+        KTransformers, AirLLM 등 OpenAI 호환 서버에 사용합니다.
+        """
+        from openai import OpenAI
+
+        client = OpenAI(base_url=base_url, api_key=api_key)
+        full_messages = []
+        if system:
+            full_messages.append({"role": "system", "content": system})
+        full_messages.extend(messages)
+
+        try:
+            response = client.chat.completions.create(
+                model=self.model,
+                messages=full_messages,
+                max_tokens=max_tokens,
+            )
+            return response.choices[0].message.content or ""
+        except Exception as e:
+            err = str(e)
+            if "connect" in err.lower() or "Connection" in err:
+                if provider_name == "KTransformers":
+                    hint = (
+                        f"\n\n**KTransformers 서버를 시작하세요:**\n"
+                        f"```\npip install ktransformers\n"
+                        f"ktransformers --model {self.model} --port 30000\n```"
+                    )
+                else:
+                    hint = (
+                        f"\n\n**AirLLM 서버를 시작하세요:**\n"
+                        f"```\npip install airllm bitsandbytes\n"
+                        f"python backend/airllm_server.py --model {self.model} --port 11435\n```"
+                    )
+                raise ConnectionError(f"⚠️ {provider_name} 서버 연결 실패: {err}{hint}")
+            raise
+
     def _call_gemini(
         self, messages: List[Dict], system: str, max_tokens: int
     ) -> str:
         import google.generativeai as genai
 
         genai.configure(api_key=self.api_key)
-        model = genai.GenerativeModel(self.model, system_instruction=system)
+        gen_config = {"max_output_tokens": max_tokens}
+        model = genai.GenerativeModel(
+            self.model,
+            system_instruction=system,
+            generation_config=gen_config,
+        )
         history = []
         for m in messages[:-1]:
             role = "user" if m["role"] == "user" else "model"
@@ -140,8 +225,13 @@ class AIProvider:
 
         response = httpx.post(
             f"{base_url}/api/chat",
-            json={"model": self.model, "messages": full_messages, "stream": False},
-            timeout=60,
+            json={
+                "model": self.model,
+                "messages": full_messages,
+                "stream": False,
+                "options": {"num_predict": max_tokens},  # Ollama max tokens 수정
+            },
+            timeout=120,
         )
         response.raise_for_status()
         return response.json()["message"]["content"]

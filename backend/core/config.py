@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./han_group.db"
 
     # AI Providers
-    DEFAULT_PROVIDER: str = "ollama"  # ollama | anthropic | openai | gemini
+    DEFAULT_PROVIDER: str = "ollama"  # ollama | anthropic | openai | gemini | ktransformers | airllm
     ANTHROPIC_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
@@ -29,8 +29,33 @@ class Settings(BaseSettings):
     OPENAI_DEFAULT_MODEL: str = "gpt-4o-mini"
     GEMINI_DEFAULT_MODEL: str = "gemini-1.5-flash"
 
+    # ── KTransformers (CPU-GPU 하이브리드 저VRAM 추론) ─────────────────────────
+    # 설치: pip install ktransformers
+    # 실행: ktransformers --model Qwen/Qwen2.5-7B-Instruct --port 30000
+    # DeepSeek-R1 (24GB VRAM + 382GB RAM): ktransformers --model deepseek-ai/DeepSeek-R1
+    # OpenAI 호환 API를 http://localhost:30000/v1 에 노출
+    KTRANSFORMERS_BASE_URL: str = "http://localhost:30000/v1"
+    KTRANSFORMERS_MODEL: str = "Qwen/Qwen2.5-7B-Instruct"
+
+    # ── AirLLM (레이어별 스트리밍, 극저VRAM — 70B → 4GB VRAM) ─────────────────
+    # 설치: pip install airllm bitsandbytes
+    # 실행: python backend/airllm_server.py --model meta-llama/Meta-Llama-3-70B --compression 4bit
+    # 주의: 레이어별 로딩으로 속도가 매우 느림 (배치/비실시간 용도에 적합)
+    AIRLLM_BASE_URL: str = "http://localhost:11435/v1"
+    AIRLLM_MODEL: str = "meta-llama/Meta-Llama-3-70B"
+
+    # ── Context Engineer (토큰 최적화) ────────────────────────────────────────
+    # 모델에 전송하는 총 컨텍스트 토큰 한도 (응답 토큰 제외)
+    # 초과 시: 시스템 슬리밍 → 히스토리 윈도잉으로 자동 압축
+    CONTEXT_MAX_TOKENS: int = 6000
+    # 토큰 초과 시에도 최소 보존할 메시지 수 (최근 N개는 절대 제거 안 함)
+    CONTEXT_MIN_MESSAGES: int = 4
+    # 이 메시지 수 이상이면 시스템 프롬프트 튜토리얼 섹션 제거 (~30% 절약)
+    CONTEXT_SLIM_AFTER: int = 10
+
     class Config:
         env_file = ".env"
 
 
 settings = Settings()
+
