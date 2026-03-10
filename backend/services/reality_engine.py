@@ -136,6 +136,35 @@ def _build_chairman_context(db: Session, now: str) -> str:
         for s in strategy_items[:10]
     ]
 
+    # Detailed pending approvals
+    pending_approval_list = (
+        db.query(ApprovalRequest)
+        .filter(ApprovalRequest.status == "pending")
+        .order_by(ApprovalRequest.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    approval_detail_lines = []
+    for a in pending_approval_list:
+        approval_detail_lines.append(
+            f"  - [#{a.id}] [{a.request_type}] {a.title} | 요청자: {a.requester} | "
+            f"{a.description[:60] + '…' if a.description and len(a.description) > 60 else (a.description or '')}"
+        )
+
+    # Detailed pending terminal requests
+    pending_terminal_list = (
+        db.query(TerminalRequest)
+        .filter(TerminalRequest.status == "pending")
+        .order_by(TerminalRequest.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    terminal_detail_lines = []
+    for t in pending_terminal_list:
+        terminal_detail_lines.append(
+            f"  - [#{t.id}] `{t.command}` | 요청자: {t.requested_by_name} | 사유: {t.reason or '없음'}"
+        )
+
     lines = [
         f"\n\n{'='*60}",
         f"[실제 그룹 현황 데이터 — {now}]",
@@ -149,6 +178,22 @@ def _build_chairman_context(db: Session, now: str) -> str:
         "▶ 계열사 목록:",
     ]
     lines += (company_lines if company_lines else ["  (없음)"])
+
+    if approval_detail_lines:
+        lines += ["", "▶ 대기 중 승인 요청 목록 (채팅에서 바로 승인/반려 가능):"]
+        lines += approval_detail_lines
+        lines += [
+            "  → 승인: <<APPROVE_REQUEST:{\"id\": N, \"note\": \"승인 사유\"}>>",
+            "  → 반려: <<REJECT_REQUEST:{\"id\": N, \"note\": \"반려 사유\"}>>",
+        ]
+
+    if terminal_detail_lines:
+        lines += ["", "▶ 대기 중 터미널 요청 목록 (채팅에서 바로 승인/실행 가능):"]
+        lines += terminal_detail_lines
+        lines += [
+            "  → 승인 & 즉시 실행: <<APPROVE_TERMINAL:{\"id\": N}>>",
+            "  → 반려: <<REJECT_TERMINAL:{\"id\": N, \"note\": \"반려 사유\"}>>",
+        ]
 
     if strategy_lines:
         lines += ["", "▶ 그룹 전략 현황:"]
