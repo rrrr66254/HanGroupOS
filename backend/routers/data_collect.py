@@ -188,29 +188,83 @@ def test_api_key(
     if not obj:
         raise HTTPException(404, "API 키를 찾을 수 없습니다.")
 
-    collector = DataCollector(api_keys={obj.service: obj.api_key})
+    result = _test_connection(obj.service, obj.api_key)
 
-    if obj.service == "serpapi":
-        result = collector.web_search("test", num_results=1)
-        ok = "results" in result and not result.get("requires_key")
-    elif obj.service == "newsapi":
-        result = collector.news_search("test", language="en", days_back=1)
-        ok = "articles" in result and result.get("source") == "newsapi"
-    elif obj.service == "comtrade":
-        result = collector.fetch_comtrade("410", year="2022")
-        ok = "data" in result
-    else:
+    if result["ok"] is None:
         return {"service": obj.service, "status": "test_not_supported",
-                "message": "이 서비스는 자동 테스트를 지원하지 않습니다. 실제 발행으로 확인해주세요."}
+                "message": result["message"]}
 
     obj.last_used_at = datetime.utcnow()
     db.commit()
 
     return {
         "service": obj.service,
-        "status": "ok" if ok else "error",
-        "result": result,
+        "status": "ok" if result["ok"] else "error",
+        "message": result["message"],
     }
+
+
+def _test_connection(service: str, api_key: str) -> dict:
+    """서비스별 연결 테스트. {"ok": bool|None, "message": str} 반환
+    ok=True: 성공, ok=False: 실패, ok=None: 테스트 미지원
+    """
+    import requests as _req
+    try:
+        if service == "huggingface":
+            r = _req.get(
+                "https://huggingface.co/api/whoami",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=8,
+            )
+            ok = r.status_code == 200
+            if ok:
+                name = r.json().get("name", "")
+                msg = f"인증 성공 (계정: {name})" if name else "인증 성공"
+            else:
+                msg = f"인증 실패 (HTTP {r.status_code})"
+
+        elif service == "json2video":
+            r = _req.get(
+                "https://api.json2video.com/v2/movies",
+                headers={"x-api-key": api_key},
+                timeout=8,
+            )
+            # 200 or 404 (키 유효, 결과 없음) → 키 자체는 유효
+            ok = r.status_code in (200, 404)
+            msg = "API 키 유효" if ok else f"인증 실패 (HTTP {r.status_code})"
+
+        elif service == "serpapi":
+            r = _req.get(
+                "https://serpapi.com/search",
+                params={"q": "test", "api_key": api_key, "num": 1},
+                timeout=8,
+            )
+            data = r.json()
+            ok = r.status_code == 200 and "organic_results" in data
+            msg = "연결 성공" if ok else data.get("error", "연결 실패")
+
+        elif service == "newsapi":
+            r = _req.get(
+                "https://newsapi.org/v2/top-headlines",
+                params={"country": "us", "pageSize": 1, "apiKey": api_key},
+                timeout=8,
+            )
+            ok = r.status_code == 200
+            msg = "연결 성공" if ok else f"연결 실패 (HTTP {r.status_code})"
+
+        elif service == "comtrade":
+            collector = DataCollector(api_keys={"comtrade": api_key})
+            result = collector.fetch_comtrade("410", year="2022")
+            ok = "data" in result
+            msg = "연결 성공" if ok else "연결 실패"
+
+        else:
+            return {"ok": None, "message": "테스트 미지원 서비스 — 실제 사용으로 확인하세요"}
+
+        return {"ok": ok, "message": msg}
+
+    except Exception as e:
+        return {"ok": False, "message": f"연결 오류: {str(e)[:100]}"}
 
 
 # ══════════════════════════════════════════════════════════════════════════════

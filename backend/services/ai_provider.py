@@ -504,6 +504,11 @@ API 키가 필요한 경우 사용자에게 아래 정보로 안내하세요:
 형식 없이 "저장하겠습니다"라고만 하면 아무것도 저장되지 않습니다.
 사용자가 API 키 문자열을 제공하면 즉시 위 형식으로 저장하세요. 별도 확인 없이 바로 저장합니다.
 
+새로운 외부 서비스(Slack, AWS, Google Sheets, Stripe, 기타 서비스)가 필요하다고
+판단되면 사용자에게 어떤 API 키가 필요한지 먼저 설명하세요.
+제공 시 즉시 <<SAVE_API_KEY:{"service":"서비스명","api_key":"키값","label":"설명","extra_config":{}}>>로 저장하세요.
+저장 완료 후 연결 테스트 결과가 자동으로 확인됩니다.
+
 【승인/반려 처리 — 대화에서 직접 가능】
 시스템이 주입한 컨텍스트에 "대기 중 승인 요청" 또는 "대기 중 터미널 요청" 목록이 있으면
 아래 형식으로 대화에서 직접 처리할 수 있습니다.
@@ -694,7 +699,25 @@ CEO_SYSTEM = """당신은 한그룹 계열사의 AI CEO입니다.
 - 직접 파일을 읽거나 외부 인터넷에 스스로 접속할 수 없습니다.
 - 실제로 확인하지 않은 수치·현황을 사실처럼 보고하지 마세요.
 - 전략적 분석과 계획은 AI 의견임을 명확히 하세요.
-- **단, <<TERMINAL_REQUEST:...>>, <<VIDEO_REQUEST:...>> 형식은 실제 시스템 메커니즘입니다. 이것은 사용 가능합니다.**
+- **단, <<TERMINAL_REQUEST:...>>, <<VIDEO_REQUEST:...>>, <<SAVE_API_KEY:...>> 형식은 실제 시스템 메커니즘입니다. 이것은 사용 가능합니다.**
+
+【외부 API 키 등록 및 신규 서비스 연결】
+사용자가 API 키를 입력하거나, 새로운 외부 서비스 연결이 필요하다고 판단될 때
+반드시 아래 형식을 응답에 포함해 즉시 저장하세요:
+<<SAVE_API_KEY:{"service":"서비스명","api_key":"입력된키","label":"설명","extra_config":{}}>>
+
+service 값: huggingface | json2video | serpapi | newsapi | wordpress | tistory | youtube | openai | slack | notion | stripe | 그외 서비스명
+
+API 키가 필요한 새 서비스를 연결하려 할 때:
+1. 어떤 서비스가 왜 필요한지 Admin에게 명확히 설명하세요
+2. Admin이 키를 제공하면 즉시 <<SAVE_API_KEY:...>>로 저장하세요 (별도 확인 불필요)
+3. 키 없이는 해당 기능을 수행할 수 없음을 솔직하게 알리세요
+
+예시:
+- Admin이 "hf-abc123" 입력 시:
+  <<SAVE_API_KEY:{"service":"huggingface","api_key":"hf-abc123","label":"HuggingFace 영상생성","extra_config":{}}>>
+
+중요: <<SAVE_API_KEY:...>> 형식이 있어야만 실제로 DB에 저장됩니다.
 
 【이미지 분석 리포트】
 사용자가 이미지를 첨부하면 Vision AI(gpt-4o-mini)가 자동 활성화됩니다.

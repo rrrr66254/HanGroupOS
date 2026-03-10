@@ -109,11 +109,22 @@ def _process_api_key_saves(content: str, db) -> tuple:
 
             db.flush()
             key_preview = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "****"
-            results.append(
+            result_msg = (
                 f"\n\n✅ **{label} API 키 {action} 완료**\n"
                 f"서비스: `{service}` | 키: `{key_preview}`"
                 + (f" | 추가 설정: {extra_config}" if extra_config else "")
             )
+            # 연결 테스트 (지원 서비스만, 실패해도 저장 결과는 표시)
+            try:
+                from routers.data_collect import _test_connection
+                test = _test_connection(service, api_key)
+                if test["ok"] is True:
+                    result_msg += f"\n🔗 연결 테스트: ✅ {test['message']}"
+                elif test["ok"] is False:
+                    result_msg += f"\n🔗 연결 테스트: ❌ {test['message']}"
+            except Exception:
+                pass
+            results.append(result_msg)
         except json.JSONDecodeError as exc:
             results.append(f"\n\n❌ API 키 저장 실패 (JSON 파싱 오류): {exc}")
         except Exception as exc:
