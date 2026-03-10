@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from core.database import get_db, SessionLocal
 from core.security import get_current_user
-from models.models import ChatSession, ChatMessage, User, AISuggestion, Company, OrgNode, StrategyItem, TerminalRequest
+from models.models import ChatSession, ChatMessage, User, AISuggestion, Company, OrgNode, StrategyItem, TerminalRequest, ApprovalRequest
 from schemas.schemas import (
     ChatSessionCreate, ChatSessionOut,
     ChatMessageOut, ChatRequest, CompanyQueryRequest,
@@ -275,6 +275,90 @@ def _process_code_actions(content: str, provider, system_prompt: str, max_retrie
     return content.strip(), results
 
 
+def _process_approval_actions(content: str, db, user_id: int) -> tuple:
+    """Parse <<APPROVE_REQUEST:...>>, <<REJECT_REQUEST:...>>,
+    <<APPROVE_TERMINAL:...>>, <<REJECT_TERMINAL:...>> blocks."""
+    from datetime import datetime as _dt
+    import subprocess
+    results = []
+
+    # ApprovalRequest handling
+    for action, is_approve in [("APPROVE_REQUEST", True), ("REJECT_REQUEST", False)]:
+        pattern = re.compile(rf'<<{action}:(.*?)>>', re.DOTALL)
+        for match in pattern.finditer(content):
+            try:
+                data = json.loads(match.group(1).strip())
+                req_id = int(data.get("id", 0))
+                note = data.get("note", "")
+                approval = db.query(ApprovalRequest).filter(
+                    ApprovalRequest.id == req_id, ApprovalRequest.status == "pending"
+                ).first()
+                if not approval:
+                    results.append(f"\n\n⚠️ 승인 요청 #{req_id} 를 찾을 수 없거나 이미 처리됐습니다.")
+                    continue
+                approval.status = "approved" if is_approve else "rejected"
+                approval.reviewer_note = note
+                approval.reviewed_by = user_id
+                approval.reviewed_at = _dt.utcnow()
+                db.flush()
+                if is_approve and approval.request_type == "capability_update":
+                    try:
+                        from services.capability_analyzer import activate_capabilities
+                        activate_capabilities(approval.id, db)
+                    except Exception:
+                        pass
+                status_label = "✅ 승인" if is_approve else "❌ 반려"
+                results.append(f"\n\n{status_label} — [{approval.request_type}] {approval.title} (#{req_id})")
+            except Exception as exc:
+                results.append(f"\n\n❌ {action} 처리 오류: {exc}")
+        content = pattern.sub("", content)
+
+    # TerminalRequest handling
+    for action, is_approve in [("APPROVE_TERMINAL", True), ("REJECT_TERMINAL", False)]:
+        pattern = re.compile(rf'<<{action}:(.*?)>>', re.DOTALL)
+        for match in pattern.finditer(content):
+            try:
+                data = json.loads(match.group(1).strip())
+                req_id = int(data.get("id", 0))
+                note = data.get("note", "")
+                tr = db.query(TerminalRequest).filter(
+                    TerminalRequest.id == req_id, TerminalRequest.status == "pending"
+                ).first()
+                if not tr:
+                    results.append(f"\n\n⚠️ 터미널 요청 #{req_id} 를 찾을 수 없거나 이미 처리됐습니다.")
+                    continue
+                if is_approve:
+                    tr.status = "approved"
+                    tr.approved_by = user_id
+                    tr.decided_at = _dt.utcnow()
+                    db.flush()
+                    result = subprocess.run(
+                        tr.command, shell=True, capture_output=True, text=True,
+                        timeout=30, cwd="/home/user/han-group-os"
+                    )
+                    tr.output = (result.stdout or "") + (("\n[stderr]\n" + result.stderr) if result.stderr else "")
+                    tr.exit_code = result.returncode
+                    tr.status = "executed"
+                    tr.executed_at = _dt.utcnow()
+                    db.flush()
+                    output_preview = (tr.output or "")[:300]
+                    results.append(
+                        f"\n\n✅ 터미널 #{req_id} 승인 & 실행 완료 (exit {tr.exit_code})\n"
+                        f"`{tr.command}`\n```\n{output_preview}\n```"
+                    )
+                else:
+                    tr.status = "rejected"
+                    tr.output = note or "AI 회장에 의해 거부됨"
+                    tr.decided_at = _dt.utcnow()
+                    db.flush()
+                    results.append(f"\n\n❌ 터미널 #{req_id} 거부됨\n`{tr.command}`")
+            except Exception as exc:
+                results.append(f"\n\n❌ {action} 처리 오류: {exc}")
+        content = pattern.sub("", content)
+
+    return content.strip(), results
+
+
 def _process_model_updates(content: str, db) -> tuple:
     """Parse <<UPDATE_MODEL:...>> blocks, update OrgNode AI model/provider, return (clean_text, result_lines).
     Format: <<UPDATE_MODEL:{"node_id":1,"provider":"openai","model":"gpt-4o-mini"}>>
@@ -447,6 +531,7 @@ def send_message(
     clean_response, api_key_results = _process_api_key_saves(ai_response, db)
     clean_response, terminal_req_ids = _process_terminal_requests(clean_response, db, session.company_id, current_user.id)
     clean_response, model_update_results = _process_model_updates(clean_response, db)
+    clean_response, approval_results = _process_approval_actions(clean_response, db, current_user.id)
     clean_response, action_results = _execute_actions(clean_response, db, current_user.id)
     # Code execution actions (INSTALL_PACKAGE / SQL_QUERY / EXECUTE_CODE with debug loop)
     clean_response, code_results = _process_code_actions(clean_response, provider, system_prompt)
@@ -456,7 +541,7 @@ def send_message(
         tr = db.query(TerminalRequest).filter(TerminalRequest.id == rid).first()
         if tr:
             terminal_notes += f"\n\n📋 **터미널 명령 요청 제출됨** (요청 #{tr.id})\n`{tr.command}`\n사유: {tr.reason}\nAdmin이 승인하면 터미널 페이지에서 실행됩니다."
-    final_content = clean_response + "".join(action_results) + "".join(api_key_results) + "".join(model_update_results) + "".join(code_results) + terminal_notes
+    final_content = clean_response + "".join(action_results) + "".join(api_key_results) + "".join(model_update_results) + "".join(approval_results) + "".join(code_results) + terminal_notes
 
     # Save AI response
     ai_name = session.agent_name or {
@@ -641,8 +726,10 @@ def stream_message(
             content_after_terminal, terminal_req_ids = _process_terminal_requests(content_after_apikey, new_db, company_id, user_id)
             # Handle model updates
             content_after_model, model_update_results = _process_model_updates(content_after_terminal, new_db)
+            # Handle approval actions (APPROVE_REQUEST / REJECT_REQUEST / APPROVE_TERMINAL / REJECT_TERMINAL)
+            content_after_approval, approval_results = _process_approval_actions(content_after_model, new_db, user_id)
             # Handle company creation
-            clean, action_results = _execute_actions(content_after_model, new_db, user_id)
+            clean, action_results = _execute_actions(content_after_approval, new_db, user_id)
             # Handle code execution (INSTALL_PACKAGE / SQL_QUERY / EXECUTE_CODE + debug loop)
             clean, code_results = _process_code_actions(clean, prov, sys_prompt)
             # Append terminal request notifications
@@ -651,7 +738,7 @@ def stream_message(
                 tr = new_db.query(TerminalRequest).filter(TerminalRequest.id == rid).first()
                 if tr:
                     terminal_notes += f"\n\n⏳ **터미널 명령 요청 제출됨** (ID #{tr.id})\n`{tr.command}`\n사유: {tr.reason}\n관리자 승인 대기 중..."
-            final = clean + "".join(action_results) + "".join(model_update_results) + terminal_notes + "".join(api_key_results) + "".join(code_results)
+            final = clean + "".join(action_results) + "".join(model_update_results) + "".join(approval_results) + terminal_notes + "".join(api_key_results) + "".join(code_results)
             ai_msg = ChatMessage(
                 session_id=session_id,
                 role="assistant",
