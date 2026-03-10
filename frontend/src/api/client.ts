@@ -315,10 +315,11 @@ export const agentApi = {
 export const videoApi = {
   models: () => api.get('/video/models'),
   generate: (data: object) => api.post('/video/generate', data),
-  jobs: (companyId?: number, limit = 20) =>
+  jobs: (companyId?: number, limit = 100) =>
     api.get('/video/jobs', { params: { company_id: companyId, limit } }),
   job: (id: number) => api.get(`/video/jobs/${id}`),
   deleteJob: (id: number) => api.delete(`/video/jobs/${id}`),
+  batchDelete: (ids: number[]) => api.post('/video/jobs/batch-delete', { ids }),
   fileUrl: (id: number) => `/api/video/file/${id}`,
 }
 

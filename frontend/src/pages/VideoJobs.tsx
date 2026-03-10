@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Film, Trash2, RefreshCw, AlertCircle, CheckCircle,
   Loader2, Play, Download, Filter, Search, ExternalLink,
+  Building2,
 } from 'lucide-react'
-import { videoApi } from '../api/client'
+import { videoApi, companiesApi } from '../api/client'
 import { useNavigate } from 'react-router-dom'
 
 interface VideoJob {
@@ -17,6 +18,11 @@ interface VideoJob {
   duration_sec: number | null
   created_at: string
   finished_at: string | null
+}
+
+interface Company {
+  id: number
+  name: string
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -42,22 +48,36 @@ type StatusFilter = 'all' | 'pending' | 'running' | 'done' | 'failed'
 
 export default function VideoJobs() {
   const [jobs, setJobs] = useState<VideoJob[]>([])
+  const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [companyFilter, setCompanyFilter] = useState<number | undefined>(undefined)
   const [search, setSearch] = useState('')
   const [previewJob, setPreviewJob] = useState<VideoJob | null>(null)
   const [deleting, setDeleting] = useState<number | null>(null)
+  const [batchDeleting, setBatchDeleting] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const navigate = useNavigate()
 
   const loadJobs = async () => {
     try {
-      const r = await videoApi.jobs(undefined, 100)
+      const r = await videoApi.jobs(companyFilter, 100)
       setJobs(r.data)
     } finally {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    companiesApi.list().then((r) => setCompanies(r.data))
+  }, [])
+
+  useEffect(() => {
+    setLoading(true)
+    loadJobs()
+    setSelectedIds(new Set())
+  }, [companyFilter])
 
   useEffect(() => {
     loadJobs()
@@ -79,10 +99,32 @@ export default function VideoJobs() {
     try {
       await videoApi.deleteJob(job.id)
       if (previewJob?.id === job.id) setPreviewJob(null)
+      setSelectedIds((prev) => { const s = new Set(prev); s.delete(job.id); return s })
       await loadJobs()
     } finally {
       setDeleting(null)
     }
+  }
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return
+    setBatchDeleting(true)
+    try {
+      await videoApi.batchDelete(Array.from(selectedIds))
+      if (previewJob && selectedIds.has(previewJob.id)) setPreviewJob(null)
+      setSelectedIds(new Set())
+      await loadJobs()
+    } finally {
+      setBatchDeleting(false)
+    }
+  }
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const s = new Set(prev)
+      s.has(id) ? s.delete(id) : s.add(id)
+      return s
+    })
   }
 
   const filtered = jobs.filter((j) => {
@@ -90,6 +132,24 @@ export default function VideoJobs() {
     if (search && !j.prompt.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
+
+  const allFilteredSelected = filtered.length > 0 && filtered.every((j) => selectedIds.has(j.id))
+
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelectedIds((prev) => {
+        const s = new Set(prev)
+        filtered.forEach((j) => s.delete(j.id))
+        return s
+      })
+    } else {
+      setSelectedIds((prev) => {
+        const s = new Set(prev)
+        filtered.forEach((j) => s.add(j.id))
+        return s
+      })
+    }
+  }
 
   const counts: Record<string, number> = { all: jobs.length }
   for (const s of ['pending', 'running', 'done', 'failed']) {
@@ -122,7 +182,34 @@ export default function VideoJobs() {
             />
           </div>
 
+          {/* Company filter */}
+          <div className="flex items-center gap-1.5">
+            <Building2 size={12} className="text-slate-500" />
+            <select
+              value={companyFilter ?? ''}
+              onChange={(e) => setCompanyFilter(e.target.value ? Number(e.target.value) : undefined)}
+              className="bg-bg-base border border-bg-border rounded text-xs text-slate-200 px-2 py-1.5 focus:outline-none focus:border-brand/60"
+            >
+              <option value="">전체 회사</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
           <div className="flex items-center gap-1 ml-auto">
+            {selectedIds.size > 0 && (
+              <button
+                onClick={handleBatchDelete}
+                disabled={batchDeleting}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 transition-colors disabled:opacity-40"
+              >
+                {batchDeleting
+                  ? <><Loader2 size={11} className="animate-spin" /> 삭제 중...</>
+                  : <><Trash2 size={11} /> 선택 삭제 ({selectedIds.size})</>
+                }
+              </button>
+            )}
             <button
               onClick={loadJobs}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-slate-400 hover:text-slate-200 hover:bg-bg-elevated transition-colors"
@@ -174,13 +261,21 @@ export default function VideoJobs() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-bg-border text-left">
-                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium w-10">#</th>
-                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium">프롬프트</th>
-                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium w-28">모델</th>
-                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium w-20">상태</th>
-                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium w-36">생성 시간</th>
-                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium w-36">완료 시간</th>
-                  <th className="px-4 py-2.5 text-[10px] text-slate-500 font-medium w-28 text-right">액션</th>
+                  <th className="px-3 py-2.5 w-8">
+                    <input
+                      type="checkbox"
+                      checked={allFilteredSelected}
+                      onChange={toggleSelectAll}
+                      className="accent-brand"
+                    />
+                  </th>
+                  <th className="px-3 py-2.5 text-[10px] text-slate-500 font-medium w-10">#</th>
+                  <th className="px-3 py-2.5 text-[10px] text-slate-500 font-medium">프롬프트</th>
+                  <th className="px-3 py-2.5 text-[10px] text-slate-500 font-medium w-28">모델</th>
+                  <th className="px-3 py-2.5 text-[10px] text-slate-500 font-medium w-20">상태</th>
+                  <th className="px-3 py-2.5 text-[10px] text-slate-500 font-medium w-36">생성 시간</th>
+                  <th className="px-3 py-2.5 text-[10px] text-slate-500 font-medium w-36">완료 시간</th>
+                  <th className="px-3 py-2.5 text-[10px] text-slate-500 font-medium w-28 text-right">액션</th>
                 </tr>
               </thead>
               <tbody>
@@ -190,19 +285,27 @@ export default function VideoJobs() {
                     onClick={() => setPreviewJob(previewJob?.id === job.id ? null : job)}
                     className={`border-b border-bg-border cursor-pointer transition-colors ${
                       previewJob?.id === job.id ? 'bg-bg-elevated' : 'hover:bg-bg-elevated/50'
-                    }`}
+                    } ${selectedIds.has(job.id) ? 'bg-brand/5' : ''}`}
                   >
-                    <td className="px-4 py-3 text-slate-500">{job.id}</td>
-                    <td className="px-4 py-3 text-slate-200 max-w-0">
+                    <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(job.id)}
+                        onChange={() => toggleSelect(job.id)}
+                        className="accent-brand"
+                      />
+                    </td>
+                    <td className="px-3 py-3 text-slate-500">{job.id}</td>
+                    <td className="px-3 py-3 text-slate-200 max-w-0">
                       <p className="truncate">{job.prompt}</p>
                       {job.status === 'failed' && job.error_msg && (
                         <p className="text-[10px] text-red-400 truncate mt-0.5">{job.error_msg}</p>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-slate-400">
+                    <td className="px-3 py-3 text-slate-400">
                       {job.model_id.split('/').pop()}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <span className={`flex items-center gap-1 ${STATUS_COLOR[job.status]}`}>
                         {(job.status === 'pending' || job.status === 'running') && (
                           <Loader2 size={10} className="animate-spin" />
@@ -212,11 +315,11 @@ export default function VideoJobs() {
                         {STATUS_LABEL[job.status]}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-slate-500">{formatDate(job.created_at)}</td>
-                    <td className="px-4 py-3 text-slate-500">
+                    <td className="px-3 py-3 text-slate-500">{formatDate(job.created_at)}</td>
+                    <td className="px-3 py-3 text-slate-500">
                       {job.finished_at ? formatDate(job.finished_at) : '—'}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                         {job.status === 'done' && job.video_url && (
                           <>

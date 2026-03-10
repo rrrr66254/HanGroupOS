@@ -81,6 +81,12 @@ router = APIRouter(prefix="/api/video", tags=["video-generation"])
 VIDEO_DIR = Path(os.path.expanduser("~")) / "han-video-store"
 VIDEO_DIR.mkdir(exist_ok=True)
 
+# FAL-AI HuggingFace 모델 ID → fal-ai 앱 ID 매핑
+FAL_MODEL_MAP: Dict[str, str] = {
+    "Lightricks/LTX-Video-0.9.8-13B-distilled": "fal-ai/ltx-video",
+    "THUDM/CogVideoX-2b": "fal-ai/cogvideox-5b",
+}
+
 # 지원 모델 목록
 SUPPORTED_MODELS = [
     {
@@ -120,6 +126,16 @@ def _get_hf_token(db: Session) -> Optional[str]:
     return row.api_key if row else None
 
 
+def _get_fal_key(db: Session) -> Optional[str]:
+    """ExternalApiKey에서 FAL-AI API 키 조회."""
+    row = (
+        db.query(ExternalApiKey)
+        .filter(ExternalApiKey.service == "fal-ai", ExternalApiKey.is_active == True)
+        .first()
+    )
+    return row.api_key if row else None
+
+
 def _get_json2video_key(db: Session) -> Optional[str]:
     """ExternalApiKey에서 JSON2Video API 키 조회."""
     row = (
@@ -139,6 +155,10 @@ class VideoGenerateRequest(BaseModel):
     num_frames: Optional[int] = None       # 프레임 수 (모델마다 다름)
     fps: Optional[int] = None             # FPS
     meta: Optional[dict] = None           # json2video 템플릿 설정 등
+
+
+class BatchDeleteRequest(BaseModel):
+    ids: List[int]
 
 
 class VideoJobOut(BaseModel):
@@ -173,6 +193,91 @@ def _format_job(job: VideoJob, request_base: str = "") -> dict:
         "created_at": job.created_at.isoformat(),
         "finished_at": job.finished_at.isoformat() if job.finished_at else None,
     }
+
+
+def _run_fal_generation(job_id: int, fal_key: str):
+    """FAL-AI API로 영상 생성 (fal_client, 실시간 로그 진행률 지원)."""
+    import os
+    from core.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
+        if not job:
+            return
+
+        job.status = "running"
+        db.commit()
+        video_progress.notify_sync(job_id, 5, "FAL-AI 큐 연결 중...")
+
+        fal_app_id = FAL_MODEL_MAP.get(job.model_id, "fal-ai/ltx-video")
+
+        try:
+            import fal_client
+
+            os.environ["FAL_KEY"] = fal_key
+
+            _progress_step = [10]  # mutable counter for closure
+
+            def on_queue_update(update):
+                if isinstance(update, fal_client.InProgress):
+                    logs = getattr(update, "logs", []) or []
+                    if logs:
+                        msg = logs[-1].get("message", "처리 중...") if isinstance(logs[-1], dict) else str(logs[-1])
+                        # 로그 개수에 따라 10~85% 선형 증가 (최대 85%는 파일 저장 전)
+                        pct = min(10 + len(logs) * 3, 85)
+                        _progress_step[0] = pct
+                        video_progress.notify_sync(job_id, pct, msg[:100])
+                    else:
+                        video_progress.notify_sync(job_id, _progress_step[0], "모델 추론 중...")
+
+            video_progress.notify_sync(job_id, 10, f"FAL-AI 모델 실행 중: {fal_app_id}")
+
+            arguments: dict = {"prompt": job.prompt}
+            if (job.meta or {}).get("num_frames"):
+                arguments["num_frames"] = job.meta["num_frames"]
+
+            result = fal_client.subscribe(
+                fal_app_id,
+                arguments=arguments,
+                with_logs=True,
+                on_queue_update=on_queue_update,
+            )
+
+            video_progress.notify_sync(job_id, 90, "영상 URL 확인 중...")
+
+            # 결과에서 영상 URL 추출 (FAL-AI 응답 형식)
+            video_url = None
+            if isinstance(result, dict):
+                vid = result.get("video") or result.get("videos", [{}])[0]
+                if isinstance(vid, dict):
+                    video_url = vid.get("url")
+                elif isinstance(vid, str):
+                    video_url = vid
+
+            if not video_url:
+                raise ValueError(f"FAL-AI 결과에서 영상 URL을 찾을 수 없습니다: {str(result)[:200]}")
+
+            job.status = "done"
+            job.video_path = video_url
+            job.finished_at = datetime.utcnow()
+            video_progress.done_sync(job_id, "done")
+
+        except ImportError:
+            job.status = "failed"
+            job.error_msg = "fal-client 패키지가 설치되지 않았습니다. pip install fal-client"
+            video_progress.done_sync(job_id, "failed")
+        except Exception as e:
+            job.status = "failed"
+            job.error_msg = str(e)[:500]
+            job.finished_at = datetime.utcnow()
+            video_progress.done_sync(job_id, "failed")
+
+        db.commit()
+        _notify_chat(db, job)
+
+    finally:
+        db.close()
 
 
 def _run_generation(job_id: int, token: str):
@@ -422,6 +527,27 @@ def _start_video_job(job_id: int, db: Session) -> bool:
             _notify_chat(db, job)
             return False
         t = threading.Thread(target=_run_json2video_generation, args=(job_id, api_key), daemon=True)
+
+    elif provider == "fal-ai":
+        fal_key = _get_fal_key(db)
+        if fal_key:
+            # FAL API 키가 있으면 fal_client 직접 사용 (실시간 진행률 지원)
+            t = threading.Thread(target=_run_fal_generation, args=(job_id, fal_key), daemon=True)
+        else:
+            # FAL 키 없으면 HuggingFace Inference 폴백
+            token = _get_hf_token(db)
+            if not token:
+                job.status = "failed"
+                job.error_msg = (
+                    "FAL-AI 또는 HuggingFace API 키가 없습니다. "
+                    "관리자 → 외부 API 키 탭에서 'fal-ai' 서비스로 등록하세요. "
+                    "(HuggingFace 키도 폴백으로 사용 가능)"
+                )
+                db.commit()
+                _notify_chat(db, job)
+                return False
+            t = threading.Thread(target=_run_generation, args=(job_id, token), daemon=True)
+
     else:
         token = _get_hf_token(db)
         if not token:
@@ -543,6 +669,14 @@ def generate_video(
                        "관리자 → API 키 관리에서 'json2video' 서비스로 등록하세요. "
                        "무료 키: https://json2video.com/get-api-key/",
             )
+    elif provider == "fal-ai":
+        if not _get_fal_key(db) and not _get_hf_token(db):
+            raise HTTPException(
+                400,
+                detail="FAL-AI 또는 HuggingFace API 키가 필요합니다. "
+                       "관리자 → API 키 관리에서 'fal-ai' 서비스(권장)로 등록하세요. "
+                       "FAL-AI 키: https://fal.ai/dashboard/keys",
+            )
     else:
         if not _get_hf_token(db):
             raise HTTPException(
@@ -598,6 +732,28 @@ def get_job(
     if not job:
         raise HTTPException(404, "Job not found")
     return _format_job(job)
+
+
+@router.post("/jobs/batch-delete")
+def batch_delete_jobs(
+    req: BatchDeleteRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """선택한 잡 일괄 삭제."""
+    deleted = 0
+    for job_id in req.ids:
+        job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
+        if not job:
+            continue
+        if job.video_path:
+            p = Path(job.video_path)
+            if p.exists():
+                p.unlink(missing_ok=True)
+        db.delete(job)
+        deleted += 1
+    db.commit()
+    return {"ok": True, "deleted": deleted}
 
 
 @router.delete("/jobs/{job_id}")
