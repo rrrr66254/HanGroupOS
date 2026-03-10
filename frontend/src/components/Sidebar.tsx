@@ -6,6 +6,7 @@ import {
   Brain, Settings, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Zap, Home, Bell, FileText, Globe, Star, GitMerge, BarChart2, UserCheck,
   Terminal, Gamepad2, Shield, Briefcase, Users, Film, ListVideo,
+  DatabaseZap, ScrollText,
 } from 'lucide-react'
 import { useAppStore } from '../store/useStore'
 import { approvalsApi, terminalApi } from '../api/client'
@@ -38,6 +39,7 @@ const NAV_GROUPS = [
       { to: '/strategy', icon: Map, label: '전략맵' },
       { to: '/synergy', icon: GitMerge, label: '시너지분석' },
       { to: '/simulation', icon: FlaskConical, label: '시뮬레이션' },
+      { to: '/data-analytics', icon: DatabaseZap, label: '데이터 분석' },
     ],
   },
   {
@@ -57,6 +59,7 @@ const NAV_GROUPS = [
     icon: FileText,
     badge: null,
     items: [
+      { to: '/doc-generator', icon: ScrollText, label: 'AI 문서 생성기' },
       { to: '/weekly-report', icon: FileText, label: '주간보고서' },
       { to: '/ir-report', icon: BarChart2, label: 'IR 보고서' },
       { to: '/site-builder', icon: Globe, label: '웹사이트' },

@@ -28,6 +28,8 @@ import GameDashboard from './pages/GameDashboard'
 import AuditLog from './pages/AuditLog'
 import VideoStudio from './pages/VideoStudio'
 import VideoJobs from './pages/VideoJobs'
+import DocGenerator from './pages/DocGenerator'
+import DataAnalytics from './pages/DataAnalytics'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -88,6 +90,8 @@ export default function App() {
           <Route path="audit" element={<AuditLog />} />
           <Route path="video-studio" element={<VideoStudio />} />
           <Route path="video-jobs" element={<VideoJobs />} />
+          <Route path="doc-generator" element={<DocGenerator />} />
+          <Route path="data-analytics" element={<DataAnalytics />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>

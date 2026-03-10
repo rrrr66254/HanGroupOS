@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Building2, Plus, X, RefreshCw, ChevronRight, ChevronLeft, Bot, Check, Zap, Sparkles } from 'lucide-react'
-import { companiesApi, orgApi, modelsApi, capabilitiesApi } from '../api/client'
+import { companiesApi, orgApi, modelsApi, capabilitiesApi, approvalsApi } from '../api/client'
 import type { Company, OrgNode } from '../types'
 import OrgChart from '../components/OrgChart'
+import type { NodeMovePayload } from '../components/OrgChart'
 
 type Capability = { id: number; capability_type: string; name: string; status: string }
 
@@ -445,6 +446,7 @@ export default function Companies() {
   const [showModal, setShowModal] = useState(false)
   const [filter, setFilter] = useState('')
   const [tab, setTab] = useState<'chart' | 'ai'>('chart')
+  const [orgEditMode, setOrgEditMode] = useState(false)
   const [capabilities, setCapabilities] = useState<Record<number, Capability[]>>({})
 
   const load = () => companiesApi.list().then((r) => {
@@ -462,8 +464,27 @@ export default function Companies() {
   const selectCompany = async (c: Company) => {
     setSelected(c)
     setTab('chart')
+    setOrgEditMode(false)
     const res = await companiesApi.orgTree(c.id)
     setOrgTree(res.data.tree)
+  }
+
+  const handleNodeMove = async (payload: NodeMovePayload) => {
+    try {
+      await orgApi.moveNode(payload.nodeId, payload.newParentId)
+      await approvalsApi.create({
+        request_type: 'org_change',
+        title: `조직 변경: ${payload.nodeName} → ${payload.newParentName} 하위 이동`,
+        description: `조직도 변경 요청: '${payload.nodeName}' 노드를 '${payload.newParentName}'의 하위 노드로 이동합니다.`,
+      })
+      // 조직도 새로고침
+      if (selected) {
+        const res = await companiesApi.orgTree(selected.id)
+        setOrgTree(res.data.tree)
+      }
+    } catch (e) {
+      console.error('조직 변경 실패:', e)
+    }
   }
 
   const filtered = companies.filter(
@@ -572,10 +593,29 @@ export default function Companies() {
                   </span>
                 </div>
               </div>
-              {tab === 'chart'
-                ? <OrgChart tree={orgTree} className="max-h-[500px]" />
-                : <AiEditPanel companyId={selected.id} />
-              }
+              {tab === 'chart' && (
+                <div>
+                  <div className="px-4 pb-2 flex justify-end">
+                    <button
+                      onClick={() => setOrgEditMode((v) => !v)}
+                      className={`text-[10px] px-2 py-1 rounded-lg border transition-colors ${
+                        orgEditMode
+                          ? 'border-brand/50 bg-brand/15 text-brand-light'
+                          : 'border-bg-border text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {orgEditMode ? '✏️ 편집 모드 ON' : '✏️ 편집 모드'}
+                    </button>
+                  </div>
+                  <OrgChart
+                    tree={orgTree}
+                    className="max-h-[500px]"
+                    editMode={orgEditMode}
+                    onNodeMove={handleNodeMove}
+                  />
+                </div>
+              )}
+              {tab === 'ai' && <AiEditPanel companyId={selected.id} />}
             </div>
           ) : (
             <div className="card p-12 flex flex-col items-center justify-center text-slate-600 gap-3">

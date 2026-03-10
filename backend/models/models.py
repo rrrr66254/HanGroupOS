@@ -498,6 +498,18 @@ class Notification(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class MarketKeywordAlert(Base):
+    """시장 모니터링 키워드 알림 구독."""
+    __tablename__ = "market_keyword_alerts"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)  # None=전체
+    keyword = Column(String(100), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    is_active = Column(Boolean, default=True)
+    last_triggered_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class MediaPost(Base):
     """발행된 블로그 포스트 및 YouTube 영상 트래킹."""
     __tablename__ = "media_posts"

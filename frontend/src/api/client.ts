@@ -59,6 +59,7 @@ export const orgApi = {
     api.get('/org/nodes', { params: { company_id: companyId } }),
   createNode: (data: object) => api.post('/org/nodes', data),
   updateNode: (id: number, data: object) => api.patch(`/org/nodes/${id}`, data),
+  moveNode: (id: number, parentId: number) => api.patch(`/org/nodes/${id}/move`, { parent_id: parentId }),
   deleteNode: (id: number) => api.delete(`/org/nodes/${id}`),
   testNode: (id: number) => api.post(`/org/nodes/${id}/test`),
   graph: (companyId?: number) =>
@@ -329,4 +330,41 @@ export const auditApi = {
   log: (params?: { kind?: string; status?: string; limit?: number; offset?: number }) =>
     api.get('/audit/log', { params }),
   stats: () => api.get('/audit/stats'),
+}
+
+// ── Data Collection ────────────────────────────────────────────────────────────
+export const dataApi = {
+  // 기존
+  collected: (params?: object) => api.get('/data/collected', { params }),
+  insights: (companyId: number, limit = 20, save = false) =>
+    api.post(`/data/insights/${companyId}`, null, { params: { limit, save } }),
+  search: (q: string, companyId?: number, limit = 20) =>
+    api.get('/data/search', { params: { q, company_id: companyId, limit } }),
+  stats: () => api.get('/data/stats'),
+  export: (companyId: number, dataType?: string, limit = 500) =>
+    api.get(`/data/export/${companyId}`, { params: { data_type: dataType, limit }, responseType: 'blob' }),
+  // 무료 소스 수집
+  collectHackernews: (data?: object) => api.post('/data/collect/hackernews', data || {}),
+  collectWorldBank: (data?: object) => api.post('/data/collect/worldbank', data || {}),
+  collectReddit: (data?: object) => api.post('/data/collect/reddit', data || {}),
+  collectDart: (data?: object) => api.post('/data/collect/dart', data || {}),
+  collectEcos: (data?: object) => api.post('/data/collect/ecos', data || {}),
+  collectFred: (data?: object) => api.post('/data/collect/fred', data || {}),
+  collectAlphaVantage: (data?: object) => api.post('/data/collect/alphavantage', data || {}),
+  // 시장 알림
+  alerts: () => api.get('/data/alerts'),
+  createAlert: (keyword: string, companyId?: number) =>
+    api.post('/data/alerts', { keyword, company_id: companyId }),
+  toggleAlert: (id: number, isActive: boolean) =>
+    api.patch(`/data/alerts/${id}`, { is_active: isActive }),
+  deleteAlert: (id: number) => api.delete(`/data/alerts/${id}`),
+}
+
+// ── Document Generator ────────────────────────────────────────────────────────
+export const docsApi = {
+  businessPlan: (companyId: number) => api.post(`/docs/business-plan/${companyId}`),
+  marketBrief: (companyId: number) => api.post(`/docs/market-brief/${companyId}`),
+  ir: (companyId: number) => api.get(`/docs/ir/${companyId}`),
+  weeklyReport: (companyId: number) => api.post(`/work/weekly-report/${companyId}`),
+  types: () => api.get('/docs/types'),
 }

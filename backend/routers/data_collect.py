@@ -3,13 +3,16 @@
 인터넷 검색, 뉴스, 스크래핑, UN 무역 데이터 수집 및 외부 API 키 관리
 """
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+from pydantic import BaseModel
 
 from core.database import get_db
 from core.security import get_current_user
-from models.models import ExternalApiKey, CollectedData, StrategyItem, User
+from models.models import ExternalApiKey, CollectedData, StrategyItem, User, MarketKeywordAlert
 from schemas.schemas import (
     ExternalApiKeyCreate, ExternalApiKeyUpdate, ExternalApiKeyOut,
     WebSearchRequest, NewsSearchRequest, ScrapeRequest,
@@ -17,6 +20,56 @@ from schemas.schemas import (
 )
 from services.data_collector import DataCollector, SERVICE_INFO
 from services.ai_provider import get_provider_from_db, MARKET_ANALYST_SYSTEM
+
+
+# ── 신규 수집 요청 스키마 ────────────────────────────────────────────────────────
+class HackernewsCollectRequest(BaseModel):
+    limit: int = 15
+    company_id: Optional[int] = None
+    save: bool = True
+
+class WorldBankCollectRequest(BaseModel):
+    indicator: str = "NY.GDP.MKTP.KD.ZG"  # GDP 성장률
+    country: str = "KR"
+    company_id: Optional[int] = None
+    save: bool = True
+
+class RedditCollectRequest(BaseModel):
+    subreddit: str = "technology"
+    limit: int = 20
+    company_id: Optional[int] = None
+    save: bool = True
+
+class DartCollectRequest(BaseModel):
+    company_name: str = ""
+    days_back: int = 7
+    company_id: Optional[int] = None
+    save: bool = True
+
+class EcosCollectRequest(BaseModel):
+    stat_code: str = "722Y001"   # 기준금리
+    item_code: str = "*AA"
+    period_type: str = "M"
+    company_id: Optional[int] = None
+    save: bool = True
+
+class FredCollectRequest(BaseModel):
+    series_id: str = "DEXKOUS"  # 원달러 환율
+    company_id: Optional[int] = None
+    save: bool = True
+
+class AlphaVantageCollectRequest(BaseModel):
+    symbol: str = "005930.KS"   # 삼성전자
+    function: str = "TIME_SERIES_DAILY"
+    company_id: Optional[int] = None
+    save: bool = True
+
+class AlertCreateRequest(BaseModel):
+    keyword: str
+    company_id: Optional[int] = None
+
+class AlertToggleRequest(BaseModel):
+    is_active: bool
 
 router = APIRouter(prefix="/api/data", tags=["data-collection"])
 
@@ -581,3 +634,435 @@ def search_collected(
             for r in results
         ],
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 무료 데이터 소스 수집 엔드포인트
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _fmt_free_content(result: dict, data_key: str, title_field: str = "title") -> str:
+    """무료 소스 결과 → CollectedData.content 포맷."""
+    items = result.get(data_key, [])
+    return "\n".join(
+        f"{i.get(title_field, '') or i.get('date', '') or str(i)}"
+        f"{': ' + str(i.get('value','')) if i.get('value') is not None else ''}"
+        for i in items[:20]
+    )[:10000]
+
+
+@router.post("/collect/hackernews", summary="HackerNews 트렌드 수집 (무료)")
+def collect_hackernews(
+    req: HackernewsCollectRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """HackerNews 상위 스토리 수집 (완전 무료, API 키 불필요)."""
+    collector = _get_collector(db)
+    result = collector.collect_hackernews(limit=req.limit)
+    saved_id = None
+    if req.save and result.get("stories"):
+        content = "\n".join(
+            f"{s.get('title','')}: {s.get('url','')}"
+            for s in result["stories"]
+        )[:10000]
+        obj = CollectedData(
+            company_id=req.company_id,
+            data_type="tech_trend",
+            source="hackernews",
+            query="hackernews_top",
+            title=f"[HackerNews] Top {len(result['stories'])} Stories ({datetime.utcnow().strftime('%Y-%m-%d')})",
+            content=content,
+            structured=result,
+            tags=["hackernews", "tech", "trend", "free"],
+            status="raw",
+        )
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+        saved_id = obj.id
+    return {**result, "saved_id": saved_id}
+
+
+@router.post("/collect/worldbank", summary="World Bank 거시경제 지표 수집 (무료)")
+def collect_worldbank(
+    req: WorldBankCollectRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """World Bank API로 GDP·무역·물가 등 거시경제 지표 수집 (완전 무료)."""
+    collector = _get_collector(db)
+    result = collector.collect_worldbank(indicator=req.indicator, country=req.country)
+    saved_id = None
+    if req.save and result.get("data"):
+        content = _fmt_free_content(result, "data", "year")
+        obj = CollectedData(
+            company_id=req.company_id,
+            data_type="economic",
+            source="worldbank",
+            query=f"{req.country}:{req.indicator}",
+            title=f"[World Bank] {req.indicator} ({req.country})",
+            content=content,
+            structured=result,
+            tags=["worldbank", "economic", "macro", "free"],
+            status="raw",
+        )
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+        saved_id = obj.id
+    return {**result, "saved_id": saved_id}
+
+
+@router.post("/collect/reddit", summary="Reddit 커뮤니티 트렌드 수집 (무료)")
+def collect_reddit(
+    req: RedditCollectRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Reddit 서브레딧 인기 게시글 수집 (완전 무료, 키 불필요)."""
+    collector = _get_collector(db)
+    result = collector.collect_reddit(subreddit=req.subreddit, limit=req.limit)
+    saved_id = None
+    if req.save and result.get("posts"):
+        content = "\n".join(
+            f"{p.get('title','')}: {p.get('url','')}"
+            for p in result["posts"]
+        )[:10000]
+        obj = CollectedData(
+            company_id=req.company_id,
+            data_type="community",
+            source="reddit",
+            query=f"r/{req.subreddit}",
+            title=f"[Reddit] r/{req.subreddit} Hot Posts",
+            content=content,
+            structured=result,
+            tags=["reddit", "community", "trend", "free"],
+            status="raw",
+        )
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+        saved_id = obj.id
+    return {**result, "saved_id": saved_id}
+
+
+@router.post("/collect/dart", summary="DART 금융감독원 공시 수집")
+def collect_dart(
+    req: DartCollectRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """DART 금융감독원 공시 수집 (무료 API 키 필요 — opendart.fss.or.kr)."""
+    collector = _get_collector(db)
+    result = collector.collect_dart(company_name=req.company_name, days_back=req.days_back)
+    saved_id = None
+    if req.save and result.get("disclosures"):
+        content = "\n".join(
+            f"{d.get('date','')} [{d.get('company','')}] {d.get('title','')}"
+            for d in result["disclosures"]
+        )[:10000]
+        obj = CollectedData(
+            company_id=req.company_id,
+            data_type="disclosure",
+            source="dart",
+            query=req.company_name or "전체",
+            title=f"[DART] {req.company_name or '전체'} 공시 ({req.days_back}일)",
+            content=content,
+            structured=result,
+            tags=["dart", "disclosure", "korea", "stock"],
+            status="raw",
+        )
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+        saved_id = obj.id
+    return {**result, "saved_id": saved_id}
+
+
+@router.post("/collect/ecos", summary="한국은행 경제통계 수집")
+def collect_ecos(
+    req: EcosCollectRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """한국은행 ECOS API로 금리·환율·GDP 등 경제통계 수집 (무료 키 필요 — ecos.bok.or.kr)."""
+    collector = _get_collector(db)
+    result = collector.collect_ecos(
+        stat_code=req.stat_code, item_code=req.item_code, period_type=req.period_type
+    )
+    saved_id = None
+    if req.save and result.get("data"):
+        content = _fmt_free_content(result, "data", "period")
+        obj = CollectedData(
+            company_id=req.company_id,
+            data_type="economic",
+            source="ecos",
+            query=req.stat_code,
+            title=f"[ECOS] 통계코드 {req.stat_code}",
+            content=content,
+            structured=result,
+            tags=["ecos", "economic", "korea", "macro"],
+            status="raw",
+        )
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+        saved_id = obj.id
+    return {**result, "saved_id": saved_id}
+
+
+@router.post("/collect/fred", summary="FRED 미국 연준 경제지표 수집")
+def collect_fred(
+    req: FredCollectRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """FRED API로 미국 금리·환율·GDP 등 수집 (무료 키 필요 — fred.stlouisfed.org)."""
+    collector = _get_collector(db)
+    result = collector.collect_fred(series_id=req.series_id)
+    saved_id = None
+    if req.save and result.get("data"):
+        content = _fmt_free_content(result, "data", "date")
+        obj = CollectedData(
+            company_id=req.company_id,
+            data_type="economic",
+            source="fred",
+            query=req.series_id,
+            title=f"[FRED] {req.series_id}",
+            content=content,
+            structured=result,
+            tags=["fred", "economic", "us", "macro"],
+            status="raw",
+        )
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+        saved_id = obj.id
+    return {**result, "saved_id": saved_id}
+
+
+@router.post("/collect/alphavantage", summary="Alpha Vantage 주가 데이터 수집")
+def collect_alphavantage(
+    req: AlphaVantageCollectRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Alpha Vantage API로 주가·환율 데이터 수집 (무료 키 필요, 분당 5회 제한)."""
+    collector = _get_collector(db)
+    result = collector.collect_alphavantage(symbol=req.symbol, function=req.function)
+    saved_id = None
+    if req.save and result.get("data"):
+        content = _fmt_free_content(result, "data", "date")
+        obj = CollectedData(
+            company_id=req.company_id,
+            data_type="stock",
+            source="alphavantage",
+            query=req.symbol,
+            title=f"[Alpha Vantage] {req.symbol} 주가",
+            content=content,
+            structured=result,
+            tags=["alphavantage", "stock", "price"],
+            status="raw",
+        )
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+        saved_id = obj.id
+    return {**result, "saved_id": saved_id}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 시장 모니터링 알림 키워드 관리 (Task C)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/alerts", summary="내 시장 알림 키워드 목록")
+def list_alerts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    alerts = (
+        db.query(MarketKeywordAlert)
+        .filter(MarketKeywordAlert.user_id == current_user.id)
+        .order_by(MarketKeywordAlert.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": a.id, "keyword": a.keyword, "company_id": a.company_id,
+            "is_active": a.is_active,
+            "last_triggered_at": a.last_triggered_at.isoformat() if a.last_triggered_at else None,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in alerts
+    ]
+
+
+@router.post("/alerts", summary="시장 알림 키워드 등록")
+def create_alert(
+    req: AlertCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not req.keyword.strip():
+        raise HTTPException(400, "키워드를 입력하세요.")
+    # 중복 방지
+    existing = db.query(MarketKeywordAlert).filter(
+        MarketKeywordAlert.user_id == current_user.id,
+        MarketKeywordAlert.keyword == req.keyword.strip(),
+        MarketKeywordAlert.company_id == req.company_id,
+    ).first()
+    if existing:
+        existing.is_active = True
+        db.commit()
+        db.refresh(existing)
+        return {"id": existing.id, "keyword": existing.keyword, "is_active": True, "message": "알림이 재활성화되었습니다."}
+
+    alert = MarketKeywordAlert(
+        keyword=req.keyword.strip(),
+        company_id=req.company_id,
+        user_id=current_user.id,
+        is_active=True,
+    )
+    db.add(alert)
+    db.commit()
+    db.refresh(alert)
+    return {"id": alert.id, "keyword": alert.keyword, "company_id": alert.company_id,
+            "is_active": True, "message": "키워드 알림이 등록되었습니다."}
+
+
+@router.patch("/alerts/{alert_id}", summary="알림 활성화/비활성화")
+def toggle_alert(
+    alert_id: int,
+    req: AlertToggleRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    alert = db.query(MarketKeywordAlert).filter(
+        MarketKeywordAlert.id == alert_id,
+        MarketKeywordAlert.user_id == current_user.id,
+    ).first()
+    if not alert:
+        raise HTTPException(404, "알림을 찾을 수 없습니다.")
+    alert.is_active = req.is_active
+    db.commit()
+    return {"id": alert.id, "keyword": alert.keyword, "is_active": alert.is_active}
+
+
+@router.delete("/alerts/{alert_id}", summary="알림 삭제")
+def delete_alert(
+    alert_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    alert = db.query(MarketKeywordAlert).filter(
+        MarketKeywordAlert.id == alert_id,
+        MarketKeywordAlert.user_id == current_user.id,
+    ).first()
+    if not alert:
+        raise HTTPException(404, "알림을 찾을 수 없습니다.")
+    db.delete(alert)
+    db.commit()
+    return {"message": f"'{alert.keyword}' 알림이 삭제되었습니다."}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 데이터 통계 & 내보내기 (Task D)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/stats", summary="수집 데이터 통계")
+def get_data_stats(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """수집 데이터 현황 통계 (전체/회사별/타입별/날짜별)."""
+    total = db.query(CollectedData).count()
+
+    # 타입별
+    by_type_rows = (
+        db.query(CollectedData.data_type, func.count(CollectedData.id))
+        .group_by(CollectedData.data_type)
+        .all()
+    )
+    by_type = {row[0]: row[1] for row in by_type_rows}
+
+    # 소스별
+    by_source_rows = (
+        db.query(CollectedData.source, func.count(CollectedData.id))
+        .group_by(CollectedData.source)
+        .order_by(func.count(CollectedData.id).desc())
+        .limit(10)
+        .all()
+    )
+    by_source = {row[0]: row[1] for row in by_source_rows}
+
+    # 회사별 상위 10
+    by_company_rows = (
+        db.query(CollectedData.company_id, func.count(CollectedData.id))
+        .filter(CollectedData.company_id != None)
+        .group_by(CollectedData.company_id)
+        .order_by(func.count(CollectedData.id).desc())
+        .limit(10)
+        .all()
+    )
+    by_company = {str(row[0]): row[1] for row in by_company_rows}
+
+    # 최근 7일 일별 수집량
+    daily = []
+    for i in range(6, -1, -1):
+        day = datetime.utcnow().date() - timedelta(days=i)
+        cnt = db.query(CollectedData).filter(
+            func.date(CollectedData.created_at) == day
+        ).count()
+        daily.append({"date": day.isoformat(), "count": cnt})
+
+    # 금일 수집량
+    today = datetime.utcnow().date()
+    today_count = db.query(CollectedData).filter(
+        func.date(CollectedData.created_at) == today
+    ).count()
+
+    return {
+        "total": total,
+        "today": today_count,
+        "by_type": by_type,
+        "by_source": by_source,
+        "by_company": by_company,
+        "daily_7days": daily,
+    }
+
+
+@router.get("/export/{company_id}", summary="수집 데이터 JSON 내보내기")
+def export_data(
+    company_id: int,
+    limit: int = 500,
+    data_type: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """회사별 수집 데이터를 JSON 파일로 내보냅니다."""
+    q = db.query(CollectedData).filter(CollectedData.company_id == company_id)
+    if data_type:
+        q = q.filter(CollectedData.data_type == data_type)
+    rows = q.order_by(CollectedData.created_at.desc()).limit(limit).all()
+
+    export_data_list = [
+        {
+            "id": r.id,
+            "data_type": r.data_type,
+            "source": r.source,
+            "query": r.query,
+            "title": r.title,
+            "content": r.content,
+            "tags": r.tags,
+            "status": r.status,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+
+    filename = f"han_group_data_{company_id}_{datetime.utcnow().strftime('%Y%m%d')}.json"
+    return JSONResponse(
+        content={"company_id": company_id, "count": len(export_data_list),
+                 "exported_at": datetime.utcnow().isoformat(), "data": export_data_list},
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

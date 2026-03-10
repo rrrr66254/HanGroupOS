@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from core.database import get_db
@@ -56,6 +57,50 @@ def update_node(
         raise HTTPException(404, "Node not found")
     for field, value in update.model_dump(exclude_none=True).items():
         setattr(node, field, value)
+    db.commit()
+    db.refresh(node)
+    return node
+
+
+class NodeMoveRequest(BaseModel):
+    parent_id: Optional[int] = None
+
+
+@router.patch("/nodes/{node_id}/move", response_model=OrgNodeOut)
+def move_node(
+    node_id: int,
+    body: NodeMoveRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """조직도 드래그앤드롭: parent_id만 변경 (순환 참조 방지 포함)."""
+    node = db.query(OrgNode).filter(OrgNode.id == node_id).first()
+    if not node:
+        raise HTTPException(404, "Node not found")
+
+    new_parent_id = body.parent_id
+
+    # 순환 참조 방지: 새 부모가 자신의 자손이면 불가
+    if new_parent_id is not None:
+        def is_descendant(candidate_id: int, ancestor_id: int) -> bool:
+            visited = set()
+            current_id = candidate_id
+            while current_id is not None:
+                if current_id in visited:
+                    break
+                visited.add(current_id)
+                current = db.query(OrgNode).filter(OrgNode.id == current_id).first()
+                if not current:
+                    break
+                if current.parent_id == ancestor_id:
+                    return True
+                current_id = current.parent_id
+            return False
+
+        if new_parent_id == node_id or is_descendant(new_parent_id, node_id):
+            raise HTTPException(400, "순환 참조: 자손 노드를 부모로 지정할 수 없습니다.")
+
+    node.parent_id = new_parent_id
     db.commit()
     db.refresh(node)
     return node

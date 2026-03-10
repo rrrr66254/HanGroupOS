@@ -3,7 +3,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import init_db, SessionLocal
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs
 
 
 app = FastAPI(
@@ -45,6 +45,7 @@ app.include_router(game.router)           # 게임 회사 전용 (트렌딩/분�
 app.include_router(audit.router)          # 감사 로그 (승인/반려/터미널 이력 통합 조회)
 app.include_router(video_gen.router)      # 영상 생성 (HuggingFace Inference API)
 app.include_router(notifications.router)  # 알림 시스템 (DB 영속화)
+app.include_router(docs.router)           # AI 문서 자동 생성기 (사업계획서/IR/시장분석)
 
 
 @app.get("/health")
@@ -307,15 +308,14 @@ def _seed_data():
 
 # ── Background Scheduler ──────────────────────────────────────────────────────
 def _auto_collect_news():
-    """6시간마다 전체 계열사 업종 관련 뉴스 자동 수집."""
-    from models.models import Company, ExternalApiKey, CollectedData
+    """6시간마다 전체 계열사 업종 관련 뉴스 + 글로벌 데이터 자동 수집."""
+    from models.models import Company, ExternalApiKey, CollectedData, MarketKeywordAlert
     from services.data_collector import DataCollector
+    from routers.notifications import create_notification
 
     db = SessionLocal()
     try:
         companies = db.query(Company).filter(Company.status == "active").all()
-        if not companies:
-            return
 
         # API 키 로드
         api_keys = {}
@@ -327,7 +327,8 @@ def _auto_collect_news():
 
         collector = DataCollector(api_keys=api_keys, extra_configs=extra_configs)
 
-        for company in companies[:5]:  # 한 번에 최대 5개 회사
+        # ── 1. 회사별 업종 뉴스 수집 ─────────────────────────────────────────
+        for company in companies[:5]:
             try:
                 industry = company.industry or company.name
                 result = collector.news_search(query=industry, language="ko", days_back=1)
@@ -350,14 +351,119 @@ def _auto_collect_news():
                     )
                     db.add(obj)
             except Exception as e:
-                print(f"[Scheduler] {company.name} 뉴스 수집 실패 (무시): {e}")
+                print(f"[Scheduler] {company.name} 뉴스 수집 실패: {e}")
+
+        # ── 2. HackerNews 글로벌 테크 트렌드 수집 ───────────────────────────
+        try:
+            hn_result = collector.collect_hackernews(limit=15)
+            if hn_result.get("stories"):
+                content = "\n".join(
+                    f"{s.get('title','')}: {s.get('url','')}"
+                    for s in hn_result["stories"]
+                )
+                db.add(CollectedData(
+                    company_id=None,
+                    data_type="tech_trend",
+                    source="hackernews",
+                    query="hackernews_top",
+                    title=f"[HackerNews] 글로벌 테크 트렌드 ({datetime.utcnow().strftime('%Y-%m-%d')})",
+                    content=content[:10000],
+                    structured=hn_result,
+                    tags=["hackernews", "tech", "trend", "free", "auto"],
+                    status="raw",
+                ))
+                print(f"[Scheduler] HackerNews {len(hn_result['stories'])}개 스토리 수집")
+        except Exception as e:
+            print(f"[Scheduler] HackerNews 수집 실패: {e}")
+
+        # ── 3. World Bank 한국 GDP 성장률 수집 (일 1회 정도) ─────────────────
+        try:
+            wb_result = collector.collect_worldbank(indicator="NY.GDP.MKTP.KD.ZG", country="KR")
+            if wb_result.get("data"):
+                content = "\n".join(
+                    f"{d.get('year','')}: {d.get('value','')}%"
+                    for d in wb_result["data"]
+                )
+                db.add(CollectedData(
+                    company_id=None,
+                    data_type="economic",
+                    source="worldbank",
+                    query="KR:NY.GDP.MKTP.KD.ZG",
+                    title="[World Bank] 한국 GDP 성장률",
+                    content=content[:5000],
+                    structured=wb_result,
+                    tags=["worldbank", "economic", "korea", "gdp", "auto"],
+                    status="raw",
+                ))
+                print(f"[Scheduler] World Bank GDP 데이터 {len(wb_result['data'])}건 수집")
+        except Exception as e:
+            print(f"[Scheduler] World Bank 수집 실패: {e}")
 
         db.commit()
-        print(f"[Scheduler] 뉴스 자동 수집 완료 ({len(companies[:5])}개 회사)")
+        print(f"[Scheduler] 데이터 자동 수집 완료 ({len(companies[:5])}개 회사 + HN + WB)")
+
+        # ── 4. 시장 모니터링 알림 키워드 매칭 ────────────────────────────────
+        try:
+            _check_market_alerts(db, create_notification)
+        except Exception as e:
+            print(f"[Scheduler] 시장 알림 체크 실패: {e}")
+
     except Exception as e:
         print(f"[Scheduler] 자동 수집 오류: {e}")
     finally:
         db.close()
+
+
+def _check_market_alerts(db, create_notification):
+    """시장 키워드 알림 매칭 — 새로 수집된 데이터에서 키워드 발견 시 알림 생성."""
+    from models.models import MarketKeywordAlert
+    from datetime import timedelta
+
+    alerts = db.query(MarketKeywordAlert).filter(MarketKeywordAlert.is_active == True).all()
+    if not alerts:
+        return
+
+    now = datetime.utcnow()
+    triggered = 0
+
+    for alert in alerts:
+        try:
+            # 마지막 트리거 이후 수집된 데이터만 검색
+            since = alert.last_triggered_at or (now - timedelta(hours=7))
+            from models.models import CollectedData
+            matches = (
+                db.query(CollectedData)
+                .filter(
+                    CollectedData.created_at > since,
+                    CollectedData.company_id == alert.company_id
+                    if alert.company_id else True,
+                )
+                .filter(
+                    (CollectedData.title.ilike(f"%{alert.keyword}%")) |
+                    (CollectedData.content.ilike(f"%{alert.keyword}%"))
+                )
+                .limit(3)
+                .all()
+            )
+            if matches:
+                match_titles = ", ".join(m.title[:50] for m in matches[:2])
+                create_notification(
+                    db=db,
+                    user_id=alert.user_id,
+                    title=f"🔔 시장 알림: '{alert.keyword}'",
+                    body=f"관련 데이터 {len(matches)}건 수집됨\n{match_titles}",
+                    notif_type="info",
+                    icon="📊",
+                    link="/market",
+                )
+                alert.last_triggered_at = now
+                triggered += 1
+        except Exception as e:
+            print(f"[Scheduler] 알림 {alert.id} 처리 실패: {e}")
+
+    if triggered:
+        db.commit()
+        print(f"[Scheduler] 시장 알림 {triggered}건 발송")
 
 
 def _start_scheduler():
