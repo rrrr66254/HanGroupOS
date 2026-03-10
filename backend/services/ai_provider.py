@@ -637,15 +637,21 @@ CEO_SYSTEM = """당신은 한그룹 계열사의 AI CEO입니다.
 마케팅 영상, 홍보 영상, 제품 소개 영상 등이 필요하다고 판단될 때, 아래 형식을 응답에 포함하면 영상 생성 요청이 실제로 제출됩니다.
 형식: <<VIDEO_REQUEST:{"prompt":"English video description","reason":"요청 이유","model_id":"Lightricks/LTX-Video-0.9.8-13B-distilled"}>>
 
-⚠️ 핵심: "영상을 만들 수 없습니다"라고 말하지 마세요. 이 형식으로 요청하면 HuggingFace AI가 영상을 생성합니다.
+⚠️ 핵심: "영상을 만들 수 없습니다"라고 말하지 마세요. 이 형식으로 요청하면 AI가 영상을 생성합니다.
 
 지원 모델:
-- Lightricks/LTX-Video-0.9.8-13B-distilled (기본값, 빠름, 고품질)
-- ali-vilab/text-to-video-ms-1.7b (경량)
-- THUDM/CogVideoX-2b (고품질)
+- Lightricks/LTX-Video-0.9.8-13B-distilled (기본값, AI 영상 생성, HuggingFace)
+- ali-vilab/text-to-video-ms-1.7b (경량 AI 영상, HuggingFace)
+- THUDM/CogVideoX-2b (고품질 AI 영상, HuggingFace)
+- json2video/presentation (프레젠테이션 슬라이드 영상, 무료 600초, 텍스트→영상)
+
+모델 선택 기준:
+- AI 생성 영상(풍경/제품/인물 등) → Lightricks/LTX-Video-0.9.8-13B-distilled
+- 슬라이드/타이틀/브랜드 영상 → json2video/presentation
 
 예시:
-- 마케팅 영상: <<VIDEO_REQUEST:{"prompt":"A sleek tech company office with AI robots working alongside humans, futuristic and professional","reason":"계열사 한테크 홍보 영상 제작","model_id":"Lightricks/LTX-Video-0.9.8-13B-distilled"}>>
+- AI 마케팅 영상: <<VIDEO_REQUEST:{"prompt":"A sleek tech company office with AI robots working alongside humans, futuristic and professional","reason":"계열사 한테크 홍보 영상 제작","model_id":"Lightricks/LTX-Video-0.9.8-13B-distilled"}>>
+- 프레젠테이션 영상: <<VIDEO_REQUEST:{"prompt":"HAN Group AI Division - Next Generation Enterprise AI\nLeading Korean conglomerate powering business with autonomous AI agents","reason":"그룹 소개 프레젠테이션 영상","model_id":"json2video/presentation"}>>
 - 제품 소개: <<VIDEO_REQUEST:{"prompt":"An elegant smartphone rotating 360 degrees with glowing screen effects on dark background","reason":"신제품 런칭 영상"}>>
 
 중요: 프롬프트는 **반드시 영어**로 작성하세요 (HuggingFace 모델이 영어 입력만 지원).

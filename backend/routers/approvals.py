@@ -106,24 +106,14 @@ def review_approval(
         except Exception as e:
             print(f"[CapabilityAnalyzer] 역량 활성화 실패 (무시): {e}")
 
-    # video_gen 승인 시 HuggingFace 영상 생성 자동 시작
+    # video_gen 승인 시 provider에 따라 자동 영상 생성 시작
     if review.status == "approved" and approval.request_type == "video_gen":
         try:
-            import threading
-            from routers.video_gen import _run_generation, _get_hf_token
+            from routers.video_gen import _start_video_job
             video_job_id = (approval.meta or {}).get("video_job_id")
             if video_job_id:
-                token = _get_hf_token(db)
-                if token:
-                    t = threading.Thread(
-                        target=_run_generation,
-                        args=(video_job_id, token),
-                        daemon=True,
-                    )
-                    t.start()
-                    print(f"[video_gen] 승인 → 자동 시작: job #{video_job_id}")
-                else:
-                    print("[video_gen] HuggingFace 토큰 없음 — 영상 생성 스킵")
+                started = _start_video_job(video_job_id, db)
+                print(f"[video_gen] 승인 → 자동 시작 {'성공' if started else '실패(API 키 없음)'}: job #{video_job_id}")
         except Exception as e:
             print(f"[video_gen] 자동 시작 실패 (무시): {e}")
 

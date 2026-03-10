@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Users, Plus, X, Send, Bot, FileText, Loader2, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import { meetingsApi, companiesApi } from '../api/client'
+import MarkdownMessage from '../components/MarkdownMessage'
 import type { Meeting, MeetingMessage, Company } from '../types'
 import { format } from 'date-fns'
 
@@ -164,9 +165,15 @@ export default function Meetings() {
                   </div>
                   <div className={`max-w-[80%] ${msg.sender_role !== 'AI' ? 'items-end' : ''} flex flex-col gap-0.5`}>
                     <div className="text-[9px] text-slate-600">{msg.sender} · {format(new Date(msg.created_at), 'HH:mm')}</div>
-                    <div className={msg.sender_role === 'AI' ? 'chat-ai' : 'chat-user'}>
-                      <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed">{msg.content}</pre>
-                    </div>
+                    {msg.sender_role === 'AI' ? (
+                      <div className="chat-ai">
+                        <MarkdownMessage content={msg.content} />
+                      </div>
+                    ) : (
+                      <div className="chat-user">
+                        <pre className="whitespace-pre-wrap font-sans text-xs leading-relaxed">{msg.content}</pre>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

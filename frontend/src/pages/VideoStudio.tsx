@@ -144,9 +144,26 @@ export default function VideoStudio() {
               </div>
             )}
 
-            <div className="bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[10px] text-amber-400">
-              API 키 필요: 관리자 → 외부 API 키 관리에서 <strong>huggingface</strong> 서비스로 HF 토큰을 등록하세요. 무료 티어 사용 가능.
-            </div>
+            {/* 모델별 API 키 안내 */}
+            {selectedModel === 'json2video/presentation' ? (
+              <div className="bg-indigo-500/10 border border-indigo-500/20 rounded p-2.5 text-[10px] text-indigo-300 space-y-1">
+                <div className="font-semibold text-indigo-200">JSON2Video — 프레젠테이션 영상</div>
+                <div>무료 600초 · 워터마크 포함 · 텍스트 슬라이드 영상 생성</div>
+                <div>API 키: 관리자 → API 키 관리 → <strong>json2video</strong> 서비스로 등록</div>
+                <a
+                  href="https://json2video.com/get-api-key/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-block text-indigo-400 underline"
+                >
+                  무료 API 키 발급 →
+                </a>
+              </div>
+            ) : (
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[10px] text-amber-400">
+                API 키 필요: 관리자 → 외부 API 키 관리에서 <strong>huggingface</strong> 서비스로 HF 토큰을 등록하세요. 무료 티어 사용 가능.
+              </div>
+            )}
 
             <button
               onClick={handleGenerate}

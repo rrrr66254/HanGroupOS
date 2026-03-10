@@ -691,6 +691,26 @@ export default function Chairman() {
     }
   }
 
+  // ── 클립보드 이미지 붙여넣기 (Ctrl+V) ────────────────────────────────────
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault()
+        const file = item.getAsFile()
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = (evt) => {
+          const dataUrl = evt.target?.result as string
+          setAttachedFile({ name: `clipboard_${Date.now()}.png`, content: dataUrl, isImage: true })
+        }
+        reader.readAsDataURL(file)
+        break
+      }
+    }
+  }
+
   // ── Main sendMessage ──────────────────────────────────────────────────────
   const sendMessage = async () => {
     if ((!input.trim() && !attachedFile) || !session || loading) return
@@ -1406,6 +1426,7 @@ export default function Chairman() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKey}
+              onPaste={handlePaste}
               placeholder={getPlaceholder()}
               disabled={!session || loading}
             />
