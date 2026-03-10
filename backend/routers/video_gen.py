@@ -71,6 +71,8 @@ def _get_json2video_key(db: Session) -> Optional[str]:
 
 
 class VideoGenerateRequest(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
     prompt: str
     model_id: str = "Lightricks/LTX-Video-0.9.8-13B-distilled"
     company_id: Optional[int] = None
@@ -80,6 +82,8 @@ class VideoGenerateRequest(BaseModel):
 
 
 class VideoJobOut(BaseModel):
+    model_config = {"protected_namespaces": (), "from_attributes": True}
+
     id: int
     prompt: str
     model_id: str
@@ -88,9 +92,6 @@ class VideoJobOut(BaseModel):
     error_msg: str
     created_at: str
     finished_at: Optional[str] = None
-
-    class Config:
-        from_attributes = True
 
 
 def _format_job(job: VideoJob, request_base: str = "") -> dict:
