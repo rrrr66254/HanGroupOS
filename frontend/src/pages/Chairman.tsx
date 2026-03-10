@@ -46,11 +46,17 @@ interface Company {
   vision?: string
 }
 
+interface OrgPlanItem {
+  level: string
+  role: string
+}
+
 interface PreviewCompany {
   name: string
   industry: string
   description: string
   vision: string
+  org_plan?: OrgPlanItem[]
 }
 
 interface DelegationStep {
@@ -1278,16 +1284,45 @@ export default function Chairman() {
                   </div>
                 )}
 
+                {/* 제안 조직 구성 */}
+                {previewCompany.org_plan && previewCompany.org_plan.length > 0 && (
+                  <div
+                    className="mb-3 p-2.5 rounded"
+                    style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(245,158,11,0.15)' }}
+                  >
+                    <div className="text-[9px] text-amber-400 font-medium uppercase tracking-wide mb-2">제안 조직 구성</div>
+                    <div className="space-y-1">
+                      {previewCompany.org_plan.map((item, i) => {
+                        const levelColor: Record<string, string> = {
+                          CEO: '#f59e0b', Chief: '#a78bfa', 팀장: '#34d399', 'C레벨': '#a78bfa',
+                        }
+                        const color = levelColor[item.level] || '#94a3b8'
+                        return (
+                          <div key={i} className="flex items-center gap-2">
+                            <span
+                              className="text-[8px] font-bold px-1.5 py-0.5 rounded flex-shrink-0"
+                              style={{ background: `${color}18`, color, border: `1px solid ${color}35` }}
+                            >
+                              {item.level}
+                            </span>
+                            <span className="text-[10px] text-slate-400">{item.role}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div
                   className="text-[10px] text-slate-500 mb-3 p-2 rounded"
                   style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.05)' }}
                 >
                   <div className="flex items-center gap-1 mb-1">
                     <Zap size={9} className="text-amber-400" />
-                    <span className="text-amber-400 font-medium">설립 후 자동 처리</span>
+                    <span className="text-amber-400 font-medium">승인 시 자동 처리</span>
                   </div>
-                  <div>• 역할별 AI 조직 자동 구성</div>
-                  <div>• CEO 초기 전략 브리핑 발송</div>
+                  <div>• 제안 조직 기반 AI 에이전트 자동 구성</div>
+                  <div>• CEO에게 Admin 명의 초기 전략 브리핑 발송</div>
                 </div>
 
                 <div className="flex gap-2">

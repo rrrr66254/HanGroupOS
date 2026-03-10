@@ -45,7 +45,12 @@ def _execute_actions(ai_response: str, db: Session, user_id: int) -> tuple:
             db.flush()
             create_company_org(db, company.id, data.get("industry", "general"), "any")
             db.flush()
-            results.append(f"\n\n✅ **계열사 설립 완료** — {company.name} (ID #{company.id})\n산업: {company.industry} | 조직 구조 자동 구성됨")
+            org_plan = data.get("org_plan", [])
+            org_summary = " → ".join([f"{o.get('role','')}" for o in org_plan[:4]]) if org_plan else "표준 조직"
+            results.append(
+                f"\n\n✅ **계열사 설립 완료** — {company.name} (ID #{company.id})\n"
+                f"산업: {company.industry} | 조직: {org_summary}"
+            )
         except Exception as exc:
             results.append(f"\n\n❌ 계열사 설립 오류: {exc}")
 
@@ -649,10 +654,10 @@ def company_query(
     )
 
     delegation = [
-        {"from": "회장", "to": ceo_name, "message": f"질문 전달: {req.question[:40]}…", "status": "done"},
+        {"from": "Admin", "to": ceo_name, "message": f"질문 전달: {req.question[:40]}…", "status": "done"},
         {"from": ceo_name, "to": "운영팀", "message": "데이터 수집 및 현황 파악", "status": "done"},
         {"from": "운영팀", "to": ceo_name, "message": "보고 완료", "status": "done"},
-        {"from": ceo_name, "to": "회장", "message": "최종 보고 전달", "status": "done"},
+        {"from": ceo_name, "to": "Admin", "message": "최종 보고 전달", "status": "done"},
     ]
 
     return {
@@ -705,13 +710,14 @@ def brief_ceo(
     ceo_name = ceo_node.name if ceo_node else f"{company.name} CEO"
 
     briefing = (
-        f"안녕하세요 {ceo_name}님. 한그룹 회장입니다.\n\n"
+        f"안녕하세요 {ceo_name}님. 한그룹 Admin입니다.\n\n"
         f"'{company.name}' 설립을 진심으로 축하합니다.\n\n"
         f"회사 개요:\n"
         f"- 산업: {company.industry}\n"
         f"- 비전: {company.vision or '미정'}\n"
         f"- 설명: {company.description or '미정'}\n\n"
-        f"초기 전략 방향을 수립하고 첫 100일 실행 계획을 간략히 보고해 주세요."
+        f"초기 전략 방향을 수립하고 첫 100일 실행 계획을 간략히 보고해 주세요.\n"
+        f"(보고 시 저를 'Admin'이라고 호칭해 주세요.)"
     )
 
     provider = get_provider_from_db(db, current_user.id)
@@ -738,7 +744,7 @@ def brief_ceo(
         db.add(ceo_session)
         db.flush()
 
-    db.add(ChatMessage(session_id=ceo_session.id, role="user", content=briefing, sender_name="회장"))
+    db.add(ChatMessage(session_id=ceo_session.id, role="user", content=briefing, sender_name="Admin"))
     db.add(ChatMessage(session_id=ceo_session.id, role="assistant", content=answer, sender_name=ceo_name))
     db.commit()
 
@@ -748,9 +754,9 @@ def brief_ceo(
         "ceo_session_id": ceo_session.id,
         "answer": answer,
         "delegation": [
-            {"from": "회장", "to": ceo_name, "message": "설립 축하 및 초기 전략 브리핑 전달", "status": "done"},
+            {"from": "Admin", "to": ceo_name, "message": "설립 축하 및 초기 전략 브리핑 전달", "status": "done"},
             {"from": ceo_name, "to": "경영팀", "message": "전략 방향 수립 착수", "status": "done"},
-            {"from": ceo_name, "to": "회장", "message": "100일 실행 계획 보고 완료", "status": "done"},
+            {"from": ceo_name, "to": "Admin", "message": "100일 실행 계획 보고 완료", "status": "done"},
         ],
     }
 
@@ -862,9 +868,9 @@ def collaborate(
         "combined": combined,
         "team_discussion": team_result,
         "delegation": [
-            {"from": "회장", "to": f"{ceo_a_name} + {ceo_b_name}", "message": f"팀 협업 과제 전달: {req.task[:28]}…", "status": "done"},
+            {"from": "Admin", "to": f"{ceo_a_name} + {ceo_b_name}", "message": f"팀 협업 과제 전달: {req.task[:28]}…", "status": "done"},
             {"from": f"{ceo_a_name} ↔ {ceo_b_name}", "to": f"{ceo_a_name} ↔ {ceo_b_name}", "message": f"팀 토론 ({team_result['total_rounds']}라운드 병렬 협의)", "status": "done"},
-            {"from": f"{ceo_a_name} + {ceo_b_name}", "to": "회장", "message": "최종 공동 실행 계획 보고", "status": "done"},
+            {"from": f"{ceo_a_name} + {ceo_b_name}", "to": "Admin", "message": "최종 공동 실행 계획 보고", "status": "done"},
         ],
     }
 
