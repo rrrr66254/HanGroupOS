@@ -9,6 +9,7 @@ import {
 import { chatApi, orgApi, companiesApi, modelsApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
 import { useProviderHealth } from '../components/ProviderStatusBanner'
+import MarkdownMessage from '../components/MarkdownMessage'
 import type { ChatSession, ChatMessage } from '../types'
 import { format } from 'date-fns'
 
@@ -343,6 +344,22 @@ export default function Chairman() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // 10초마다 새 메시지 폴링 (영상 완료 알림 등 백그라운드 메시지 수신)
+  useEffect(() => {
+    if (!session) return
+    const iv = setInterval(async () => {
+      if (loading) return
+      try {
+        const res = await chatApi.messages(session.id)
+        setMessages((prev) => {
+          if (res.data.length !== prev.length) return res.data
+          return prev
+        })
+      } catch {}
+    }, 10_000)
+    return () => clearInterval(iv)
+  }, [session?.id, loading])
 
   useEffect(() => () => { if (delegTimerRef.current) clearInterval(delegTimerRef.current) }, [])
 
@@ -896,9 +913,17 @@ export default function Chairman() {
     return `${selectedExec.name}에게 질문… (Enter 전송)`
   }
 
-  // Parse AI message content and render approval/terminal result lines as colored cards
-  const renderChatContent = (content: string, showCursor: boolean) => {
-    // Split content into regular text segments and action result lines
+  // ── 이미지 헬퍼 ──────────────────────────────────────────────────────────
+  const extractImageBlock = (text: string) => {
+    const m = text.match(/\[첨부파일:\s*(.+?)\]\n```\n(data:image\/[^\n]+)\n```/s)
+    if (!m) return null
+    return { filename: m[1].trim(), dataUrl: m[2].trim() }
+  }
+  const stripImageBlock = (text: string) =>
+    text.replace(/\[첨부파일:.+?\]\n```\ndata:image\/[\s\S]+?```\n*/s, '').trim()
+
+  // Parse message content → render action cards + markdown (AI) or image preview (user)
+  const renderChatContent = (content: string, showCursor: boolean, role: 'user' | 'assistant' = 'assistant') => {
     const lines = content.split('\n')
     const segments: { type: 'text' | 'approve' | 'reject' | 'terminal_ok' | 'terminal_fail' | 'warn'; text: string }[] = []
     let textBuffer: string[] = []
@@ -929,13 +954,37 @@ export default function Chairman() {
 
     return segments.map((seg, i) => {
       if (seg.type === 'text') {
+        // ── AI 메시지: MarkdownMessage로 렌더링 ───────────────────────────
+        if (role === 'assistant') {
+          return (
+            <MarkdownMessage
+              key={i}
+              content={seg.text}
+              streaming={showCursor && i === segments.length - 1}
+            />
+          )
+        }
+        // ── 사용자 메시지: 이미지 감지 후 썸네일 + 텍스트 ──────────────
+        const img = extractImageBlock(seg.text)
+        const cleanText = img ? stripImageBlock(seg.text) : seg.text
         return (
-          <pre key={i} className="whitespace-pre-wrap font-sans text-sm leading-relaxed">
-            {seg.text}
-            {showCursor && i === segments.length - 1 && (
-              <span className="inline-block w-0.5 h-4 bg-slate-400 ml-0.5 align-middle" style={{ animation: 'blink 1s step-end infinite' }} />
+          <div key={i} className="space-y-2">
+            {img && (
+              <div className="flex flex-col items-end gap-1">
+                <img
+                  src={img.dataUrl}
+                  alt={img.filename}
+                  className="max-w-[200px] max-h-[160px] rounded-lg object-cover border border-brand/30 cursor-pointer hover:opacity-90 transition-opacity"
+                  onClick={() => window.open(img.dataUrl, '_blank')}
+                  title="클릭하여 원본 보기"
+                />
+                <span className="text-[10px] text-slate-500">{img.filename}</span>
+              </div>
             )}
-          </pre>
+            {cleanText && (
+              <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed">{cleanText}</pre>
+            )}
+          </div>
         )
       }
       const colors: Record<string, string> = {
@@ -1293,7 +1342,7 @@ export default function Chairman() {
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {renderChatContent(msg.content, msg.role === 'assistant' && loading && msg.content !== '')}
+                      {renderChatContent(msg.content, msg.role === 'assistant' && loading && msg.content !== '', msg.role as 'user' | 'assistant')}
                     </div>
                   )}
                 </div>
