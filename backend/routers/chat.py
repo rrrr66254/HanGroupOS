@@ -801,7 +801,10 @@ def collaborate(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Have two company CEOs collaborate on a task assigned by the chairman."""
+    """Have two company CEOs collaborate using Team Agent (parallel, shared context), then report to Chairman (Sub Agent)."""
+    import asyncio
+    from services.team_agent import run_team_discussion, format_team_discussion
+
     company_a = db.query(Company).filter(Company.id == req.company_a_id).first()
     company_b = db.query(Company).filter(Company.id == req.company_b_id).first()
     if not company_a or not company_b:
@@ -812,37 +815,42 @@ def collaborate(
     ceo_a_name = ceo_a.name if ceo_a else f"{company_a.name} CEO"
     ceo_b_name = ceo_b.name if ceo_b else f"{company_b.name} CEO"
 
-    provider = get_provider_from_db(db, current_user.id)
+    # ── 1단계: CEO들 팀 토론 (Team Agent — 병렬, 공유 컨텍스트) ─────────────────
+    ceo_a_provider = get_node_ai_provider(db, ceo_a) if ceo_a else get_provider_from_db(db, current_user.id)
+    ceo_b_provider = get_node_ai_provider(db, ceo_b) if ceo_b else get_provider_from_db(db, current_user.id)
 
-    # Step 1: CEO A proposes its role
-    prompt_a = (
-        f"한그룹 회장의 협업 과제입니다.\n\n"
-        f"협업 과제: {req.task}\n\n"
-        f"협업 파트너: {company_b.name} ({company_b.industry})\n\n"
-        f"{company_a.name}의 CEO로서 이 협업에서 귀사의 역할, 강점, 구체적인 기여 방안을 제시해주세요. "
-        f"간결하게 작성해주세요."
-    )
-    response_a = provider.chat([{"role": "user", "content": prompt_a}], system=CEO_SYSTEM, session_type="ceo")
+    agents = [
+        {
+            "name": ceo_a_name,
+            "provider": ceo_a_provider,
+            "system": CEO_SYSTEM + f"\n\n당신은 {company_a.name}({company_a.industry})의 CEO입니다.",
+        },
+        {
+            "name": ceo_b_name,
+            "provider": ceo_b_provider,
+            "system": CEO_SYSTEM + f"\n\n당신은 {company_b.name}({company_b.industry})의 CEO입니다.",
+        },
+    ]
 
-    # Step 2: CEO B responds, seeing CEO A's proposal
-    prompt_b = (
-        f"한그룹 회장의 협업 과제입니다.\n\n"
-        f"협업 과제: {req.task}\n\n"
-        f"협업 파트너: {company_a.name} ({company_a.industry})\n\n"
-        f"{ceo_a_name}의 제안:\n{response_a}\n\n"
-        f"{company_b.name}의 CEO로서 위 제안을 바탕으로 귀사의 역할, 보완점, 공동 실행 계획을 제시해주세요. "
-        f"간결하게 작성해주세요."
-    )
-    response_b = provider.chat([{"role": "user", "content": prompt_b}], system=CEO_SYSTEM, session_type="ceo")
+    topic = f"한그룹 회장의 협업 과제: {req.task}"
+    team_result = asyncio.run(run_team_discussion(agents, topic, max_rounds=2))
 
-    # Step 3: Synthesize combined plan
-    prompt_combined = (
-        f"다음 두 CEO의 협업 제안을 종합하여 최종 공동 실행 계획을 작성해주세요.\n\n"
-        f"[{ceo_a_name}]\n{response_a}\n\n"
-        f"[{ceo_b_name}]\n{response_b}\n\n"
-        f"명확하고 실행 가능한 공동 계획을 번호 목록으로 작성해주세요."
+    # 각 CEO의 발언 취합 (하위 호환 필드)
+    response_a = "\n\n".join(
+        m["content"] for m in team_result["all_messages"] if m["agent_name"] == ceo_a_name
     )
-    combined = provider.chat([{"role": "user", "content": prompt_combined}], system=CHAIRMAN_SYSTEM, session_type="chairman")
+    response_b = "\n\n".join(
+        m["content"] for m in team_result["all_messages"] if m["agent_name"] == ceo_b_name
+    )
+
+    # ── 2단계: 회장에게 보고 (Sub Agent — 계층 보고) ────────────────────────────
+    chairman_provider = get_provider_from_db(db, current_user.id)
+    team_summary = format_team_discussion(team_result)
+    combined = chairman_provider.chat(
+        [{"role": "user", "content": f"{team_summary}\n\n명확하고 실행 가능한 공동 계획을 번호 목록으로 작성해주세요."}],
+        system=CHAIRMAN_SYSTEM,
+        session_type="chairman",
+    )
 
     return {
         "company_a": {"id": company_a.id, "name": company_a.name},
@@ -852,11 +860,11 @@ def collaborate(
         "response_a": response_a,
         "response_b": response_b,
         "combined": combined,
+        "team_discussion": team_result,
         "delegation": [
-            {"from": "회장", "to": ceo_a_name, "message": f"협업 과제 전달: {req.task[:28]}…", "status": "done"},
-            {"from": ceo_a_name, "to": ceo_b_name, "message": "역할 및 협업 방안 제안", "status": "done"},
-            {"from": ceo_b_name, "to": ceo_a_name, "message": "보완 및 공동 계획 수립", "status": "done"},
-            {"from": ceo_a_name, "to": "회장", "message": "최종 공동 실행 계획 보고", "status": "done"},
+            {"from": "회장", "to": f"{ceo_a_name} + {ceo_b_name}", "message": f"팀 협업 과제 전달: {req.task[:28]}…", "status": "done"},
+            {"from": f"{ceo_a_name} ↔ {ceo_b_name}", "to": f"{ceo_a_name} ↔ {ceo_b_name}", "message": f"팀 토론 ({team_result['total_rounds']}라운드 병렬 협의)", "status": "done"},
+            {"from": f"{ceo_a_name} + {ceo_b_name}", "to": "회장", "message": "최종 공동 실행 계획 보고", "status": "done"},
         ],
     }
 
@@ -930,52 +938,66 @@ def multi_ceo_meeting(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Simulate a multi-CEO strategy meeting and return transcript + minutes."""
+    """Multi-CEO strategy meeting using Team Agent (parallel per round, shared context) + Chairman minutes (Sub Agent)."""
+    import asyncio
+    from services.team_agent import run_team_discussion, format_team_discussion
+
     companies = [db.query(Company).filter(Company.id == int(cid)).first() for cid in req.company_ids]
     companies = [c for c in companies if c]
     if len(companies) < 2:
         raise HTTPException(400, "최소 2개 회사가 필요합니다")
 
+    # 각 CEO 에이전트 구성 (개별 AI 프로바이더 사용)
     participants = []
+    agents = []
     for company in companies:
         node = db.query(OrgNode).filter(OrgNode.company_id == company.id, OrgNode.level == "ceo").first()
-        participants.append((company, node.name if node else f"{company.name} CEO"))
+        ceo_name = node.name if node else f"{company.name} CEO"
+        participants.append({"company": company.name, "ceo_name": ceo_name})
 
-    provider = get_provider_from_db(db, current_user.id)
+        ceo_provider = get_node_ai_provider(db, node) if node else get_provider_from_db(db, current_user.id)
+        agents.append({
+            "name": ceo_name,
+            "provider": ceo_provider,
+            "system": CEO_SYSTEM + f"\n\n당신은 {company.name}({company.industry})의 CEO입니다. 3~4문장으로 간결하게 발언해주세요.",
+        })
 
-    context_header = (
-        f"한그룹 회장 주재 긴급 경영진 회의\n"
-        f"안건: {req.topic}\n"
-        f"참석자: {', '.join(f'{name}({co.name})' for co, name in participants)}\n\n"
-    )
+    # ── Team Agent: 모든 CEO 병렬 토론 (라운드별 공유 컨텍스트) ──────────────────
+    max_rounds = getattr(req, "rounds", None) or 2
+    team_result = asyncio.run(run_team_discussion(agents, req.topic, max_rounds=max_rounds))
+
+    # 트랜스크립트 구성 (하위 호환 형식)
     transcript = []
-    accumulated = ""
+    for msg in team_result["all_messages"]:
+        # 참가자 정보 매칭
+        co_info = next((p for p in participants if p["ceo_name"] == msg["agent_name"]), None)
+        transcript.append({
+            "ceo_name": msg["agent_name"],
+            "company": co_info["company"] if co_info else "",
+            "speech": msg["content"],
+            "round": msg["round_num"],
+        })
 
-    for co, ceo_name in participants:
-        prev_block = ("이전 발언:\n" + accumulated + "\n") if accumulated else ""
-        prompt = (
-            f"{context_header}"
-            f"{prev_block}"
-            f"[{ceo_name} / {co.name} CEO] 발언 순서입니다. "
-            f"안건에 대한 귀사의 입장과 제안을 3~4문장으로 간결하게 발표해주세요."
-        )
-        speech = provider.chat([{"role": "user", "content": prompt}], system=CEO_SYSTEM, session_type="ceo")
-        transcript.append({"ceo_name": ceo_name, "company": co.name, "industry": co.industry, "speech": speech})
-        accumulated += f"[{ceo_name}]: {speech}\n\n"
-
+    # ── Sub Agent: 회장이 회의록 작성 (계층 보고) ─────────────────────────────
+    chairman_provider = get_provider_from_db(db, current_user.id)
+    team_summary = format_team_discussion(team_result)
     minutes_prompt = (
-        f"다음 경영진 회의 내용을 바탕으로 공식 회의록을 작성해주세요.\n\n"
-        f"안건: {req.topic}\n\n발언 내용:\n{accumulated}\n\n"
+        f"다음 경영진 팀 회의 내용을 바탕으로 공식 회의록을 작성해주세요.\n\n{team_summary}\n\n"
         f"주요 결정사항, 각사 역할 분담, 후속 액션 아이템을 포함하여 "
         f"구체적이고 실행 가능한 회의록을 작성해주세요."
     )
-    minutes = provider.chat([{"role": "user", "content": minutes_prompt}], system=CHAIRMAN_SYSTEM, session_type="chairman")
+    minutes = chairman_provider.chat(
+        [{"role": "user", "content": minutes_prompt}],
+        system=CHAIRMAN_SYSTEM,
+        session_type="chairman",
+    )
 
     return {
         "topic": req.topic,
         "transcript": transcript,
         "minutes": minutes,
-        "participants": [{"company": co.name, "ceo_name": name} for co, name in participants],
+        "participants": participants,
+        "team_discussion": team_result,
     }
 
 

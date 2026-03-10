@@ -1,17 +1,40 @@
 """
 AI Provider abstraction layer.
-Supports: anthropic | openai | gemini | ollama | ktransformers | airllm
+Supports: anthropic | openai | gemini | ollama | ktransformers
 Ollama is the default local provider (no API key required).
 
 저VRAM 옵션:
   ktransformers — CPU-GPU 하이브리드 (DeepSeek-R1: 24GB VRAM + RAM)
                   OpenAI 호환 서버 내장: http://localhost:30000/v1
-  airllm        — 레이어별 스트리밍 (70B → 4GB VRAM, 속도 느림)
-                  별도 서버 필요: python backend/airllm_server.py
+                  미실행 시 Ollama로 자동 폴백
 """
 import json
 from typing import Optional, List, Dict, Any
 from core.config import settings
+
+# ── KTransformers 헬스체크 캐시 (30초) ────────────────────────────────────────
+_KT_HEALTH_CACHE: dict = {"ok": None, "ts": 0.0}
+_KT_CACHE_TTL: float = 30.0
+
+
+def _is_ktransformers_alive(base_url: str) -> bool:
+    """KTransformers 서버 활성 여부 확인 (30초 캐시)."""
+    import time
+    import httpx
+
+    now = time.time()
+    if _KT_HEALTH_CACHE["ok"] is not None and now - _KT_HEALTH_CACHE["ts"] < _KT_CACHE_TTL:
+        return bool(_KT_HEALTH_CACHE["ok"])
+    try:
+        health_url = base_url.rstrip("/")
+        if health_url.endswith("/v1"):
+            health_url = health_url[:-3]
+        r = httpx.get(f"{health_url}/health", timeout=2.0)
+        ok = r.status_code == 200
+    except Exception:
+        ok = False
+    _KT_HEALTH_CACHE.update({"ok": ok, "ts": now})
+    return ok
 
 
 class AIProvider:
@@ -31,8 +54,8 @@ class AIProvider:
         self.model = model or self._get_default_model()
         self.base_url = base_url or ""
 
-        # ktransformers / airllm: no API key needed (local servers)
-        _local_providers = ("ollama", "ktransformers", "airllm")
+        # ktransformers: no API key needed (local server)
+        _local_providers = ("ollama", "ktransformers")
         if not self.api_key and self.provider not in _local_providers:
             self.provider = "ollama"
             self.model = settings.OLLAMA_MODEL
@@ -52,7 +75,6 @@ class AIProvider:
             "gemini": settings.GEMINI_DEFAULT_MODEL,
             "ollama": settings.OLLAMA_MODEL,
             "ktransformers": settings.KTRANSFORMERS_MODEL,
-            "airllm": settings.AIRLLM_MODEL,
         }
         return mapping.get(self.provider, settings.OLLAMA_MODEL)
 
@@ -82,19 +104,17 @@ class AIProvider:
             elif self.provider == "gemini":
                 return self._call_gemini(messages, system, max_tokens)
             elif self.provider == "ktransformers":
-                return self._call_openai_compat(
-                    messages, system, max_tokens,
-                    base_url=self.base_url or settings.KTRANSFORMERS_BASE_URL,
-                    api_key=self.api_key or "ktransformers",
-                    provider_name="KTransformers",
-                )
-            elif self.provider == "airllm":
-                return self._call_openai_compat(
-                    messages, system, max_tokens,
-                    base_url=self.base_url or settings.AIRLLM_BASE_URL,
-                    api_key=self.api_key or "airllm",
-                    provider_name="AirLLM",
-                )
+                kt_url = self.base_url or settings.KTRANSFORMERS_BASE_URL
+                if _is_ktransformers_alive(kt_url):
+                    return self._call_openai_compat(
+                        messages, system, max_tokens,
+                        base_url=kt_url,
+                        api_key=self.api_key or "ktransformers",
+                        provider_name="KTransformers",
+                    )
+                else:
+                    print("[AIProvider] KTransformers 미실행 → Ollama 자동 폴백")
+                    return self._call_ollama(messages, system, max_tokens)
             else:
                 # Default: ollama
                 return self._call_ollama(messages, system, max_tokens)
@@ -154,7 +174,7 @@ class AIProvider:
     ) -> str:
         """
         OpenAI 호환 API를 사용하는 범용 메서드.
-        KTransformers, AirLLM 등 OpenAI 호환 서버에 사용합니다.
+        KTransformers 등 OpenAI 호환 서버에 사용합니다.
         """
         from openai import OpenAI
 
@@ -174,18 +194,11 @@ class AIProvider:
         except Exception as e:
             err = str(e)
             if "connect" in err.lower() or "Connection" in err:
-                if provider_name == "KTransformers":
-                    hint = (
-                        f"\n\n**KTransformers 서버를 시작하세요:**\n"
-                        f"```\npip install ktransformers\n"
-                        f"ktransformers --model {self.model} --port 30000\n```"
-                    )
-                else:
-                    hint = (
-                        f"\n\n**AirLLM 서버를 시작하세요:**\n"
-                        f"```\npip install airllm bitsandbytes\n"
-                        f"python backend/airllm_server.py --model {self.model} --port 11435\n```"
-                    )
+                hint = (
+                    f"\n\n**{provider_name} 서버를 시작하세요:**\n"
+                    f"```\npip install ktransformers\n"
+                    f"ktransformers --model {self.model} --port 30000\n```"
+                )
                 raise ConnectionError(f"⚠️ {provider_name} 서버 연결 실패: {err}{hint}")
             raise
 

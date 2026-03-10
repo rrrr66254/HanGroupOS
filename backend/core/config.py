@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./han_group.db"
 
     # AI Providers
-    DEFAULT_PROVIDER: str = "ollama"  # ollama | anthropic | openai | gemini | ktransformers | airllm
+    DEFAULT_PROVIDER: str = "ollama"  # ollama | anthropic | openai | gemini | ktransformers
     ANTHROPIC_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
@@ -34,15 +34,10 @@ class Settings(BaseSettings):
     # 실행: ktransformers --model Qwen/Qwen2.5-7B-Instruct --port 30000
     # DeepSeek-R1 (24GB VRAM + 382GB RAM): ktransformers --model deepseek-ai/DeepSeek-R1
     # OpenAI 호환 API를 http://localhost:30000/v1 에 노출
+    # ⚠️ 미실행 시 Ollama로 자동 폴백 (KTRANSFORMERS_FALLBACK_TO_OLLAMA=True)
     KTRANSFORMERS_BASE_URL: str = "http://localhost:30000/v1"
     KTRANSFORMERS_MODEL: str = "Qwen/Qwen2.5-7B-Instruct"
-
-    # ── AirLLM (레이어별 스트리밍, 극저VRAM — 70B → 4GB VRAM) ─────────────────
-    # 설치: pip install airllm bitsandbytes
-    # 실행: python backend/airllm_server.py --model meta-llama/Meta-Llama-3-70B --compression 4bit
-    # 주의: 레이어별 로딩으로 속도가 매우 느림 (배치/비실시간 용도에 적합)
-    AIRLLM_BASE_URL: str = "http://localhost:11435/v1"
-    AIRLLM_MODEL: str = "meta-llama/Meta-Llama-3-70B"
+    KTRANSFORMERS_FALLBACK_TO_OLLAMA: bool = True  # 서버 미실행 시 Ollama 자동 폴백
 
     # ── Context Engineer (토큰 최적화) ────────────────────────────────────────
     # 모델에 전송하는 총 컨텍스트 토큰 한도 (응답 토큰 제외)
