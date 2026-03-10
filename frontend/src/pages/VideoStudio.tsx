@@ -194,7 +194,7 @@ export default function VideoStudio() {
               </div>
             ) : (
               <div className="bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[10px] text-amber-400">
-                API 키 필요: 관리자 → 외부 API 키 관리에서 <strong>huggingface</strong> 서비스로 HF 토큰을 등록하세요. 무료 티어 사용 가능.
+                API 키 필요: 관리자 → <strong>외부 API 키</strong> 탭에서 <strong>huggingface</strong> 서비스로 HF 토큰을 등록하세요. 무료 티어 사용 가능.
               </div>
             )}
 

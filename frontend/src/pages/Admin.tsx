@@ -1,7 +1,23 @@
 import { useEffect, useState } from 'react'
-import { Settings, Key, Cpu, Check, X, Trash2, Plus } from 'lucide-react'
-import { modelsApi } from '../api/client'
+import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe } from 'lucide-react'
+import { modelsApi, externalKeyApi } from '../api/client'
 import type { ModelCatalog, ProviderConfig } from '../types'
+
+interface ExternalKey {
+  id: number
+  service: string
+  label: string
+  is_active: boolean
+  created_at: string
+}
+
+const EXT_SERVICE_INFO: Record<string, { description: string; color: string }> = {
+  huggingface: { description: '영상 스튜디오 (HF Inference API)', color: 'text-yellow-400' },
+  json2video: { description: '영상 스튜디오 (프레젠테이션 영상)', color: 'text-indigo-400' },
+  serpapi: { description: '시장분석 / 게임플랫폼 검색', color: 'text-green-400' },
+  newsapi: { description: '뉴스 수집', color: 'text-blue-400' },
+  openai: { description: '이미지 분석 (GPT-4o Vision)', color: 'text-emerald-400' },
+}
 
 const PROVIDER_INFO: Record<string, { label: string; color: string; description: string }> = {
   anthropic: { label: 'Anthropic Claude', color: 'text-orange-400', description: 'Claude Opus, Sonnet, Haiku' },
@@ -15,11 +31,15 @@ export default function Admin() {
   const [catalog, setCatalog] = useState<ModelCatalog[]>([])
   const [providers, setProviders] = useState<ProviderConfig[]>([])
   const [health, setHealth] = useState<Record<string, { status: string; model: string }>>({})
-  const [tab, setTab] = useState<'providers' | 'catalog' | 'system'>('providers')
+  const [tab, setTab] = useState<'providers' | 'catalog' | 'external-keys' | 'system'>('providers')
 
   const [newProvider, setNewProvider] = useState({
     provider: 'anthropic', api_key: '', model_override: '', base_url: '',
   })
+
+  const [extKeys, setExtKeys] = useState<ExternalKey[]>([])
+  const [newExtKey, setNewExtKey] = useState({ service: '', label: '', api_key: '' })
+  const [extError, setExtError] = useState('')
 
   const loadAll = async () => {
     modelsApi.catalog().then((r) => setCatalog(r.data))
@@ -27,7 +47,9 @@ export default function Admin() {
     modelsApi.health().then((r) => setHealth(r.data))
   }
 
-  useEffect(() => { loadAll() }, [])
+  const loadExtKeys = () => externalKeyApi.list().then((r) => setExtKeys(r.data))
+
+  useEffect(() => { loadAll(); loadExtKeys() }, [])
 
   const saveProvider = async () => {
     await modelsApi.saveProvider(newProvider)
@@ -40,13 +62,34 @@ export default function Admin() {
     loadAll()
   }
 
+  const saveExtKey = async () => {
+    setExtError('')
+    if (!newExtKey.service.trim() || !newExtKey.api_key.trim()) {
+      setExtError('서비스명과 API 키는 필수입니다.')
+      return
+    }
+    try {
+      await externalKeyApi.create({ ...newExtKey, label: newExtKey.label || newExtKey.service })
+      setNewExtKey({ service: '', label: '', api_key: '' })
+      loadExtKeys()
+    } catch (e: any) {
+      setExtError(e.response?.data?.detail || '등록 실패')
+    }
+  }
+
+  const deleteExtKey = async (id: number) => {
+    await externalKeyApi.delete(id)
+    loadExtKeys()
+  }
+
   return (
     <div className="space-y-4 animate-fade-in">
       {/* Tab bar */}
-      <div className="flex items-center gap-1 bg-bg-card border border-bg-border rounded-xl p-1 w-fit">
+      <div className="flex items-center gap-1 bg-bg-card border border-bg-border rounded-xl p-1 w-fit flex-wrap">
         {[
           { id: 'providers', label: 'AI Provider 설정' },
           { id: 'catalog', label: '모델 카탈로그' },
+          { id: 'external-keys', label: '외부 API 키' },
           { id: 'system', label: '시스템 정보' },
         ].map((t) => (
           <button
@@ -184,6 +227,99 @@ export default function Admin() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'external-keys' && (
+        <div className="space-y-4">
+          {/* Service guide */}
+          <div className="card p-4">
+            <h3 className="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-2">
+              <Globe size={13} /> 주요 외부 서비스
+            </h3>
+            <div className="space-y-1.5">
+              {Object.entries(EXT_SERVICE_INFO).map(([svc, info]) => (
+                <div key={svc} className="flex items-center gap-3 text-[11px]">
+                  <code className={`font-mono font-semibold ${info.color} w-24 shrink-0`}>{svc}</code>
+                  <span className="text-slate-500">{info.description}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Register form */}
+          <div className="card p-4">
+            <h3 className="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-2">
+              <Key size={13} /> 외부 API 키 등록
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+              <div>
+                <label className="block text-[10px] text-slate-500 mb-1">서비스명 *</label>
+                <input
+                  className="input text-xs font-mono"
+                  value={newExtKey.service}
+                  onChange={(e) => setNewExtKey((p) => ({ ...p, service: e.target.value.toLowerCase().trim() }))}
+                  placeholder="huggingface / json2video / serpapi"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-500 mb-1">레이블 (선택)</label>
+                <input
+                  className="input text-xs"
+                  value={newExtKey.label}
+                  onChange={(e) => setNewExtKey((p) => ({ ...p, label: e.target.value }))}
+                  placeholder="내 HF 토큰"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-500 mb-1">API 키 *</label>
+                <input
+                  className="input text-xs font-mono"
+                  type="password"
+                  value={newExtKey.api_key}
+                  onChange={(e) => setNewExtKey((p) => ({ ...p, api_key: e.target.value }))}
+                  placeholder="hf-... / sk-... / ..."
+                />
+              </div>
+            </div>
+            {extError && (
+              <p className="text-[11px] text-red-400 mb-2">{extError}</p>
+            )}
+            <button onClick={saveExtKey} className="btn-primary text-xs flex items-center gap-2">
+              <Plus size={12} /> 등록
+            </button>
+          </div>
+
+          {/* Registered keys */}
+          {extKeys.length > 0 && (
+            <div className="card p-4">
+              <h3 className="text-xs font-semibold text-slate-300 mb-3">등록된 외부 API 키</h3>
+              <div className="space-y-2">
+                {extKeys.map((k) => (
+                  <div key={k.id} className="flex items-center justify-between bg-bg-elevated rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${k.is_active ? 'bg-success' : 'bg-slate-600'}`} />
+                      <div>
+                        <div className={`text-xs font-semibold font-mono ${EXT_SERVICE_INFO[k.service]?.color || 'text-slate-300'}`}>
+                          {k.service}
+                        </div>
+                        <div className="text-[9px] text-slate-500">{k.label}</div>
+                      </div>
+                    </div>
+                    <button onClick={() => deleteExtKey(k.id)} className="text-slate-600 hover:text-danger p-1">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {extKeys.length === 0 && (
+            <div className="card p-6 text-center text-xs text-slate-600">
+              등록된 외부 API 키가 없습니다.
             </div>
           )}
         </div>

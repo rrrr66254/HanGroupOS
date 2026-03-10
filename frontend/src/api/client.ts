@@ -160,6 +160,13 @@ export const modelsApi = {
   ollamaStatus: () => api.get('/models/ollama/status'),
 }
 
+// ── External API Keys ──────────────────────────────────────────────────────────
+export const externalKeyApi = {
+  list: () => api.get('/data/api-keys'),
+  create: (data: object) => api.post('/data/api-keys', data),
+  delete: (id: number) => api.delete(`/data/api-keys/${id}`),
+}
+
 // ── Memory ────────────────────────────────────────────────────────────────────
 export const memoryApi = {
   list: (params?: object) => api.get('/memory', { params }),

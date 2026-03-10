@@ -344,11 +344,19 @@ def _start_video_job(job_id: int, db: Session) -> bool:
     if provider == "json2video":
         api_key = _get_json2video_key(db)
         if not api_key:
+            job.status = "failed"
+            job.error_msg = "json2video API 키가 없습니다. 관리자 → 외부 API 키 탭에서 'json2video' 서비스로 등록하세요."
+            db.commit()
+            _notify_chat(db, job)
             return False
         t = threading.Thread(target=_run_json2video_generation, args=(job_id, api_key), daemon=True)
     else:
         token = _get_hf_token(db)
         if not token:
+            job.status = "failed"
+            job.error_msg = "HuggingFace API 토큰이 없습니다. 관리자 → 외부 API 키 탭에서 'huggingface' 서비스로 등록하세요."
+            db.commit()
+            _notify_chat(db, job)
             return False
         t = threading.Thread(target=_run_generation, args=(job_id, token), daemon=True)
 

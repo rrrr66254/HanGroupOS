@@ -485,7 +485,13 @@ def _process_video_requests(content: str, db, company_id, user_id: int, session_
     from datetime import datetime as _dt
 
     req_ids = []
+    # Primary pattern: well-formed <<VIDEO_REQUEST:{...}>>
     pattern = re.compile(r'<<VIDEO_REQUEST:(.*?)>>', re.DOTALL)
+    # Fallback pattern: AI forgot closing >>, e.g. <<VIDEO_REQUEST:{...}}}
+    fallback_pattern = re.compile(r'<<VIDEO_REQUEST:(\{.*?\})\}*\s*$', re.DOTALL | re.MULTILINE)
+
+    # Collect all matches (primary first, then fallback on unmatched)
+    matched_spans = []
     for match in pattern.finditer(content):
         raw = match.group(1).strip()
         try:
@@ -520,10 +526,31 @@ def _process_video_requests(content: str, db, company_id, user_id: int, session_
             )
             db.add(approval)
             db.flush()
-            req_ids.append((job.id, prompt))
+
+            # Check if API key is available for this provider
+            try:
+                from routers.video_gen import _get_hf_token, _get_json2video_key, SUPPORTED_MODELS as _MODELS
+                model_info = next((m for m in _MODELS if m["id"] == model_id), {})
+                provider = model_info.get("provider", "hf-inference")
+                if provider == "json2video":
+                    has_key = bool(_get_json2video_key(db))
+                    key_service = "json2video"
+                else:
+                    has_key = bool(_get_hf_token(db))
+                    key_service = "huggingface"
+            except Exception:
+                has_key = True
+                key_service = ""
+
+            matched_spans.append(match.span())
+            req_ids.append((job.id, prompt, has_key, key_service))
         except Exception:
-            pass
+            matched_spans.append(match.span())
+
+    # Strip matched primary blocks
     clean = pattern.sub("", content).strip()
+    # Strip any leftover <<VIDEO_REQUEST: ... that didn't have closing >>
+    clean = re.sub(r'<<VIDEO_REQUEST:[^>]*(?:>>)?', '', clean, flags=re.DOTALL).strip()
     return clean, req_ids
 
 
@@ -645,8 +672,16 @@ def send_message(
             terminal_notes += f"\n\n📋 **터미널 명령 요청 제출됨** (요청 #{tr.id})\n`{tr.command}`\n사유: {tr.reason}\nAdmin이 승인하면 터미널 페이지에서 실행됩니다."
     # Video request notifications
     video_notes = ""
-    for job_id, prompt in video_reqs:
-        video_notes += f"\n\n🎬 **영상 생성 요청 제출됨** (작업 #{job_id})\n프롬프트: `{prompt[:80]}`\n승인함에서 확인 후 영상 스튜디오에서 생성됩니다."
+    for item in video_reqs:
+        job_id, prompt = item[0], item[1]
+        has_key = item[2] if len(item) > 2 else True
+        key_service = item[3] if len(item) > 3 else ""
+        note = f"\n\n🎬 **영상 생성 요청 제출됨** (작업 #{job_id})\n프롬프트: `{prompt[:80]}`\n"
+        if not has_key and key_service:
+            note += f"⚠️ **API 키 없음**: `{key_service}` 키가 등록되지 않아 영상을 생성할 수 없습니다.\n관리자 → **외부 API 키** 탭에서 `{key_service}` 서비스로 등록하세요."
+        else:
+            note += "승인함에서 확인 후 영상 스튜디오에서 생성됩니다."
+        video_notes += note
     final_content = clean_response + "".join(action_results) + "".join(api_key_results) + "".join(model_update_results) + "".join(approval_results) + "".join(code_results) + terminal_notes + video_notes
 
     # Save AI response
@@ -848,8 +883,16 @@ def stream_message(
                     terminal_notes += f"\n\n⏳ **터미널 명령 요청 제출됨** (ID #{tr.id})\n`{tr.command}`\n사유: {tr.reason}\n관리자 승인 대기 중..."
             # Append video request notifications
             video_notes = ""
-            for job_id, prompt in video_reqs:
-                video_notes += f"\n\n🎬 **영상 생성 요청 제출됨** (작업 #{job_id})\n프롬프트: `{prompt[:80]}`\n승인함 확인 후 영상 스튜디오에서 생성됩니다."
+            for item in video_reqs:
+                job_id, prompt = item[0], item[1]
+                has_key = item[2] if len(item) > 2 else True
+                key_service = item[3] if len(item) > 3 else ""
+                note = f"\n\n🎬 **영상 생성 요청 제출됨** (작업 #{job_id})\n프롬프트: `{prompt[:80]}`\n"
+                if not has_key and key_service:
+                    note += f"⚠️ **API 키 없음**: `{key_service}` 키가 등록되지 않아 영상을 생성할 수 없습니다.\n관리자 → **외부 API 키** 탭에서 `{key_service}` 서비스로 등록하세요."
+                else:
+                    note += "승인함 확인 후 영상 스튜디오에서 생성됩니다."
+                video_notes += note
             final = clean + "".join(action_results) + "".join(model_update_results) + "".join(approval_results) + terminal_notes + video_notes + "".join(api_key_results) + "".join(code_results)
             ai_msg = ChatMessage(
                 session_id=session_id,
