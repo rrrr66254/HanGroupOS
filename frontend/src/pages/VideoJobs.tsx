@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Film, Trash2, RefreshCw, AlertCircle, CheckCircle,
   Loader2, Play, Download, Filter, Search, ExternalLink,
-  Building2,
+  Building2, BarChart2, Clock, TrendingUp, TrendingDown,
 } from 'lucide-react'
 import { videoApi, companiesApi } from '../api/client'
 import { useNavigate } from 'react-router-dom'
@@ -23,6 +23,17 @@ interface VideoJob {
 interface Company {
   id: number
   name: string
+}
+
+interface VideoStats {
+  total: number
+  by_status: Record<string, number>
+  by_model: Record<string, number>
+  by_provider: Record<string, number>
+  done_count: number
+  failed_count: number
+  success_rate: number
+  avg_duration_sec: number | null
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -49,6 +60,8 @@ type StatusFilter = 'all' | 'pending' | 'running' | 'done' | 'failed'
 export default function VideoJobs() {
   const [jobs, setJobs] = useState<VideoJob[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
+  const [stats, setStats] = useState<VideoStats | null>(null)
+  const [statsOpen, setStatsOpen] = useState(true)
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [companyFilter, setCompanyFilter] = useState<number | undefined>(undefined)
@@ -59,6 +72,8 @@ export default function VideoJobs() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const navigate = useNavigate()
+
+  const loadStats = () => videoApi.stats().then((r) => setStats(r.data)).catch(() => {})
 
   const loadJobs = async () => {
     try {
@@ -71,6 +86,7 @@ export default function VideoJobs() {
 
   useEffect(() => {
     companiesApi.list().then((r) => setCompanies(r.data))
+    loadStats()
   }, [])
 
   useEffect(() => {
@@ -100,7 +116,7 @@ export default function VideoJobs() {
       await videoApi.deleteJob(job.id)
       if (previewJob?.id === job.id) setPreviewJob(null)
       setSelectedIds((prev) => { const s = new Set(prev); s.delete(job.id); return s })
-      await loadJobs()
+      await Promise.all([loadJobs(), loadStats()])
     } finally {
       setDeleting(null)
     }
@@ -113,7 +129,7 @@ export default function VideoJobs() {
       await videoApi.batchDelete(Array.from(selectedIds))
       if (previewJob && selectedIds.has(previewJob.id)) setPreviewJob(null)
       setSelectedIds(new Set())
-      await loadJobs()
+      await Promise.all([loadJobs(), loadStats()])
     } finally {
       setBatchDeleting(false)
     }
@@ -224,6 +240,92 @@ export default function VideoJobs() {
             </button>
           </div>
         </div>
+
+        {/* Stats dashboard */}
+        {statsOpen && stats && (
+          <div className="px-6 py-3 border-b border-bg-border bg-bg-card/50">
+            <div className="flex items-center gap-2 mb-2">
+              <BarChart2 size={11} className="text-slate-500" />
+              <span className="text-[10px] text-slate-500 font-medium">통계 대시보드</span>
+              <button
+                onClick={() => setStatsOpen(false)}
+                className="ml-auto text-[10px] text-slate-600 hover:text-slate-400"
+              >접기</button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
+              {/* 전체 잡 */}
+              <div className="bg-bg-base border border-bg-border rounded p-2.5">
+                <p className="text-[10px] text-slate-500">전체 잡</p>
+                <p className="text-lg font-bold text-slate-100 mt-0.5">{stats.total}</p>
+              </div>
+              {/* 완료 */}
+              <div className="bg-green-500/5 border border-green-500/15 rounded p-2.5">
+                <p className="text-[10px] text-green-500">완료</p>
+                <p className="text-lg font-bold text-green-400 mt-0.5">{stats.done_count}</p>
+              </div>
+              {/* 실패 */}
+              <div className="bg-red-500/5 border border-red-500/15 rounded p-2.5">
+                <p className="text-[10px] text-red-500">실패</p>
+                <p className="text-lg font-bold text-red-400 mt-0.5">{stats.failed_count}</p>
+              </div>
+              {/* 성공률 */}
+              <div className="bg-bg-base border border-bg-border rounded p-2.5">
+                <div className="flex items-center gap-1">
+                  {stats.success_rate >= 50
+                    ? <TrendingUp size={10} className="text-green-400" />
+                    : <TrendingDown size={10} className="text-red-400" />
+                  }
+                  <p className="text-[10px] text-slate-500">성공률</p>
+                </div>
+                <p className={`text-lg font-bold mt-0.5 ${stats.success_rate >= 50 ? 'text-green-400' : 'text-red-400'}`}>
+                  {stats.success_rate}%
+                </p>
+              </div>
+              {/* 평균 생성 시간 */}
+              <div className="bg-bg-base border border-bg-border rounded p-2.5">
+                <div className="flex items-center gap-1">
+                  <Clock size={10} className="text-slate-500" />
+                  <p className="text-[10px] text-slate-500">평균 시간</p>
+                </div>
+                <p className="text-sm font-bold text-slate-200 mt-0.5">
+                  {stats.avg_duration_sec != null
+                    ? stats.avg_duration_sec >= 60
+                      ? `${Math.floor(stats.avg_duration_sec / 60)}분 ${stats.avg_duration_sec % 60}초`
+                      : `${stats.avg_duration_sec}초`
+                    : '—'}
+                </p>
+              </div>
+              {/* 최다 사용 모델 */}
+              <div className="bg-bg-base border border-bg-border rounded p-2.5 col-span-1">
+                <p className="text-[10px] text-slate-500">최다 사용 모델</p>
+                {Object.keys(stats.by_model).length > 0 ? (
+                  <p className="text-[10px] font-semibold text-brand-light mt-0.5 truncate">
+                    {Object.entries(stats.by_model).sort(([, a], [, b]) => b - a)[0]?.[0]?.split('/').pop()}
+                    <span className="text-slate-500 ml-1">
+                      ({Object.entries(stats.by_model).sort(([, a], [, b]) => b - a)[0]?.[1]}회)
+                    </span>
+                  </p>
+                ) : <p className="text-[10px] text-slate-600 mt-0.5">—</p>}
+                {/* 프로바이더 분포 */}
+                <div className="flex gap-1 mt-1.5">
+                  {Object.entries(stats.by_provider).map(([p, c]) => (
+                    <span key={p} className="text-[9px] text-slate-500 bg-bg-border rounded px-1">
+                      {p.replace('-', '')}:{c}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {!statsOpen && (
+          <div className="px-6 py-1.5 border-b border-bg-border bg-bg-card/50 flex items-center gap-2">
+            <BarChart2 size={11} className="text-slate-600" />
+            <button onClick={() => setStatsOpen(true)} className="text-[10px] text-slate-600 hover:text-slate-400">
+              통계 대시보드 펼치기
+            </button>
+          </div>
+        )}
 
         {/* Status filter tabs */}
         <div className="flex items-center gap-1 px-6 py-2 border-b border-bg-border bg-bg-card">

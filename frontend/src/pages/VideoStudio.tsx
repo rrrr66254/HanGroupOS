@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Film, Play, Plus, Trash2, RefreshCw, AlertCircle, CheckCircle, Clock, Loader2 } from 'lucide-react'
-import { videoApi } from '../api/client'
+import {
+  Film, Play, Plus, Trash2, RefreshCw, AlertCircle, CheckCircle,
+  Clock, Loader2, Users, Building2, Download,
+} from 'lucide-react'
+import { videoApi, companiesApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
 
 interface VideoModel {
@@ -12,6 +15,7 @@ interface VideoModel {
 
 interface VideoJob {
   id: number
+  company_id: number | null
   prompt: string
   model_id: string
   provider: string
@@ -21,6 +25,11 @@ interface VideoJob {
   duration_sec: number | null
   created_at: string
   finished_at: string | null
+}
+
+interface Company {
+  id: number
+  name: string
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -46,6 +55,7 @@ const EST_SECONDS: Record<string, number> = {
 export default function VideoStudio() {
   const [models, setModels] = useState<VideoModel[]>([])
   const [jobs, setJobs] = useState<VideoJob[]>([])
+  const [companies, setCompanies] = useState<Company[]>([])
   const [prompt, setPrompt] = useState('')
   const [selectedModel, setSelectedModel] = useState('')
   const [generating, setGenerating] = useState(false)
@@ -57,6 +67,10 @@ export default function VideoStudio() {
   const wsRef = useRef<WebSocket | null>(null)
   const [wsProgress, setWsProgress] = useState<{ progress: number; message: string } | null>(null)
   const token = useAuthStore((s) => s.token)
+
+  // 회사 ID → 이름 맵
+  const companyMap: Record<number, string> = {}
+  companies.forEach((c) => { companyMap[c.id] = c.name })
 
   const formatElapsed = (createdAt: string) => {
     const elapsed = Math.floor((now - new Date(createdAt).getTime()) / 1000)
@@ -71,12 +85,18 @@ export default function VideoStudio() {
     return Math.min(Math.round((elapsed / est) * 100), 95)
   }
 
+  const selectedModelInfo = models.find((m) => m.id === selectedModel)
+  const falModels = models.filter((m) => m.provider === 'fal-ai')
+  const hfModels = models.filter((m) => m.provider === 'hf-inference')
+  const j2vModels = models.filter((m) => m.provider === 'json2video')
+
   useEffect(() => {
     videoApi.models().then((r) => {
       setModels(r.data)
       const rec = r.data.find((m: VideoModel) => m.recommended)
       if (rec) setSelectedModel(rec.id)
     })
+    companiesApi.list().then((r) => setCompanies(r.data))
     loadJobs()
   }, [])
 
@@ -86,14 +106,9 @@ export default function VideoStudio() {
     if (hasActive) {
       pollRef.current = setInterval(loadJobs, 4000)
     } else {
-      if (pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
-      }
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
     }
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
-    }
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [jobs])
 
   // 1초마다 now 갱신 (진행률 타이머용)
@@ -106,32 +121,21 @@ export default function VideoStudio() {
 
   // WebSocket 연결: 선택된 잡이 실행 중일 때 실시간 진행률 수신
   useEffect(() => {
-    if (wsRef.current) {
-      wsRef.current.close()
-      wsRef.current = null
-    }
+    if (wsRef.current) { wsRef.current.close(); wsRef.current = null }
     setWsProgress(null)
-
     if (!selected || (selected.status !== 'pending' && selected.status !== 'running') || !token) return
-
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${proto}//${window.location.host}/api/video/ws/${selected.id}?token=${token}`)
     wsRef.current = ws
-
     ws.onmessage = (e) => {
       try {
         const data = JSON.parse(e.data)
-        if (data.type === 'progress') {
-          setWsProgress({ progress: data.progress, message: data.message })
-        } else if (data.type === 'done') {
-          setWsProgress(null)
-          loadJobs()
-        }
+        if (data.type === 'progress') setWsProgress({ progress: data.progress, message: data.message })
+        else if (data.type === 'done') { setWsProgress(null); loadJobs() }
       } catch { /* ignore */ }
     }
     ws.onerror = () => { wsRef.current = null }
     ws.onclose = () => { wsRef.current = null }
-
     return () => { ws.close() }
   }, [selected?.id, selected?.status, token])
 
@@ -176,10 +180,14 @@ export default function VideoStudio() {
       <div className="w-80 border-r border-bg-border flex flex-col bg-bg-card">
         {/* Header */}
         <div className="p-4 border-b border-bg-border">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-1">
             <Film size={18} className="text-brand-light" />
             <h1 className="text-sm font-semibold text-slate-100">영상 스튜디오</h1>
+            <span className="flex items-center gap-1 text-[9px] bg-brand/15 text-brand-light border border-brand/20 rounded px-1.5 py-0.5 ml-auto">
+              <Users size={9} /> 공유 스페이스
+            </span>
           </div>
+          <p className="text-[10px] text-slate-600 mb-4">모든 회사가 함께 사용하는 영상 생성 공간입니다.</p>
 
           {/* Prompt input */}
           <div className="space-y-2">
@@ -191,18 +199,36 @@ export default function VideoStudio() {
               className="w-full bg-bg-base border border-bg-border rounded text-xs text-slate-200 p-2.5 resize-none h-20 focus:outline-none focus:border-brand/60 placeholder:text-slate-600"
             />
 
-            {/* Model selector */}
+            {/* Model selector — optgroup으로 구분 */}
             <label className="text-[10px] text-slate-500">생성 모델</label>
             <select
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
               className="w-full bg-bg-base border border-bg-border rounded text-xs text-slate-200 p-2 focus:outline-none focus:border-brand/60"
             >
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
+              {falModels.length > 0 && (
+                <optgroup label="FAL-AI (권장 — 빠른 추론)">
+                  {falModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.recommended ? '★ ' : ''}{m.label}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {hfModels.length > 0 && (
+                <optgroup label="HuggingFace Inference">
+                  {hfModels.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                </optgroup>
+              )}
+              {j2vModels.length > 0 && (
+                <optgroup label="JSON2Video">
+                  {j2vModels.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
 
             {error && (
@@ -213,23 +239,21 @@ export default function VideoStudio() {
             )}
 
             {/* 모델별 API 키 안내 */}
-            {selectedModel === 'json2video/presentation' ? (
+            {selectedModelInfo?.provider === 'json2video' ? (
               <div className="bg-indigo-500/10 border border-indigo-500/20 rounded p-2.5 text-[10px] text-indigo-300 space-y-1">
                 <div className="font-semibold text-indigo-200">JSON2Video — 프레젠테이션 영상</div>
-                <div>무료 600초 · 워터마크 포함 · 텍스트 슬라이드 영상 생성</div>
-                <div>API 키: 관리자 → API 키 관리 → <strong>json2video</strong> 서비스로 등록</div>
-                <a
-                  href="https://json2video.com/get-api-key/"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-block text-indigo-400 underline"
-                >
-                  무료 API 키 발급 →
-                </a>
+                <div>무료 600초 · 워터마크 포함 · 텍스트 슬라이드</div>
+                <div>관리자 → API 키 관리 → <strong>json2video</strong> 서비스로 등록</div>
+              </div>
+            ) : selectedModelInfo?.provider === 'fal-ai' ? (
+              <div className="bg-violet-500/10 border border-violet-500/20 rounded p-2.5 text-[10px] text-violet-300 space-y-1">
+                <div className="font-semibold text-violet-200">FAL-AI 모델</div>
+                <div>관리자 → API 키 관리 → <strong>fal-ai</strong> 서비스로 키 등록 (권장)</div>
+                <div className="text-violet-400">키 없을 시 HuggingFace 키로 자동 폴백</div>
               </div>
             ) : (
               <div className="bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[10px] text-amber-400">
-                API 키 필요: 관리자 → <strong>외부 API 키</strong> 탭에서 <strong>huggingface</strong> 서비스로 HF 토큰을 등록하세요. 무료 티어 사용 가능.
+                관리자 → <strong>외부 API 키</strong> 탭 → <strong>huggingface</strong> 서비스로 HF 토큰 등록
               </div>
             )}
 
@@ -237,7 +261,6 @@ export default function VideoStudio() {
             {selectedModel === 'json2video/presentation' && (
               <div className="border border-indigo-500/20 rounded p-2.5 space-y-2" style={{ background: 'rgba(99,102,241,0.05)' }}>
                 <p className="text-[10px] font-semibold text-indigo-300">고급 템플릿 설정</p>
-
                 <div>
                   <label className="text-[10px] text-slate-500 block mb-1">템플릿 스타일</label>
                   <select
@@ -250,7 +273,6 @@ export default function VideoStudio() {
                     <option value="modern">모던형 — 풀스크린 대형 타이포그래피</option>
                   </select>
                 </div>
-
                 {j2vConfig.template === 'corporate' && (
                   <div>
                     <label className="text-[10px] text-slate-500 block mb-1">로고 텍스트 (선택)</label>
@@ -263,7 +285,6 @@ export default function VideoStudio() {
                     />
                   </div>
                 )}
-
                 <div>
                   <label className="text-[10px] text-slate-500 block mb-1">배경 이미지 URL (선택)</label>
                   <input
@@ -274,7 +295,6 @@ export default function VideoStudio() {
                     className="w-full bg-bg-base border border-bg-border rounded text-xs text-slate-200 p-1.5 focus:outline-none focus:border-brand/60 placeholder:text-slate-600"
                   />
                 </div>
-
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -301,10 +321,10 @@ export default function VideoStudio() {
           </div>
         </div>
 
-        {/* Job list */}
+        {/* Job list — 전체 회사의 생성 기록 */}
         <div className="flex-1 overflow-y-auto">
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-[10px] text-slate-500">생성 기록</span>
+            <span className="text-[10px] text-slate-500">전체 생성 기록 ({jobs.length})</span>
             <button onClick={loadJobs} className="text-slate-500 hover:text-slate-300 transition-colors">
               <RefreshCw size={12} />
             </button>
@@ -322,18 +342,26 @@ export default function VideoStudio() {
                 }`}
               >
                 <div className="flex items-center justify-between mb-1">
-                  <span className={`text-[10px] font-medium ${STATUS_COLOR[job.status]}`}>
-                    {STATUS_LABEL[job.status]}
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className={`text-[10px] font-medium shrink-0 ${STATUS_COLOR[job.status]}`}>
+                      {STATUS_LABEL[job.status]}
+                      {(job.status === 'pending' || job.status === 'running') && (
+                        <Loader2 size={10} className="inline ml-1 animate-spin" />
+                      )}
+                    </span>
                     {(job.status === 'pending' || job.status === 'running') && (
-                      <Loader2 size={10} className="inline ml-1 animate-spin" />
+                      <span className="text-[9px] text-slate-600">{formatElapsed(job.created_at)}</span>
                     )}
-                    {(job.status === 'pending' || job.status === 'running') && (
-                      <span className="text-[9px] text-slate-600 ml-1">{formatElapsed(job.created_at)}</span>
+                    {job.company_id && companyMap[job.company_id] && (
+                      <span className="flex items-center gap-0.5 text-[9px] text-violet-400 bg-violet-500/10 rounded px-1 shrink-0">
+                        <Building2 size={8} />
+                        {companyMap[job.company_id]}
+                      </span>
                     )}
-                  </span>
+                  </div>
                   <button
                     onClick={(e) => { e.stopPropagation(); handleDelete(job) }}
-                    className="text-slate-600 hover:text-red-400 transition-colors"
+                    className="text-slate-600 hover:text-red-400 transition-colors shrink-0 ml-1"
                   >
                     <Trash2 size={11} />
                   </button>
@@ -361,6 +389,12 @@ export default function VideoStudio() {
                 <span className={`text-sm font-medium ${STATUS_COLOR[selected.status]}`}>
                   {STATUS_LABEL[selected.status]}
                 </span>
+                {selected.company_id && companyMap[selected.company_id] && (
+                  <span className="flex items-center gap-1 text-[10px] text-violet-400 bg-violet-500/10 border border-violet-500/20 rounded px-2 py-0.5">
+                    <Building2 size={10} />
+                    {companyMap[selected.company_id]}
+                  </span>
+                )}
               </div>
               <span className="text-xs text-slate-500">모델: {selected.model_id.split('/').pop()}</span>
             </div>
@@ -390,9 +424,9 @@ export default function VideoStudio() {
                 <a
                   href={selected.video_url}
                   download={`video_${selected.id}.mp4`}
-                  className="self-start text-xs text-brand-light hover:underline"
+                  className="self-start flex items-center gap-1.5 text-xs text-brand-light hover:underline"
                 >
-                  MP4 다운로드
+                  <Download size={12} /> MP4 다운로드
                 </a>
               </div>
             )}
@@ -404,12 +438,10 @@ export default function VideoStudio() {
                   <Loader2 size={16} className="animate-spin text-brand-light" />
                   <span>{selected.status === 'pending' ? '대기 중...' : '영상 생성 중...'}</span>
                 </div>
-
                 <div className="flex items-center gap-1.5 text-xs text-slate-500">
                   <Clock size={12} />
                   <span>경과: {formatElapsed(selected.created_at)}</span>
                 </div>
-
                 {selected.status === 'running' && (
                   <div className="space-y-1.5">
                     <div className="flex justify-between text-[10px] text-slate-600">
@@ -447,16 +479,15 @@ export default function VideoStudio() {
           <div className="flex-1 flex flex-col items-center justify-center gap-4 text-slate-600">
             <Film size={48} strokeWidth={1} />
             <div className="text-center">
-              <p className="text-sm text-slate-400">영상 스튜디오</p>
-              <p className="text-xs mt-1">HuggingFace Inference API 무료 티어 사용</p>
+              <p className="text-sm text-slate-400">HAN Group 공유 영상 스튜디오</p>
+              <p className="text-xs mt-1">FAL-AI · HuggingFace · JSON2Video 지원</p>
               <p className="text-xs text-slate-600 mt-1">왼쪽에서 프롬프트를 입력하고 영상을 생성하세요</p>
             </div>
-
             <div className="mt-4 grid grid-cols-1 gap-2 max-w-sm w-full">
               {[
-                'A majestic eagle soaring over mountain peaks',
-                'A busy futuristic city with flying cars at night',
-                'Waves crashing on a tropical beach at sunset',
+                'A majestic eagle soaring over mountain peaks at golden hour',
+                'A busy futuristic city with flying cars at night, neon lights',
+                'Waves crashing on a tropical beach at sunset, cinematic',
               ].map((ex) => (
                 <button
                   key={ex}

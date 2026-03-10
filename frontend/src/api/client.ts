@@ -314,6 +314,7 @@ export const agentApi = {
 // ── Video Generation ──────────────────────────────────────────────────────────
 export const videoApi = {
   models: () => api.get('/video/models'),
+  stats: () => api.get('/video/stats'),
   generate: (data: object) => api.post('/video/generate', data),
   jobs: (companyId?: number, limit = 100) =>
     api.get('/video/jobs', { params: { company_id: companyId, limit } }),

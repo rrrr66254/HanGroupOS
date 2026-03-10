@@ -82,6 +82,7 @@ VIDEO_DIR = Path(os.path.expanduser("~")) / "han-video-store"
 VIDEO_DIR.mkdir(exist_ok=True)
 
 # FAL-AI HuggingFace 모델 ID → fal-ai 앱 ID 매핑
+# fal-ai/로 시작하는 ID는 그대로 사용 (identity)
 FAL_MODEL_MAP: Dict[str, str] = {
     "Lightricks/LTX-Video-0.9.8-13B-distilled": "fal-ai/ltx-video",
     "THUDM/CogVideoX-2b": "fal-ai/cogvideox-5b",
@@ -89,16 +90,29 @@ FAL_MODEL_MAP: Dict[str, str] = {
 
 # 지원 모델 목록
 SUPPORTED_MODELS = [
+    # ── FAL-AI (권장) ───────────────────────────────────────────────────────
     {
         "id": "Lightricks/LTX-Video-0.9.8-13B-distilled",
-        "label": "LTX-Video (Lightricks) — 빠름, 고품질",
+        "label": "LTX-Video 0.9.8-13B (Lightricks) — 빠름, 고품질",
         "provider": "fal-ai",
         "recommended": True,
     },
     {
-        "id": "ali-vilab/text-to-video-ms-1.7b",
-        "label": "Text-to-Video MS 1.7B (ModelScope) — 경량",
-        "provider": "hf-inference",
+        "id": "fal-ai/hunyuan-video",
+        "label": "Hunyuan Video (Tencent) — 고해상도, 영화적",
+        "provider": "fal-ai",
+        "recommended": False,
+    },
+    {
+        "id": "fal-ai/wan/t2v-14b",
+        "label": "Wan T2V 14B (Alibaba) — 다국어, 긴 영상",
+        "provider": "fal-ai",
+        "recommended": False,
+    },
+    {
+        "id": "fal-ai/kling-video/v1.6/standard/text-to-video",
+        "label": "Kling Video 1.6 (Kuaishou) — 인물·자연 특화",
+        "provider": "fal-ai",
         "recommended": False,
     },
     {
@@ -107,6 +121,14 @@ SUPPORTED_MODELS = [
         "provider": "fal-ai",
         "recommended": False,
     },
+    # ── HuggingFace Inference ────────────────────────────────────────────────
+    {
+        "id": "ali-vilab/text-to-video-ms-1.7b",
+        "label": "Text-to-Video MS 1.7B (ModelScope) — HF 경량",
+        "provider": "hf-inference",
+        "recommended": False,
+    },
+    # ── JSON2Video ───────────────────────────────────────────────────────────
     {
         "id": "json2video/presentation",
         "label": "JSON2Video — 프레젠테이션 영상 (무료 600초, 워터마크)",
@@ -183,6 +205,7 @@ def _format_job(job: VideoJob, request_base: str = "") -> dict:
             video_url = f"/api/video/file/{job.id}"  # HF 로컬 파일
     return {
         "id": job.id,
+        "company_id": job.company_id,
         "prompt": job.prompt,
         "model_id": job.model_id,
         "provider": job.provider,
@@ -210,7 +233,11 @@ def _run_fal_generation(job_id: int, fal_key: str):
         db.commit()
         video_progress.notify_sync(job_id, 5, "FAL-AI 큐 연결 중...")
 
-        fal_app_id = FAL_MODEL_MAP.get(job.model_id, "fal-ai/ltx-video")
+        # HF 모델 ID → FAL 앱 ID 변환; 이미 fal-ai/ 형식이면 그대로 사용
+        fal_app_id = FAL_MODEL_MAP.get(
+            job.model_id,
+            job.model_id if job.model_id.startswith("fal-ai/") else "fal-ai/ltx-video",
+        )
 
         try:
             import fal_client
@@ -246,14 +273,24 @@ def _run_fal_generation(job_id: int, fal_key: str):
 
             video_progress.notify_sync(job_id, 90, "영상 URL 확인 중...")
 
-            # 결과에서 영상 URL 추출 (FAL-AI 응답 형식)
+            # 결과에서 영상 URL 추출 (모델마다 다른 응답 형식 대응)
             video_url = None
             if isinstance(result, dict):
-                vid = result.get("video") or result.get("videos", [{}])[0]
-                if isinstance(vid, dict):
-                    video_url = vid.get("url")
-                elif isinstance(vid, str):
-                    video_url = vid
+                # 우선순위: video.url → videos[0].url → video_url → url
+                for key in ("video", "videos"):
+                    val = result.get(key)
+                    if not val:
+                        continue
+                    if isinstance(val, list):
+                        val = val[0] if val else None
+                    if isinstance(val, dict):
+                        video_url = val.get("url") or val.get("video_url")
+                    elif isinstance(val, str):
+                        video_url = val
+                    if video_url:
+                        break
+                if not video_url:
+                    video_url = result.get("video_url") or result.get("url")
 
             if not video_url:
                 raise ValueError(f"FAL-AI 결과에서 영상 URL을 찾을 수 없습니다: {str(result)[:200]}")
@@ -639,6 +676,71 @@ async def video_progress_ws(
         pass
     finally:
         video_progress.disconnect(job_id, websocket)
+
+
+@router.get("/stats")
+def get_video_stats(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """영상 잡 전체 통계."""
+    from sqlalchemy import func
+
+    total = db.query(VideoJob).count()
+
+    status_rows = (
+        db.query(VideoJob.status, func.count(VideoJob.id))
+        .group_by(VideoJob.status)
+        .all()
+    )
+    by_status: Dict[str, int] = {s: c for s, c in status_rows}
+
+    model_rows = (
+        db.query(VideoJob.model_id, func.count(VideoJob.id))
+        .group_by(VideoJob.model_id)
+        .order_by(func.count(VideoJob.id).desc())
+        .limit(10)
+        .all()
+    )
+    by_model: Dict[str, int] = {m: c for m, c in model_rows}
+
+    provider_rows = (
+        db.query(VideoJob.provider, func.count(VideoJob.id))
+        .group_by(VideoJob.provider)
+        .all()
+    )
+    by_provider: Dict[str, int] = {p: c for p, c in provider_rows}
+
+    done_count = by_status.get("done", 0)
+    failed_count = by_status.get("failed", 0)
+    success_rate = round(done_count / max(total, 1) * 100, 1)
+
+    # 완료된 잡의 평균 생성 시간 (finished_at - created_at)
+    completed = (
+        db.query(VideoJob.created_at, VideoJob.finished_at)
+        .filter(VideoJob.status == "done", VideoJob.finished_at != None)
+        .all()
+    )
+    if completed:
+        durations = [
+            (row.finished_at - row.created_at).total_seconds()
+            for row in completed
+            if row.finished_at and row.created_at
+        ]
+        avg_duration_sec = round(sum(durations) / len(durations)) if durations else None
+    else:
+        avg_duration_sec = None
+
+    return {
+        "total": total,
+        "by_status": by_status,
+        "by_model": by_model,
+        "by_provider": by_provider,
+        "done_count": done_count,
+        "failed_count": failed_count,
+        "success_rate": success_rate,
+        "avg_duration_sec": avg_duration_sec,
+    }
 
 
 @router.get("/models")
