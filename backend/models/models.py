@@ -450,7 +450,25 @@ class GameProject(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-class MediaPost(Base):
+class VideoJob(Base):
+    """HuggingFace 영상 생성 작업 기록."""
+    __tablename__ = "video_jobs"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    prompt = Column(Text, nullable=False)              # 텍스트 프롬프트
+    model_id = Column(String(200), default="")         # HF 모델 ID
+    provider = Column(String(50), default="hf-inference")
+    status = Column(String(20), default="pending")     # pending | running | done | failed
+    video_path = Column(String(500), default="")       # 저장된 영상 파일 경로
+    error_msg = Column(Text, default="")               # 실패 시 오류 메시지
+    duration_sec = Column(Float, nullable=True)        # 영상 길이 (초)
+    meta = Column(JSON, default={})                    # 기타 파라미터
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
+
+
+
     """발행된 블로그 포스트 및 YouTube 영상 트래킹."""
     __tablename__ = "media_posts"
     id = Column(Integer, primary_key=True, index=True)

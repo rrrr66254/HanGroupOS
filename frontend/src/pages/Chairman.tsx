@@ -4,7 +4,7 @@ import {
   Send, Loader2, ArrowRight, CheckCircle, Building2,
   Eye, X, Plus, ChevronRight, WifiOff, Wifi, Settings,
   MessageSquare, Zap, AlertCircle, BarChart2, Users,
-  Clock, Trophy, FileText, Coffee, BookOpen, Vote,
+  Clock, Trophy, FileText, Coffee, BookOpen, Vote, Paperclip,
 } from 'lucide-react'
 import { chatApi, orgApi, companiesApi, modelsApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
@@ -184,6 +184,8 @@ export default function Chairman() {
   const [session, setSession] = useState<ChatSession | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
+  const [attachedFile, setAttachedFile] = useState<{ name: string; content: string } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(false)
   const [companies, setCompanies] = useState<Company[]>([])
   const [panelMode, setPanelMode] = useState<PanelMode>('companies')
@@ -622,9 +624,30 @@ export default function Chairman() {
     }
   }
 
+  // ── File attachment handler ───────────────────────────────────────────────
+  const handleFileAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const MAX = 200_000  // 200KB text limit
+    const reader = new FileReader()
+    reader.onload = (evt) => {
+      const text = evt.target?.result as string
+      setAttachedFile({ name: file.name, content: text.slice(0, MAX) })
+    }
+    reader.onerror = () => setAttachedFile(null)
+    // Read as text for text files; base64 for others
+    if (file.type.startsWith('text/') || /\.(txt|md|csv|json|py|js|ts|tsx|jsx|xml|yaml|yml|log|sh|sql)$/.test(file.name)) {
+      reader.readAsText(file)
+    } else {
+      reader.readAsDataURL(file)
+    }
+    // reset input so same file can be reattached
+    e.target.value = ''
+  }
+
   // ── Main sendMessage ──────────────────────────────────────────────────────
   const sendMessage = async () => {
-    if (!input.trim() || !session || loading) return
+    if ((!input.trim() && !attachedFile) || !session || loading) return
 
     // Ollama 연결 상태 사전 확인
     if (editProvider === 'ollama' && health?.ollama.status !== 'connected') {
@@ -640,7 +663,11 @@ export default function Chairman() {
       return
     }
 
-    const content = input.trim()
+    let content = input.trim()
+    if (attachedFile) {
+      content = `[첨부파일: ${attachedFile.name}]\n\`\`\`\n${attachedFile.content}\n\`\`\`\n\n${content}`
+      setAttachedFile(null)
+    }
     setInput('')
     setLoading(true)
 
@@ -1244,7 +1271,33 @@ export default function Chairman() {
 
         {/* Input */}
         <div className="px-5 py-4 border-t border-bg-border flex-shrink-0">
+          {/* Attached file badge */}
+          {attachedFile && (
+            <div className="flex items-center gap-2 mb-2 px-2 py-1 bg-brand/10 border border-brand/25 rounded text-xs text-brand-light w-fit max-w-full">
+              <Paperclip size={11} />
+              <span className="truncate max-w-[200px]">{attachedFile.name}</span>
+              <button onClick={() => setAttachedFile(null)} className="text-slate-400 hover:text-red-400 flex-shrink-0">
+                <X size={11} />
+              </button>
+            </div>
+          )}
           <div className="flex gap-2">
+            {/* Hidden file input */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileAttach}
+              accept=".txt,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.xml,.yaml,.yml,.log,.sh,.sql,.pdf,.png,.jpg,.jpeg,.gif,.mp4,.webm"
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              title="파일 첨부"
+              disabled={!session || loading}
+              className="text-slate-500 hover:text-slate-200 disabled:opacity-40 transition-colors flex-shrink-0 self-end pb-1"
+            >
+              <Paperclip size={16} />
+            </button>
             <textarea
               className="input resize-none flex-1 text-sm"
               rows={2}
@@ -1256,8 +1309,8 @@ export default function Chairman() {
             />
             <button
               onClick={sendMessage}
-              disabled={!input.trim() || !session || loading}
-              className="btn-primary px-4 flex-shrink-0 flex items-center gap-1.5"
+              disabled={(!input.trim() && !attachedFile) || !session || loading}
+              className="btn-primary px-4 flex-shrink-0 flex items-center gap-1.5 self-end"
             >
               {loading ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
             </button>

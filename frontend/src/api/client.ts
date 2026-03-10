@@ -288,6 +288,17 @@ export const agentApi = {
     api.post('/chat/agent-chat', { node_id: nodeId, message }),
 }
 
+// ── Video Generation ──────────────────────────────────────────────────────────
+export const videoApi = {
+  models: () => api.get('/video/models'),
+  generate: (data: object) => api.post('/video/generate', data),
+  jobs: (companyId?: number, limit = 20) =>
+    api.get('/video/jobs', { params: { company_id: companyId, limit } }),
+  job: (id: number) => api.get(`/video/jobs/${id}`),
+  deleteJob: (id: number) => api.delete(`/video/jobs/${id}`),
+  fileUrl: (id: number) => `/api/video/file/${id}`,
+}
+
 // ── Audit Log ──────────────────────────────────────────────────────────────────
 export const auditApi = {
   log: (params?: { kind?: string; status?: string; limit?: number; offset?: number }) =>

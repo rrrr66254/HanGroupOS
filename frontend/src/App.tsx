@@ -26,6 +26,7 @@ import TalentMatch from './pages/TalentMatch'
 import Terminal from './pages/Terminal'
 import GameDashboard from './pages/GameDashboard'
 import AuditLog from './pages/AuditLog'
+import VideoStudio from './pages/VideoStudio'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -84,6 +85,7 @@ export default function App() {
           <Route path="terminal" element={<Terminal />} />
           <Route path="game" element={<GameDashboard />} />
           <Route path="audit" element={<AuditLog />} />
+          <Route path="video-studio" element={<VideoStudio />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>
