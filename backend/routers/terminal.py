@@ -184,6 +184,79 @@ def execute_request(
     return _format(req)
 
 
+@router.post("/requests/{req_id}/approve-and-execute")
+def approve_and_execute(
+    req_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """대기 중인 요청을 승인하고 즉시 실행합니다. admin만 가능."""
+    if current_user.role != "admin":
+        raise HTTPException(403, "관리자만 실행할 수 있습니다")
+
+    req = db.query(TerminalRequest).filter(TerminalRequest.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "요청을 찾을 수 없습니다")
+    if req.status != "pending":
+        raise HTTPException(400, f"대기 중인 요청만 즉시 실행할 수 있습니다 (상태: {req.status})")
+
+    if _is_dangerous(req.command):
+        req.status = "rejected"
+        req.output = "안전 점검 실패: 위험한 명령어가 감지되었습니다"
+        db.commit()
+        raise HTTPException(400, req.output)
+
+    # Approve
+    req.status = "approved"
+    req.approved_by = current_user.id
+    req.decided_at = datetime.utcnow()
+    db.flush()
+
+    # Execute immediately
+    try:
+        result = subprocess.run(
+            req.command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd="/home/user/han-group-os",
+        )
+        req.output = (result.stdout or "") + (("\n[stderr]\n" + result.stderr) if result.stderr else "")
+        req.exit_code = result.returncode
+        req.status = "executed"
+    except subprocess.TimeoutExpired:
+        req.output = "오류: 명령 실행 시간이 초과되었습니다 (30초)"
+        req.exit_code = -1
+        req.status = "executed"
+    except Exception as e:
+        req.output = f"실행 오류: {e}"
+        req.exit_code = -1
+        req.status = "executed"
+
+    req.executed_at = datetime.utcnow()
+    db.commit()
+    db.refresh(req)
+    return _format(req)
+
+
+@router.get("/live")
+def live_executions(
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """최근 실행된 명령 목록 (실행완료 + 승인됨 포함, 최신순)."""
+    reqs = (
+        db.query(TerminalRequest)
+        .filter(TerminalRequest.status.in_(["executed", "approved"]))
+        .order_by(TerminalRequest.executed_at.desc().nullslast(), TerminalRequest.decided_at.desc().nullslast())
+        .limit(limit)
+        .all()
+    )
+    return [_format(r) for r in reqs]
+
+
 def _format(req: TerminalRequest) -> dict:
     return {
         "id": req.id,

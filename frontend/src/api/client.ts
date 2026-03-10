@@ -251,6 +251,8 @@ export const terminalApi = {
   decide: (id: number, action: 'approve' | 'reject', note?: string) =>
     api.post(`/terminal/requests/${id}/decide`, { action, note }),
   execute: (id: number) => api.post(`/terminal/requests/${id}/execute`),
+  approveAndExecute: (id: number) => api.post(`/terminal/requests/${id}/approve-and-execute`),
+  live: (limit = 20) => api.get('/terminal/live', { params: { limit } }),
 }
 
 // ── Capabilities ──────────────────────────────────────────────────────────────
