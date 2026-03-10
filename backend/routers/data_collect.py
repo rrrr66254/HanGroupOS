@@ -9,13 +9,14 @@ from datetime import datetime
 
 from core.database import get_db
 from core.security import get_current_user
-from models.models import ExternalApiKey, CollectedData, User
+from models.models import ExternalApiKey, CollectedData, StrategyItem, User
 from schemas.schemas import (
     ExternalApiKeyCreate, ExternalApiKeyUpdate, ExternalApiKeyOut,
     WebSearchRequest, NewsSearchRequest, ScrapeRequest,
     RssFetchRequest, ComtradeRequest, CollectedDataOut,
 )
 from services.data_collector import DataCollector, SERVICE_INFO
+from services.ai_provider import get_provider_from_db, MARKET_ANALYST_SYSTEM
 
 router = APIRouter(prefix="/api/data", tags=["data-collection"])
 
@@ -431,3 +432,152 @@ def delete_collected(
     db.delete(obj)
     db.commit()
     return {"message": "삭제되었습니다."}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 전략 자동 인사이트
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/insights/{company_id}", summary="수집 데이터 → 전략 자동 인사이트")
+def generate_insights(
+    company_id: int,
+    limit: int = 20,
+    save: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    최근 수집 데이터(뉴스·검색·스크래핑)를 MARKET_ANALYST AI로 분석해
+    전략 시사점을 자동 생성합니다.
+    save=true 이면 StrategyItem으로도 저장합니다.
+    """
+    rows = (
+        db.query(CollectedData)
+        .filter(CollectedData.company_id == company_id)
+        .order_by(CollectedData.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    if not rows:
+        raise HTTPException(404, "분석할 수집 데이터가 없습니다. 먼저 뉴스/검색을 수집하세요.")
+
+    # 수집 데이터를 텍스트로 직렬화
+    data_text = ""
+    for i, row in enumerate(rows, 1):
+        data_text += f"\n[{i}] [{row.data_type}] {row.title}\n{row.content[:500]}\n"
+
+    prompt = (
+        f"아래는 최근 수집된 시장 데이터 {len(rows)}건입니다.\n"
+        f"이 데이터를 바탕으로 전략적 인사이트 3~5가지를 도출해주세요.\n"
+        f"각 인사이트는 구체적 근거와 추천 액션을 포함해주세요.\n\n"
+        f"{data_text}"
+    )
+
+    provider = get_provider_from_db(db, current_user.id)
+    insights = provider.chat(
+        [{"role": "user", "content": prompt}],
+        system=MARKET_ANALYST_SYSTEM,
+        session_type="general",
+    )
+
+    saved_id = None
+    if save:
+        item = StrategyItem(
+            company_id=company_id,
+            title=f"AI 인사이트 ({datetime.utcnow().strftime('%Y-%m-%d')})",
+            description=insights,
+            item_type="initiative",
+            status="active",
+            priority="high",
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        saved_id = item.id
+
+    return {
+        "insights": insights,
+        "data_count": len(rows),
+        "generated_at": datetime.utcnow().isoformat(),
+        "saved_strategy_id": saved_id,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 전문 검색 (SQLite FTS5)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/search", summary="수집 데이터 전문 검색")
+def search_collected(
+    q: str,
+    company_id: Optional[int] = None,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    수집 데이터를 키워드로 전문 검색합니다.
+    SQLite FTS5를 사용하며, 미지원 환경에서는 LIKE 검색으로 폴백합니다.
+    """
+    if not q or len(q.strip()) < 1:
+        raise HTTPException(400, "검색어를 입력하세요.")
+
+    from sqlalchemy import text as sa_text
+
+    results = []
+    try:
+        # FTS5 가상 테이블 존재 여부 확인 및 생성
+        db.execute(sa_text(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS collected_data_fts "
+            "USING fts5(title, content, content=collected_data, content_rowid=id, tokenize='unicode61')"
+        ))
+        db.commit()
+
+        # FTS 인덱스 재구축 (content 테이블 기반)
+        db.execute(sa_text("INSERT OR IGNORE INTO collected_data_fts(collected_data_fts) VALUES('rebuild')"))
+        db.commit()
+
+        # FTS5 MATCH 검색
+        fts_sql = sa_text(
+            "SELECT cd.* FROM collected_data cd "
+            "JOIN collected_data_fts fts ON cd.id = fts.rowid "
+            "WHERE collected_data_fts MATCH :q "
+            + ("AND cd.company_id = :cid " if company_id else "")
+            + "ORDER BY rank LIMIT :lim"
+        )
+        params = {"q": q, "lim": limit}
+        if company_id:
+            params["cid"] = company_id
+
+        rows = db.execute(fts_sql, params).fetchall()
+        ids = [r[0] for r in rows]
+        if ids:
+            results = db.query(CollectedData).filter(CollectedData.id.in_(ids)).all()
+
+    except Exception:
+        # FTS5 미지원 → LIKE 폴백
+        keyword = f"%{q}%"
+        qry = db.query(CollectedData).filter(
+            (CollectedData.title.ilike(keyword)) | (CollectedData.content.ilike(keyword))
+        )
+        if company_id:
+            qry = qry.filter(CollectedData.company_id == company_id)
+        results = qry.order_by(CollectedData.created_at.desc()).limit(limit).all()
+
+    return {
+        "query": q,
+        "count": len(results),
+        "results": [
+            {
+                "id": r.id,
+                "data_type": r.data_type,
+                "title": r.title,
+                "content": r.content[:300],
+                "source": r.source,
+                "company_id": r.company_id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in results
+        ],
+    }

@@ -165,6 +165,16 @@ export const externalKeyApi = {
   list: () => api.get('/data/api-keys'),
   create: (data: object) => api.post('/data/api-keys', data),
   delete: (id: number) => api.delete(`/data/api-keys/${id}`),
+  test: (id: number) => api.post(`/data/api-keys/${id}/test`),
+}
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+export const notificationsApi = {
+  list: (unreadOnly?: boolean) => api.get('/notifications', { params: { unread_only: unreadOnly } }),
+  unreadCount: () => api.get('/notifications/unread-count'),
+  markRead: (id: number) => api.post(`/notifications/read/${id}`),
+  markAllRead: () => api.post('/notifications/read-all'),
+  delete: (id: number) => api.delete(`/notifications/${id}`),
 }
 
 // ── Memory ────────────────────────────────────────────────────────────────────
@@ -243,6 +253,12 @@ export const sitesApi = {
   submissions: (siteId: number) => api.get(`/sites/${siteId}/submissions`),
   evaluate: () => api.post('/sites/evaluate'),
   generateIR: (companyId: number) => api.post(`/sites/ir/${companyId}`),
+  // Multipage
+  generatePages: (siteId: number) => api.post(`/sites/${siteId}/pages/generate`),
+  listPages: (siteId: number) => api.get(`/sites/${siteId}/pages`),
+  getPageHtml: (siteId: number, pageId: number) => api.get(`/sites/${siteId}/pages/${pageId}/html`),
+  updatePage: (siteId: number, pageId: number, data: { html?: string; title?: string }) =>
+    api.patch(`/sites/${siteId}/pages/${pageId}`, data),
 }
 
 // ── Synergy ───────────────────────────────────────────────────────────────────

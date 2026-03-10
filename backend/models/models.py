@@ -366,6 +366,19 @@ class SiteSubmission(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class SitePage(Base):
+    """멀티페이지 사이트의 개별 페이지."""
+    __tablename__ = "site_pages"
+    id = Column(Integer, primary_key=True, index=True)
+    site_id = Column(Integer, ForeignKey("company_sites.id"), nullable=False)
+    slug = Column(String(100), nullable=False)          # "home" | "about" | "services" | "contact"
+    title = Column(String(200), nullable=False)
+    html_content = Column(Text, default="")
+    page_order = Column(Integer, default=0)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class TerminalRequest(Base):
     """CEO가 admin 승인 후 실행할 터미널 명령 요청."""
     __tablename__ = "terminal_requests"
@@ -466,6 +479,23 @@ class VideoJob(Base):
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     finished_at = Column(DateTime, nullable=True)
+
+
+class Notification(Base):
+    """시스템 알림 — DB 영속화."""
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # None = 전체
+    title = Column(String(200), nullable=False)
+    body = Column(Text, default="")
+    notif_type = Column(String(50), default="info")
+    # info | success | warning | error | approval | video | work | form
+    icon = Column(String(10), default="🔔")
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    link = Column(String(300), default="")           # 클릭 시 이동할 URL
+    is_read = Column(Boolean, default=False)
+    meta = Column(JSON, default={})
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class MediaPost(Base):

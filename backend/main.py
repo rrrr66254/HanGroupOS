@@ -1,8 +1,9 @@
-from fastapi import FastAPI
+import asyncio
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import init_db, SessionLocal
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications
 
 
 app = FastAPI(
@@ -43,6 +44,7 @@ app.include_router(capabilities.router)   # 회사 역량 관리 (자동 분석 
 app.include_router(game.router)           # 게임 회사 전용 (트렌딩/분석/아이디어/프로젝트)
 app.include_router(audit.router)          # 감사 로그 (승인/반려/터미널 이력 통합 조회)
 app.include_router(video_gen.router)      # 영상 생성 (HuggingFace Inference API)
+app.include_router(notifications.router)  # 알림 시스템 (DB 영속화)
 
 
 @app.get("/health")
@@ -57,6 +59,54 @@ def startup():
     _seed_data()
     _check_ollama()
     _check_ktransformers()
+    _start_scheduler()
+    _restart_pending_video_jobs()
+
+
+@app.on_event("startup")
+async def _setup_ws_loop():
+    """WebSocket ConnectionManager에 현재 이벤트 루프 주입."""
+    from routers.notifications import manager as notif_manager
+    notif_manager.set_loop(asyncio.get_running_loop())
+
+
+# ── WebSocket: 실시간 알림 ─────────────────────────────────────────────────────
+@app.websocket("/ws/notifications")
+async def ws_notifications(ws: WebSocket, token: str = Query("")):
+    from core.security import decode_token
+    from models.models import Notification, User as UserModel
+    from routers.notifications import manager as notif_manager
+
+    payload = decode_token(token) if token else None
+    if not payload:
+        await ws.close(code=4001)
+        return
+
+    db = SessionLocal()
+    try:
+        user = db.query(UserModel).filter(UserModel.username == payload.get("sub")).first()
+        if not user:
+            await ws.close(code=4001)
+            return
+
+        await notif_manager.connect(user.id, ws)
+
+        # 연결 즉시 미읽음 수 전송
+        cnt = db.query(Notification).filter(
+            (Notification.user_id == user.id) | (Notification.user_id == None),
+            Notification.is_read == False,
+        ).count()
+        await ws.send_json({"type": "unread_count", "count": cnt})
+
+        try:
+            while True:
+                await ws.receive_text()  # 클라이언트 ping 수신용
+        except WebSocketDisconnect:
+            notif_manager.disconnect(user.id, ws)
+    except Exception:
+        notif_manager.disconnect(user.id, ws) if user else None
+    finally:
+        db.close()
 
 
 def _check_ollama():
@@ -253,3 +303,111 @@ def _seed_data():
         print(f"Seed error: {e}")
     finally:
         db.close()
+
+
+# ── Background Scheduler ──────────────────────────────────────────────────────
+def _auto_collect_news():
+    """6시간마다 전체 계열사 업종 관련 뉴스 자동 수집."""
+    from models.models import Company, ExternalApiKey, CollectedData
+    from services.data_collector import DataCollector
+
+    db = SessionLocal()
+    try:
+        companies = db.query(Company).filter(Company.status == "active").all()
+        if not companies:
+            return
+
+        # API 키 로드
+        api_keys = {}
+        extra_configs = {}
+        for row in db.query(ExternalApiKey).filter(ExternalApiKey.is_active == True).all():
+            api_keys[row.service] = row.api_key
+            if row.extra_config:
+                extra_configs[row.service] = row.extra_config
+
+        collector = DataCollector(api_keys=api_keys, extra_configs=extra_configs)
+
+        for company in companies[:5]:  # 한 번에 최대 5개 회사
+            try:
+                industry = company.industry or company.name
+                result = collector.news_search(query=industry, language="ko", days_back=1)
+                articles = result.get("articles", [])
+                if articles:
+                    content = "\n".join(
+                        f"{a.get('title','')}: {a.get('description','')}"
+                        for a in articles[:10]
+                    )
+                    obj = CollectedData(
+                        company_id=company.id,
+                        data_type="news",
+                        source=result.get("source", "auto"),
+                        query=industry,
+                        title=f"[자동수집] {industry} 뉴스",
+                        content=content[:10000],
+                        structured=result,
+                        tags=["news", "auto_collected"],
+                        status="raw",
+                    )
+                    db.add(obj)
+            except Exception as e:
+                print(f"[Scheduler] {company.name} 뉴스 수집 실패 (무시): {e}")
+
+        db.commit()
+        print(f"[Scheduler] 뉴스 자동 수집 완료 ({len(companies[:5])}개 회사)")
+    except Exception as e:
+        print(f"[Scheduler] 자동 수집 오류: {e}")
+    finally:
+        db.close()
+
+
+def _start_scheduler():
+    """APScheduler 백그라운드 스케줄러 시작."""
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        scheduler = BackgroundScheduler(timezone="Asia/Seoul")
+        # 6시간마다 뉴스 자동 수집
+        scheduler.add_job(_auto_collect_news, "interval", hours=6, id="auto_news")
+        scheduler.start()
+        print("✓ 데이터 수집 스케줄러 시작 (6시간 간격 뉴스 자동 수집)")
+    except Exception as e:
+        print(f"⚠️  스케줄러 시작 실패 (무시): {e}")
+
+
+# ── Video Job Recovery ────────────────────────────────────────────────────────
+def _restart_pending_video_jobs():
+    """서버 재시작 시 pending/running 상태 영상 잡을 재시도."""
+    from models.models import VideoJob
+
+    db = SessionLocal()
+    try:
+        stuck_jobs = (
+            db.query(VideoJob)
+            .filter(VideoJob.status.in_(["pending", "running"]))
+            .all()
+        )
+        if not stuck_jobs:
+            return
+
+        from routers.video_gen import _start_video_job
+        restarted = 0
+        for job in stuck_jobs:
+            job.status = "pending"  # running → pending 으로 리셋
+            db.commit()
+            started = _start_video_job(job.id, db)
+            if started:
+                restarted += 1
+        print(f"✓ 미완료 영상 잡 {restarted}/{len(stuck_jobs)}개 재시작")
+    except Exception as e:
+        print(f"⚠️  영상 잡 재시작 실패 (무시): {e}")
+    finally:
+        db.close()
+
+
+# ── Data Collection Schedule API ─────────────────────────────────────────────
+@app.post("/api/scheduler/collect-now")
+def trigger_collection(_=None):
+    """수동으로 즉시 뉴스 수집 트리거."""
+    import threading
+    t = threading.Thread(target=_auto_collect_news, daemon=True)
+    t.start()
+    return {"ok": True, "message": "뉴스 수집 작업이 백그라운드에서 시작되었습니다."}

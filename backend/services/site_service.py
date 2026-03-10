@@ -6,7 +6,7 @@ import json
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 
-from models.models import Company, CompanySite, SiteSubmission, ProviderConfig, OrgNode
+from models.models import Company, CompanySite, SiteSubmission, SitePage, ProviderConfig, OrgNode
 from services.ai_provider import AIProvider
 
 
@@ -460,6 +460,162 @@ def generate_and_save_site(db: Session, company_id: int, template_type: str = "c
     db.commit()
     db.refresh(site)
     return site
+
+
+def _build_page_html(company: Company, slug: str, page_slug: str, page_title: str, body_html: str) -> str:
+    """멀티페이지용 공통 레이아웃 HTML 빌더."""
+    color = _color_for_industry(company.industry)
+    pages = [
+        ("home", "홈"), ("about", "소개"), ("services", "서비스"), ("contact", "문의"),
+    ]
+    nav_links = "\n".join(
+        f'<a href="/sites/{slug}/{p}" class="{"active" if p == page_slug else ""}">{label}</a>'
+        for p, label in pages
+    )
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{page_title} — {company.name}</title>
+<style>
+  :root {{ --primary: {color}; --bg: #0f1117; --bg2: #161a24; --card: #1e2233;
+           --text: #e2e8f0; --muted: #94a3b8; --border: rgba(255,255,255,0.08); }}
+  * {{ margin:0; padding:0; box-sizing:border-box; }}
+  body {{ font-family: 'Pretendard', 'Apple SD Gothic Neo', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }}
+  a {{ color: var(--primary); text-decoration: none; }}
+  nav {{ position: fixed; top:0; left:0; right:0; z-index:100; backdrop-filter: blur(16px);
+         background: rgba(15,17,23,0.85); border-bottom: 1px solid var(--border);
+         padding: 0 2rem; display: flex; align-items: center; justify-content: space-between; height: 64px; }}
+  .logo {{ font-size: 1.25rem; font-weight: 700; color: var(--primary); }}
+  .nav-links {{ display: flex; gap: 2rem; }}
+  .nav-links a {{ color: var(--muted); font-size: 0.9rem; transition: color 0.2s; }}
+  .nav-links a:hover, .nav-links a.active {{ color: var(--text); }}
+  .page-wrap {{ padding: 5rem 2rem 4rem; max-width: 1100px; margin: 0 auto; }}
+  h1 {{ font-size: clamp(1.8rem, 4vw, 3rem); font-weight: 800; margin-bottom: 1rem;
+        background: linear-gradient(135deg, #fff 0%, var(--muted) 100%);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent; }}
+  h2 {{ font-size: 1.5rem; font-weight: 700; margin: 2rem 0 1rem; color: var(--text); }}
+  p {{ color: var(--muted); margin-bottom: 1rem; }}
+  .card-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.5rem; margin: 2rem 0; }}
+  .card {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; }}
+  .card .icon {{ font-size: 2rem; margin-bottom: 0.75rem; }}
+  .card h3 {{ font-size: 1.1rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text); }}
+  .card p {{ font-size: 0.9rem; }}
+  .btn {{ display: inline-block; background: var(--primary); color: #fff; padding: 0.75rem 1.75rem;
+           border-radius: 10px; font-weight: 700; border: none; cursor: pointer; margin-top: 1rem; }}
+  form {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 2rem; max-width: 540px; }}
+  input, textarea {{ width: 100%; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+                      padding: 0.75rem 1rem; color: var(--text); font-size: 0.95rem; margin-bottom: 1rem; }}
+  textarea {{ min-height: 120px; resize: vertical; }}
+</style>
+</head>
+<body>
+<nav>
+  <span class="logo">{company.name}</span>
+  <div class="nav-links">{nav_links}</div>
+</nav>
+<div class="page-wrap">
+{body_html}
+</div>
+</body>
+</html>"""
+
+
+def generate_multipage_site(db: Session, site_id: int) -> list:
+    """사이트의 4개 페이지(home/about/services/contact) AI 생성 후 SitePage 목록 반환."""
+    site = db.query(CompanySite).filter(CompanySite.id == site_id).first()
+    if not site:
+        raise ValueError("Site not found")
+
+    company = db.query(Company).filter(Company.id == site.company_id).first()
+    if not company:
+        raise ValueError("Company not found")
+
+    content = generate_site_content(db, company)
+    slug = site.slug
+
+    page_defs = [
+        {
+            "slug": "home",
+            "title": "홈",
+            "order": 0,
+            "body": f"""
+<h1>{content.get("tagline", company.name)}</h1>
+<p style="font-size:1.15rem">{content.get("hero_desc", "")}</p>
+<a href="/sites/{slug}/services" class="btn">서비스 보기</a>
+<h2>핵심 역량</h2>
+<div class="card-grid">
+{"".join(f'<div class="card"><div class="icon">{f["icon"]}</div><h3>{f["title"]}</h3><p>{f["desc"]}</p></div>' for f in content.get("features", []))}
+</div>""",
+        },
+        {
+            "slug": "about",
+            "title": "소개",
+            "order": 1,
+            "body": f"""
+<h1>{content.get("about_title", "회사 소개")}</h1>
+<p style="font-size:1.05rem;max-width:720px">{content.get("about_desc", company.description or "")}</p>
+<h2>비전 & 미션</h2>
+<div class="card-grid">
+  <div class="card"><div class="icon">🎯</div><h3>비전</h3><p>{company.vision or "글로벌 AI 기업으로 성장"}</p></div>
+  <div class="card"><div class="icon">🏭</div><h3>산업</h3><p>{company.industry}</p></div>
+  <div class="card"><div class="icon">🤝</div><h3>핵심 가치</h3><p>혁신 · 신뢰 · 성장</p></div>
+</div>""",
+        },
+        {
+            "slug": "services",
+            "title": "서비스",
+            "order": 2,
+            "body": f"""
+<h1>{content.get("services_title", "서비스")}</h1>
+<p>{content.get("services_desc", "")}</p>
+<div class="card-grid">
+{"".join(f'<div class="card"><div class="icon">{s["icon"]}</div><h3>{s["title"]}</h3><p>{s["desc"]}</p></div>' for s in content.get("services", []))}
+</div>""",
+        },
+        {
+            "slug": "contact",
+            "title": "문의",
+            "order": 3,
+            "body": f"""
+<h1>{content.get("contact_title", "문의하기")}</h1>
+<p>{content.get("contact_desc", "")}</p>
+<form method="POST" action="/sites/{slug}/submit">
+  <input type="text" name="name" placeholder="이름" required>
+  <input type="email" name="email" placeholder="이메일" required>
+  <input type="text" name="company" placeholder="회사명">
+  <textarea name="message" placeholder="문의 내용을 입력하세요" required></textarea>
+  <button type="submit" class="btn">문의 보내기</button>
+</form>""",
+        },
+    ]
+
+    created = []
+    for pd in page_defs:
+        html = _build_page_html(company, slug, pd["slug"], pd["title"], pd["body"])
+        # Upsert by (site_id, slug)
+        existing = db.query(SitePage).filter(
+            SitePage.site_id == site_id, SitePage.slug == pd["slug"]
+        ).first()
+        if existing:
+            existing.html_content = html
+            existing.title = pd["title"]
+            existing.page_order = pd["order"]
+        else:
+            existing = SitePage(
+                site_id=site_id,
+                slug=pd["slug"],
+                title=pd["title"],
+                html_content=html,
+                page_order=pd["order"],
+            )
+            db.add(existing)
+        db.commit()
+        db.refresh(existing)
+        created.append(existing)
+
+    return created
 
 
 def evaluate_all_sites(db: Session) -> list:

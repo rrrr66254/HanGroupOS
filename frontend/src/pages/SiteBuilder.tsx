@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   Globe, Play, Zap, ExternalLink, Upload, Eye, Code2,
-  CheckCircle, Clock, Loader2, ChevronDown, ChevronUp, Inbox, RefreshCw,
+  CheckCircle, Clock, Loader2, ChevronDown, ChevronUp, Inbox, RefreshCw, Layout,
 } from 'lucide-react'
 import { companiesApi } from '../api/client'
 import { sitesApi } from '../api/client'
@@ -16,19 +16,28 @@ interface Site {
 interface Submission {
   id: number; form_data: Record<string, string>; source: string; created_at: string
 }
+interface SitePage {
+  id: number; site_id: number; slug: string; title: string
+  page_order: number; is_active: boolean; created_at: string | null
+}
 
 export default function SiteBuilder() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [selectedId, setSelectedId] = useState<number | ''>('')
   const [site, setSite] = useState<Site | null>(null)
   const [generating, setGenerating] = useState(false)
-  const [tab, setTab] = useState<'preview' | 'code' | 'submissions'>('preview')
+  const [tab, setTab] = useState<'preview' | 'code' | 'submissions' | 'pages'>('preview')
   const [html, setHtml] = useState('')
   const [editingHtml, setEditingHtml] = useState('')
   const [savingHtml, setSavingHtml] = useState(false)
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [loadingSubs, setLoadingSubs] = useState(false)
   const [deploying, setDeploying] = useState(false)
+  const [pages, setPages] = useState<SitePage[]>([])
+  const [generatingPages, setGeneratingPages] = useState(false)
+  const [selectedPage, setSelectedPage] = useState<SitePage | null>(null)
+  const [pageHtml, setPageHtml] = useState('')
+  const [savingPage, setSavingPage] = useState(false)
 
   useEffect(() => {
     companiesApi.list().then((r) => {
@@ -40,12 +49,13 @@ export default function SiteBuilder() {
 
   useEffect(() => {
     if (!selectedId) return
-    setSite(null); setHtml(''); setSubmissions([])
+    setSite(null); setHtml(''); setSubmissions([]); setPages([]); setSelectedPage(null)
     sitesApi.getCompanySite(selectedId as number)
       .then((r) => {
         const s = r.data as Site
         setSite(s)
         loadHtml(s.id)
+        loadPages(s.id)
       })
       .catch(() => {}) // no site yet
   }, [selectedId])
@@ -105,9 +115,49 @@ export default function SiteBuilder() {
     } catch { /* ignore */ } finally { setLoadingSubs(false) }
   }
 
+  const loadPages = async (siteId: number) => {
+    try {
+      const r = await sitesApi.listPages(siteId)
+      const list = r.data as SitePage[]
+      setPages(list)
+      if (list.length > 0 && !selectedPage) setSelectedPage(list[0])
+    } catch { /* ignore */ }
+  }
+
+  const generatePages = async () => {
+    if (!site) return
+    setGeneratingPages(true)
+    try {
+      const r = await sitesApi.generatePages(site.id)
+      const list = (r.data.pages || []) as SitePage[]
+      setPages(list)
+      if (list.length > 0) setSelectedPage(list[0])
+    } catch { /* ignore */ } finally { setGeneratingPages(false) }
+  }
+
+  const loadPageHtml = async (page: SitePage) => {
+    try {
+      const r = await sitesApi.getPageHtml(site!.id, page.id)
+      setPageHtml(r.data.html || '')
+    } catch { setPageHtml('') }
+  }
+
+  const savePageHtml = async () => {
+    if (!site || !selectedPage) return
+    setSavingPage(true)
+    try {
+      await sitesApi.updatePage(site.id, selectedPage.id, { html: pageHtml })
+    } catch { /* ignore */ } finally { setSavingPage(false) }
+  }
+
   useEffect(() => {
     if (tab === 'submissions' && site) loadSubmissions()
+    if (tab === 'pages' && site) loadPages(site.id)
   }, [tab, site])
+
+  useEffect(() => {
+    if (selectedPage && site) loadPageHtml(selectedPage)
+  }, [selectedPage])
 
   const selectedCompany = companies.find((c) => c.id === selectedId)
 
@@ -216,6 +266,7 @@ export default function SiteBuilder() {
             {[
               { key: 'preview', label: '미리보기', icon: Eye },
               { key: 'code', label: 'HTML 편집', icon: Code2 },
+              { key: 'pages', label: '멀티페이지', icon: Layout },
               { key: 'submissions', label: '수집 데이터', icon: Inbox },
             ].map(({ key, label, icon: Icon }) => (
               <button
@@ -265,6 +316,91 @@ export default function SiteBuilder() {
                 className="w-full h-96 text-[11px] font-mono bg-bg-elevated text-slate-300 border border-bg-border rounded-lg p-3 resize-none focus:outline-none focus:border-brand/50"
                 spellCheck={false}
               />
+            </div>
+          )}
+
+          {/* Pages */}
+          {tab === 'pages' && (
+            <div className="card p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-200">멀티페이지 관리</span>
+                <button
+                  onClick={generatePages}
+                  disabled={generatingPages}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-all"
+                  style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.35)', color: '#a5b4fc' }}
+                >
+                  {generatingPages ? <Loader2 size={11} className="animate-spin" /> : <Zap size={11} />}
+                  {generatingPages ? 'AI 생성 중…' : '4개 페이지 AI 생성'}
+                </button>
+              </div>
+
+              {pages.length === 0 ? (
+                <div className="text-center py-8 text-slate-600 text-sm">
+                  아직 생성된 페이지가 없습니다.<br />
+                  <span className="text-xs">"4개 페이지 AI 생성" 버튼으로 홈/소개/서비스/문의 페이지를 자동 생성하세요.</span>
+                </div>
+              ) : (
+                <div className="grid grid-cols-[180px_1fr] gap-4">
+                  {/* Page list */}
+                  <div className="space-y-1">
+                    {pages.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setSelectedPage(p)}
+                        className="w-full text-left px-3 py-2 rounded-lg text-xs transition-all"
+                        style={{
+                          background: selectedPage?.id === p.id ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)',
+                          border: `1px solid ${selectedPage?.id === p.id ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.06)'}`,
+                          color: selectedPage?.id === p.id ? '#a5b4fc' : '#94a3b8',
+                        }}
+                      >
+                        <div className="font-medium">{p.title}</div>
+                        <div className="text-[10px] text-slate-600 font-mono mt-0.5">/{p.slug}</div>
+                        {site?.status === 'live' && (
+                          <a
+                            href={`/sites/${site.slug}/${p.slug}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-[10px] text-brand-light flex items-center gap-0.5 mt-1 hover:underline"
+                          >
+                            <ExternalLink size={8} /> 열기
+                          </a>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Page HTML editor */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-slate-500 font-mono">
+                        {selectedPage ? `/sites/${site?.slug}/${selectedPage.slug}` : '페이지를 선택하세요'}
+                      </span>
+                      {selectedPage && (
+                        <button
+                          onClick={savePageHtml}
+                          disabled={savingPage}
+                          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-all"
+                          style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.35)', color: '#a5b4fc' }}
+                        >
+                          {savingPage ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle size={11} />}
+                          저장
+                        </button>
+                      )}
+                    </div>
+                    <textarea
+                      value={pageHtml}
+                      onChange={(e) => setPageHtml(e.target.value)}
+                      disabled={!selectedPage}
+                      className="w-full h-72 text-[11px] font-mono bg-bg-elevated text-slate-300 border border-bg-border rounded-lg p-3 resize-none focus:outline-none focus:border-brand/50"
+                      placeholder={selectedPage ? 'HTML 내용을 편집하세요' : '왼쪽에서 페이지를 선택하세요'}
+                      spellCheck={false}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
