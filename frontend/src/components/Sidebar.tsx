@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, MessageSquare, Building2, CheckSquare,
@@ -8,17 +8,20 @@ import {
   Terminal, Gamepad2, Shield, Briefcase, Users,
 } from 'lucide-react'
 import { useAppStore } from '../store/useStore'
+import { approvalsApi, terminalApi } from '../api/client'
 
-const TOP_ITEMS = [
-  { to: '/group-home', icon: Home, label: '그룹 홈', highlight: true },
-  { to: '/chairman', icon: MessageSquare, label: 'AI 회장' },
-]
+// Badge metadata: which items get which badge count
+const ITEM_BADGES: Record<string, 'approvals' | 'terminals'> = {
+  '/approvals': 'approvals',
+  '/terminal': 'terminals',
+}
 
 const NAV_GROUPS = [
   {
     id: 'management',
     label: '경영',
     icon: Briefcase,
+    badge: 'approvals' as const,
     items: [
       { to: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
       { to: '/companies', icon: Building2, label: '계열사' },
@@ -29,6 +32,7 @@ const NAV_GROUPS = [
     id: 'strategy',
     label: '분석/전략',
     icon: TrendingUp,
+    badge: null,
     items: [
       { to: '/market', icon: TrendingUp, label: '시장분석' },
       { to: '/strategy', icon: Map, label: '전략맵' },
@@ -40,6 +44,7 @@ const NAV_GROUPS = [
     id: 'org',
     label: '조직/AI',
     icon: Users,
+    badge: null,
     items: [
       { to: '/live-office', icon: Monitor, label: 'AI 오피스' },
       { to: '/memory', icon: Brain, label: '기업기억' },
@@ -50,6 +55,7 @@ const NAV_GROUPS = [
     id: 'content',
     label: '보고/콘텐츠',
     icon: FileText,
+    badge: null,
     items: [
       { to: '/weekly-report', icon: FileText, label: '주간보고서' },
       { to: '/ir-report', icon: BarChart2, label: 'IR 보고서' },
@@ -62,6 +68,7 @@ const NAV_GROUPS = [
     id: 'system',
     label: '시스템',
     icon: Settings,
+    badge: 'terminals' as const,
     items: [
       { to: '/terminal', icon: Terminal, label: '터미널' },
       { to: '/audit', icon: Shield, label: '감사 로그' },
@@ -70,10 +77,57 @@ const NAV_GROUPS = [
   },
 ]
 
+const TOP_ITEMS = [
+  { to: '/group-home', icon: Home, label: '그룹 홈', highlight: true },
+  { to: '/chairman', icon: MessageSquare, label: 'AI 회장' },
+]
+
+function Badge({ count, color = 'red' }: { count: number; color?: 'red' | 'orange' | 'yellow' }) {
+  if (count === 0) return null
+  const styles = {
+    red:    { background: 'rgba(239,68,68,0.15)',  color: '#f87171', border: '1px solid rgba(239,68,68,0.35)' },
+    orange: { background: 'rgba(251,146,60,0.15)', color: '#fb923c', border: '1px solid rgba(251,146,60,0.35)' },
+    yellow: { background: 'rgba(250,204,21,0.15)', color: '#fbbf24', border: '1px solid rgba(250,204,21,0.35)' },
+  }
+  return (
+    <span
+      className="px-1.5 py-0.5 rounded-full text-[9px] font-bold flex-shrink-0"
+      style={styles[color]}
+    >
+      {count > 99 ? '99+' : count}
+    </span>
+  )
+}
+
 export default function Sidebar() {
-  const { sidebarOpen, toggleSidebar, newEventCount } = useAppStore()
+  const {
+    sidebarOpen, toggleSidebar, newEventCount,
+    pendingApprovals, pendingTerminals,
+    setPendingApprovals, setPendingTerminals,
+  } = useAppStore()
   const [logoError, setLogoError] = useState(false)
   const location = useLocation()
+
+  // Poll pending counts every 30 seconds
+  useEffect(() => {
+    const fetchCounts = async () => {
+      try {
+        const [approvals, terminals] = await Promise.allSettled([
+          approvalsApi.list('pending'),
+          terminalApi.list('pending'),
+        ])
+        if (approvals.status === 'fulfilled') {
+          setPendingApprovals(approvals.value.data?.length ?? 0)
+        }
+        if (terminals.status === 'fulfilled') {
+          setPendingTerminals(terminals.value.data?.length ?? 0)
+        }
+      } catch { /* silent */ }
+    }
+    fetchCounts()
+    const iv = setInterval(fetchCounts, 30_000)
+    return () => clearInterval(iv)
+  }, [])
 
   // Open groups: auto-open the group that contains the active route
   const getInitialOpen = () => {
@@ -114,8 +168,24 @@ export default function Sidebar() {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current)
   }
 
-  const NavItem = ({ to, icon: Icon, label, highlight }: { to: string; icon: React.ElementType; label: string; highlight?: boolean }) => {
-    const showBadge = to === '/group-home' && newEventCount > 0
+  const getBadgeCount = (badgeKey: 'approvals' | 'terminals' | null) => {
+    if (badgeKey === 'approvals') return pendingApprovals
+    if (badgeKey === 'terminals') return pendingTerminals
+    return 0
+  }
+
+  const getItemBadge = (to: string) => {
+    const key = ITEM_BADGES[to]
+    if (!key) return 0
+    return getBadgeCount(key)
+  }
+
+  const NavItem = ({
+    to, icon: Icon, label, highlight,
+  }: { to: string; icon: React.ElementType; label: string; highlight?: boolean }) => {
+    const showHomeBadge = to === '/group-home' && newEventCount > 0
+    const itemBadge = getItemBadge(to)
+
     return (
       <NavLink
         to={to}
@@ -133,29 +203,33 @@ export default function Sidebar() {
           <>
             <div className="relative flex-shrink-0">
               <Icon size={18} className={isActive ? 'text-brand-light' : highlight ? 'text-accent' : ''} />
-              {showBadge && !sidebarOpen && (
-                <span
-                  className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
-                  style={{ background: '#ef4444', color: 'white' }}
-                >
+              {/* Icon-mode badges */}
+              {!sidebarOpen && showHomeBadge && (
+                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold bg-red-500 text-white">
                   {newEventCount > 9 ? '9+' : newEventCount}
+                </span>
+              )}
+              {!sidebarOpen && itemBadge > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold bg-orange-500 text-white">
+                  {itemBadge > 9 ? '9+' : itemBadge}
                 </span>
               )}
             </div>
             {sidebarOpen && (
               <span className="truncate animate-fade-in flex-1">{label}</span>
             )}
-            {sidebarOpen && showBadge && (
-              <span
-                className="ml-auto flex-shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-0.5"
-                style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}
-              >
+            {sidebarOpen && showHomeBadge && (
+              <span className="ml-auto flex-shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold flex items-center gap-0.5"
+                style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>
                 <Bell size={8} />{newEventCount}
               </span>
             )}
+            {sidebarOpen && itemBadge > 0 && (
+              <Badge count={itemBadge} color="orange" />
+            )}
             {!sidebarOpen && (
               <div className="absolute left-full ml-3 px-2 py-1 bg-bg-elevated border border-bg-border rounded-md text-xs text-slate-200 whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
-                {label}{showBadge ? ` (${newEventCount})` : ''}
+                {label}{showHomeBadge ? ` (${newEventCount})` : ''}{itemBadge > 0 ? ` · ${itemBadge}건` : ''}
               </div>
             )}
           </>
@@ -174,12 +248,7 @@ export default function Sidebar() {
         <div className="flex items-center gap-3 overflow-hidden">
           <div className="w-8 h-8 flex items-center justify-center flex-shrink-0">
             {!logoError ? (
-              <img
-                src="/logo.png"
-                alt="HAN Group"
-                className="w-8 h-8 object-contain"
-                onError={() => setLogoError(true)}
-              />
+              <img src="/logo.png" alt="HAN Group" className="w-8 h-8 object-contain" onError={() => setLogoError(true)} />
             ) : (
               <div className="w-8 h-8 bg-brand rounded-lg flex items-center justify-center">
                 <Zap size={16} className="text-white" />
@@ -210,6 +279,7 @@ export default function Sidebar() {
           const isOpen = openGroups.has(group.id)
           const hasActive = group.items.some((item) => location.pathname.startsWith(item.to))
           const GroupIcon = group.icon
+          const groupBadge = getBadgeCount(group.badge)
 
           return (
             <div key={group.id}>
@@ -223,13 +293,14 @@ export default function Sidebar() {
                   <span className="flex-1 text-left animate-fade-in uppercase tracking-wider">
                     {group.label}
                   </span>
-                  {hasActive && !isOpen && (
+                  {groupBadge > 0 && <Badge count={groupBadge} color="orange" />}
+                  {hasActive && !isOpen && groupBadge === 0 && (
                     <span className="w-1.5 h-1.5 rounded-full bg-brand-light flex-shrink-0" />
                   )}
                   {isOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                 </button>
               ) : (
-                /* Collapsed: icon only, hover shows sub-sidebar */
+                /* Collapsed: icon only + badge dot, hover shows sub-sidebar */
                 <div
                   className="relative"
                   onMouseEnter={(e) => {
@@ -239,11 +310,16 @@ export default function Sidebar() {
                   onMouseLeave={hideSubmenu}
                 >
                   <button
-                    className={`w-full flex items-center justify-center py-2.5 rounded-lg transition-colors ${
+                    className={`w-full flex items-center justify-center py-2.5 rounded-lg transition-colors relative ${
                       hasActive ? 'text-brand-light bg-brand/10' : 'text-slate-500 hover:text-slate-300 hover:bg-bg-elevated'
                     }`}
                   >
                     <GroupIcon size={16} />
+                    {groupBadge > 0 && (
+                      <span className="absolute top-1 right-1 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold bg-orange-500 text-white">
+                        {groupBadge > 9 ? '9+' : groupBadge}
+                      </span>
+                    )}
                   </button>
                 </div>
               )}
@@ -277,35 +353,35 @@ export default function Sidebar() {
         if (!group) return null
         return (
           <div
-            style={{
-              position: 'fixed',
-              left: 64,
-              top: submenuTop,
-              zIndex: 9999,
-            }}
+            style={{ position: 'fixed', left: 64, top: submenuTop, zIndex: 9999 }}
             onMouseEnter={keepSubmenu}
             onMouseLeave={hideSubmenu}
             className="bg-bg-card border border-bg-border rounded-r-xl shadow-2xl py-2 min-w-[180px]"
           >
-            <div className="px-3 py-1.5 text-[10px] text-slate-500 uppercase tracking-wider font-semibold border-b border-bg-border mb-1">
-              {group.label}
+            <div className="px-3 py-1.5 flex items-center justify-between border-b border-bg-border mb-1">
+              <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
+                {group.label}
+              </span>
+              {getBadgeCount(group.badge) > 0 && (
+                <Badge count={getBadgeCount(group.badge)} color="orange" />
+              )}
             </div>
             {group.items.map((item) => {
               const ItemIcon = item.icon
               const isActive = location.pathname.startsWith(item.to)
+              const badge = getItemBadge(item.to)
               return (
                 <NavLink
                   key={item.to}
                   to={item.to}
                   onClick={() => setHoveredGroup(null)}
                   className={`flex items-center gap-2.5 px-3 py-2 text-xs transition-colors ${
-                    isActive
-                      ? 'text-brand-light bg-brand/10'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-bg-elevated'
+                    isActive ? 'text-brand-light bg-brand/10' : 'text-slate-400 hover:text-slate-200 hover:bg-bg-elevated'
                   }`}
                 >
                   <ItemIcon size={14} />
-                  {item.label}
+                  <span className="flex-1">{item.label}</span>
+                  {badge > 0 && <Badge count={badge} color="orange" />}
                 </NavLink>
               )
             })}

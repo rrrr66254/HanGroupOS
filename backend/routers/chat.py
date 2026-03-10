@@ -1,5 +1,6 @@
 import re
 import json
+import os
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -356,7 +357,7 @@ def _process_approval_actions(content: str, db, user_id: int) -> tuple:
                 tr.status = "approved"; tr.approved_by = user_id; tr.decided_at = _dt.utcnow()
                 db.flush()
                 result = subprocess.run(tr.command, shell=True, capture_output=True, text=True,
-                    timeout=30, cwd="/home/user/han-group-os")
+                    timeout=30, cwd=os.path.expanduser("~"))
                 tr.output = (result.stdout or "") + (("\n[stderr]\n" + result.stderr) if result.stderr else "")
                 tr.exit_code = result.returncode; tr.status = "executed"; tr.executed_at = _dt.utcnow()
                 db.flush()
@@ -387,7 +388,7 @@ def _process_approval_actions(content: str, db, user_id: int) -> tuple:
                     db.flush()
                     result = subprocess.run(
                         tr.command, shell=True, capture_output=True, text=True,
-                        timeout=30, cwd="/home/user/han-group-os"
+                        timeout=30, cwd=os.path.expanduser("~")
                     )
                     tr.output = (result.stdout or "") + (("\n[stderr]\n" + result.stderr) if result.stderr else "")
                     tr.exit_code = result.returncode

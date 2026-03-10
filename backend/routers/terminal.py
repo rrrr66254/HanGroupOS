@@ -9,6 +9,7 @@ Terminal router: CEO가 명령 실행을 요청하고 admin이 승인/거부한 
 """
 import subprocess
 import re
+import os
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -164,7 +165,7 @@ def execute_request(
             capture_output=True,
             text=True,
             timeout=30,
-            cwd="/home/user/han-group-os",
+            cwd=os.path.expanduser("~"),
         )
         req.output = (result.stdout or "") + (("\n[stderr]\n" + result.stderr) if result.stderr else "")
         req.exit_code = result.returncode
@@ -220,7 +221,7 @@ def approve_and_execute(
             capture_output=True,
             text=True,
             timeout=30,
-            cwd="/home/user/han-group-os",
+            cwd=os.path.expanduser("~"),
         )
         req.output = (result.stdout or "") + (("\n[stderr]\n" + result.stderr) if result.stderr else "")
         req.exit_code = result.returncode

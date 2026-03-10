@@ -25,11 +25,15 @@ interface AppState {
   selectedCompany: Company | null
   sidebarOpen: boolean
   newEventCount: number
+  pendingApprovals: number
+  pendingTerminals: number
   theme: 'dark' | 'light'
   setSelectedCompany: (company: Company | null) => void
   toggleSidebar: () => void
   setNewEventCount: (n: number) => void
   clearNewEvents: () => void
+  setPendingApprovals: (n: number) => void
+  setPendingTerminals: (n: number) => void
   toggleTheme: () => void
 }
 
@@ -37,11 +41,15 @@ export const useAppStore = create<AppState>((set) => ({
   selectedCompany: null,
   sidebarOpen: true,
   newEventCount: 0,
+  pendingApprovals: 0,
+  pendingTerminals: 0,
   theme: (localStorage.getItem('han-theme') as 'dark' | 'light') ?? 'dark',
   setSelectedCompany: (company) => set({ selectedCompany: company }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setNewEventCount: (n) => set({ newEventCount: n }),
   clearNewEvents: () => set({ newEventCount: 0 }),
+  setPendingApprovals: (n) => set({ pendingApprovals: n }),
+  setPendingTerminals: (n) => set({ pendingTerminals: n }),
   toggleTheme: () => set((s) => {
     const next = s.theme === 'dark' ? 'light' : 'dark'
     localStorage.setItem('han-theme', next)

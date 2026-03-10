@@ -450,15 +450,16 @@ export default function LiveOffice() {
 
   useEffect(() => { loadAgents(selectedId) }, [selectedId, loadAgents])
 
-  // Redraw canvas when agents or posMap change
+  // Redraw canvas when agents/posMap change OR when switching back to office tab
   useEffect(() => {
+    if (activeTab !== 'office') return
     if (!canvasRef.current) return
     const deskAnchors = Array.from(posMap.entries()).map(([id, pos]) => {
       const agent = agents.find((a) => a.id === id)
       return { x: pos.x, y: pos.y, level: agent?.level || 'specialist' }
     })
     drawHierarchicalBg(canvasRef.current, deskAnchors)
-  }, [posMap, agents.length])
+  }, [posMap, agents.length, activeTab])
 
   // Tick animation
   useEffect(() => {
