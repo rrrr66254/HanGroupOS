@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
   Crosshair, Plus, Trash2, RefreshCw, Loader, ChevronDown, ChevronUp,
-  Newspaper, X, Search, GitCompare, Building2,
+  Newspaper, X, Search, GitCompare, Building2, BarChart2,
 } from 'lucide-react'
-import { competitorApi, companiesApi } from '../api/client'
+import { competitorApi, companiesApi, competitorTrendApi } from '../api/client'
 import MarkdownMessage from '../components/MarkdownMessage'
 
 interface Competitor {
@@ -15,6 +15,24 @@ interface Competitor {
   created_at: string
 }
 
+interface TrendWeek {
+  week: string
+  count: number
+}
+
+interface TrendCompetitor {
+  id: number
+  name: string
+  industry: string
+  weekly: TrendWeek[]
+  total: number
+}
+
+interface TrendData {
+  weeks: number
+  competitors: TrendCompetitor[]
+}
+
 interface NewsItem {
   id: number
   title: string
@@ -23,6 +41,24 @@ interface NewsItem {
   data_type: string
   tags: string[]
   created_at: string
+}
+
+function TrendBars({ weekly }: { weekly: TrendWeek[] }) {
+  const maxCount = Math.max(...weekly.map(w => w.count), 1)
+  return (
+    <div className="flex items-end gap-1 h-12">
+      {weekly.map((w, i) => (
+        <div key={i} className="flex flex-col items-center gap-0.5 flex-1">
+          <div
+            className="w-full bg-brand/40 rounded-t-sm min-h-[2px]"
+            style={{ height: `${(w.count / maxCount) * 44}px` }}
+            title={`${w.week}: ${w.count}건`}
+          />
+          <span className="text-[8px] text-slate-600">{w.week.split('/')[1]}</span>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function CompetitorCard({
@@ -154,6 +190,8 @@ export default function Competitors() {
   const [compareResult, setCompareResult] = useState<string | null>(null)
   const [comparing, setComparing] = useState(false)
   const [showCompare, setShowCompare] = useState(false)
+  const [trend, setTrend] = useState<TrendData | null>(null)
+  const [trendLoading, setTrendLoading] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -213,6 +251,16 @@ export default function Competitors() {
     await load()
   }
 
+  const handleTrend = async () => {
+    setTrendLoading(true)
+    try {
+      const r = await competitorTrendApi.trend(8)
+      setTrend(r.data)
+    } finally {
+      setTrendLoading(false)
+    }
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* 헤더 */}
@@ -235,6 +283,15 @@ export default function Competitors() {
               {showCompare ? '비교분석 닫기' : '비교분석'}
             </button>
           )}
+          <button
+            onClick={handleTrend}
+            disabled={trendLoading}
+            className="btn-ghost flex items-center gap-1.5 text-xs"
+            style={{ color: trend ? '#818cf8' : undefined }}
+          >
+            {trendLoading ? <Loader size={13} className="animate-spin" /> : <BarChart2 size={13} />}
+            트렌드 분석
+          </button>
           <button onClick={load} disabled={loading} className="btn-ghost flex items-center gap-1.5 text-xs">
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
             새로고침
@@ -291,6 +348,39 @@ export default function Competitors() {
               <MarkdownMessage content={compareResult} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* 경쟁사 트렌드 */}
+      {trend && (
+        <div className="card p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <BarChart2 size={16} className="text-brand-light" />
+              <h3 className="text-sm font-semibold text-slate-100">경쟁사 트렌드</h3>
+              <span className="text-[10px] text-slate-500">최근 {trend.weeks}주 데이터 수집 현황</span>
+            </div>
+            <button onClick={() => setTrend(null)} className="text-slate-500 hover:text-slate-300 p-1">
+              <X size={14} />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {trend.competitors.map((c) => (
+              <div key={c.id} className="p-3 rounded-lg bg-bg-elevated border border-bg-border space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-200">{c.name}</div>
+                    <div className="text-[10px] text-slate-500">{c.industry || '업종 미지정'}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-base font-bold text-brand-light">{c.total}</div>
+                    <div className="text-[9px] text-slate-600">총 {trend.weeks}주</div>
+                  </div>
+                </div>
+                {c.weekly.length > 0 && <TrendBars weekly={c.weekly} />}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

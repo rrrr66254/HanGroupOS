@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Lightbulb, RefreshCw, Loader, ChevronDown, ChevronUp,
   Building2, Calendar, Zap, TrendingUp, BarChart3, Play, ArrowUpCircle, X, CheckSquare, Square,
+  GitBranch,
 } from 'lucide-react'
 import { dataApi, companiesApi, strategyApi } from '../api/client'
 import MarkdownMessage from '../components/MarkdownMessage'
@@ -16,6 +17,16 @@ interface Insight {
   priority: string
   company_id: number | null
   created_at: string
+  source_insight_id?: number
+}
+
+interface GenealogyNode {
+  id: number
+  title: string
+  item_type: string
+  status: string
+  progress: number
+  children: GenealogyNode[]
 }
 
 interface InsightStats {
@@ -154,6 +165,83 @@ function PromoteModal({ insight, companies, onClose, onDone }: PromoteModalProps
   )
 }
 
+function GenealogyTree({ nodes, depth = 0 }: { nodes: GenealogyNode[], depth?: number }) {
+  return (
+    <ul className={`space-y-1 ${depth > 0 ? 'ml-4 border-l border-bg-border pl-3 mt-1' : ''}`}>
+      {nodes.map((node) => (
+        <li key={node.id}>
+          <div className="flex items-start gap-2 py-1">
+            <GitBranch size={11} className="text-brand-light flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-medium text-slate-200 leading-snug">{node.title}</div>
+              <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500">
+                <span>{node.item_type}</span>
+                <span>·</span>
+                <span>{node.status}</span>
+                {node.progress > 0 && (
+                  <>
+                    <span>·</span>
+                    <span>{node.progress}%</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+          {node.children?.length > 0 && (
+            <GenealogyTree nodes={node.children} depth={depth + 1} />
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function GenealogyModal({ insightId, onClose }: { insightId: number; onClose: () => void }) {
+  const [loading, setLoading] = useState(true)
+  const [tree, setTree] = useState<GenealogyNode[]>([])
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    strategyApi.genealogy(insightId)
+      .then((r) => setTree(Array.isArray(r.data) ? r.data : [r.data]))
+      .catch(() => setError('계보 로딩 실패'))
+      .finally(() => setLoading(false))
+  }, [insightId])
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="card w-full max-w-lg p-6 space-y-4 max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <GitBranch size={16} className="text-brand-light" />
+            <h3 className="text-sm font-semibold text-slate-100">인사이트 계보</h3>
+          </div>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 p-1">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="overflow-y-auto flex-1">
+          {loading && (
+            <div className="flex items-center gap-2 text-slate-500 text-xs py-4">
+              <Loader size={14} className="animate-spin" />
+              계보 로딩 중...
+            </div>
+          )}
+          {error && (
+            <div className="text-xs text-red-400">{error}</div>
+          )}
+          {!loading && !error && tree.length === 0 && (
+            <div className="text-xs text-slate-500 py-4">계보 데이터가 없습니다.</div>
+          )}
+          {!loading && tree.length > 0 && (
+            <GenealogyTree nodes={tree} />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function InsightCard({
   insight,
   companyName,
@@ -167,6 +255,7 @@ function InsightCard({
 }) {
   const [expanded, setExpanded] = useState(false)
   const [showPromote, setShowPromote] = useState(false)
+  const [showGenealogy, setShowGenealogy] = useState(false)
   const isAuto = insight.title.startsWith('[자동인사이트]')
 
   return (
@@ -179,6 +268,12 @@ function InsightCard({
           onDone={onPromoted}
         />
       )}
+      {showGenealogy && (
+        <GenealogyModal
+          insightId={insight.id}
+          onClose={() => setShowGenealogy(false)}
+        />
+      )}
       <div className="flex items-start gap-2">
         <div className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center ${isAuto ? 'bg-brand/20' : 'bg-success/20'}`}>
           {isAuto ? <Zap size={10} className="text-brand-light" /> : <Lightbulb size={10} className="text-success" />}
@@ -189,6 +284,11 @@ function InsightCard({
             {isAuto && (
               <span className="text-[9px] px-1.5 py-0.5 rounded bg-brand/20 text-brand-light border border-brand/30 flex-shrink-0">
                 AI 자동
+              </span>
+            )}
+            {insight.source_insight_id && (
+              <span className="text-[9px] bg-brand/10 text-brand-light border border-brand/20 px-1.5 py-0.5 rounded-full flex-shrink-0">
+                격상됨
               </span>
             )}
             <span className={`text-[9px] px-1.5 py-0.5 rounded border flex-shrink-0 ${PRIORITY_COLORS[insight.priority] || PRIORITY_COLORS.low}`}>
@@ -206,6 +306,15 @@ function InsightCard({
             </span>
           </div>
         </div>
+        {insight.source_insight_id && (
+          <button
+            onClick={() => setShowGenealogy(true)}
+            title="계보 보기"
+            className="flex-shrink-0 text-slate-500 hover:text-brand-light p-1 transition-colors"
+          >
+            <GitBranch size={14} />
+          </button>
+        )}
         <button
           onClick={() => setShowPromote(true)}
           title="전략 목표로 격상"

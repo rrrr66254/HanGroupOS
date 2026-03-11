@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { FileText, Play, Loader2, RefreshCw, Building2, Calendar, Users, MessageCircle } from 'lucide-react'
-import { workApi, companiesApi } from '../api/client'
+import { workApi, companiesApi, briefingApi } from '../api/client'
 
 interface Company { id: number; name: string; industry: string }
 
@@ -14,6 +14,15 @@ interface ReportData {
   p2p_messages: number
   report: string
   generated_at: string
+}
+
+interface BriefingData {
+  briefing: string
+  period: string
+  data_count: number
+  strategy_count: number
+  kpi_count: number
+  generated_at?: string
 }
 
 // ── Simple markdown renderer (bold, headers, lists) ────────────────────────────
@@ -79,6 +88,9 @@ export default function WeeklyReport() {
   const [report, setReport] = useState<ReportData | null>(null)
   const [savedReports, setSavedReports] = useState<ReportData[]>([])
   const [selectedSaved, setSelectedSaved] = useState<ReportData | null>(null)
+  const [activeTab, setActiveTab] = useState<'subsidiary' | 'briefing'>('subsidiary')
+  const [briefing, setBriefing] = useState<BriefingData | null>(null)
+  const [briefingGenerating, setBriefingGenerating] = useState(false)
 
   useEffect(() => {
     companiesApi.list().then((res) => {
@@ -110,6 +122,15 @@ export default function WeeklyReport() {
     } catch { /* ignore */ } finally { setGenerating(false) }
   }
 
+  const generateBriefing = async () => {
+    setBriefingGenerating(true)
+    setBriefing(null)
+    try {
+      const res = await briefingApi.generate()
+      setBriefing(res.data as BriefingData)
+    } catch { /* ignore */ } finally { setBriefingGenerating(false) }
+  }
+
   const displayed = selectedSaved || report
   const selectedCompany = companies.find((c) => c.id === selectedId)
 
@@ -124,114 +145,211 @@ export default function WeeklyReport() {
           </h1>
           <p className="text-[11px] text-slate-500 mt-0.5">최근 7일 업무 루프 결과를 AI가 종합 분석합니다</p>
         </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={selectedId}
-            onChange={(e) => { setSelectedId(Number(e.target.value)); setReport(null); setSelectedSaved(null) }}
-            className="text-xs bg-bg-elevated border border-bg-border rounded-lg px-3 py-1.5 text-slate-300"
-          >
-            {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <button
-            onClick={generate}
-            disabled={generating || !selectedId}
-            className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium transition-all"
-            style={{
-              background: generating ? 'rgba(99,102,241,0.06)' : 'rgba(99,102,241,0.15)',
-              border: '1px solid rgba(99,102,241,0.35)', color: '#a5b4fc',
-            }}
-          >
-            {generating ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-            {generating ? '보고서 생성 중…' : '보고서 생성'}
-          </button>
-        </div>
-      </div>
-
-      {/* Saved report chips */}
-      {savedReports.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] text-slate-600">저장된 보고서:</span>
-          {savedReports.map((r, i) => (
+        {activeTab === 'subsidiary' && (
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedId}
+              onChange={(e) => { setSelectedId(Number(e.target.value)); setReport(null); setSelectedSaved(null) }}
+              className="text-xs bg-bg-elevated border border-bg-border rounded-lg px-3 py-1.5 text-slate-300"
+            >
+              {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
             <button
-              key={i}
-              onClick={() => { setSelectedSaved(r); setReport(null) }}
-              className="text-[10px] px-2.5 py-1 rounded-full transition-all"
+              onClick={generate}
+              disabled={generating || !selectedId}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium transition-all"
               style={{
-                background: selectedSaved?.generated_at === r.generated_at
-                  ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                color: selectedSaved?.generated_at === r.generated_at ? '#a5b4fc' : '#64748b',
+                background: generating ? 'rgba(99,102,241,0.06)' : 'rgba(99,102,241,0.15)',
+                border: '1px solid rgba(99,102,241,0.35)', color: '#a5b4fc',
               }}
             >
-              {r.company_name} · {new Date(r.generated_at).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
+              {generating ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+              {generating ? '보고서 생성 중…' : '보고서 생성'}
             </button>
-          ))}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
-      {/* Loading */}
-      {generating && (
-        <div className="card p-8 text-center">
-          <Loader2 size={32} className="animate-spin text-brand mx-auto mb-3" />
-          <div className="text-sm text-slate-300 font-medium">AI가 주간 데이터를 분석하고 있습니다…</div>
-          <div className="text-xs text-slate-600 mt-1">업무 로그 종합 → 부문 분석 → 인사이트 도출</div>
-        </div>
-      )}
+      {/* Tab switcher */}
+      <div className="flex rounded-lg border border-bg-border overflow-hidden w-fit">
+        {([
+          { key: 'subsidiary', label: '계열사 보고' },
+          { key: 'briefing', label: '그룹 브리핑' },
+        ] as const).map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-4 py-1.5 text-xs font-medium transition-colors ${
+              activeTab === tab.key
+                ? 'bg-brand/20 text-brand-light'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-      {/* Report display */}
-      {displayed && !generating && (
-        <div className="space-y-4">
-          {/* Meta bar */}
-          <div className="card p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="text-sm font-bold text-slate-100">{displayed.company_name}</div>
-                <div className="text-[10px] text-slate-500">{displayed.company_industry}</div>
-              </div>
-              <div className="text-[10px] text-slate-600 flex items-center gap-1">
-                <Calendar size={10} />
-                {new Date(displayed.generated_at).toLocaleString('ko-KR')} 생성
-              </div>
-            </div>
-            <div className="grid grid-cols-4 gap-3">
-              {[
-                { icon: Calendar, label: '분석 기간', value: `최근 ${displayed.period_days}일`, color: '#60a5fa' },
-                { icon: RefreshCw, label: '업무 사이클', value: `${displayed.total_cycles}회`, color: '#34d399' },
-                { icon: Users, label: 'AI 보고서', value: `${displayed.total_logs}건`, color: '#a78bfa' },
-                { icon: MessageCircle, label: 'P2P 메시지', value: `${displayed.p2p_messages}건`, color: '#fbbf24' },
-              ].map(({ icon: Icon, label, value, color }) => (
-                <div key={label} className="rounded-lg p-3 text-center"
-                  style={{ background: `${color}10`, border: `1px solid ${color}25` }}>
-                  <Icon size={14} className="mx-auto mb-1" style={{ color }} />
-                  <div className="text-base font-bold" style={{ color }}>{value}</div>
-                  <div className="text-[9px] text-slate-600 mt-0.5">{label}</div>
-                </div>
+      {/* ── 계열사 보고 탭 ── */}
+      {activeTab === 'subsidiary' && (
+        <>
+          {/* Saved report chips */}
+          {savedReports.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] text-slate-600">저장된 보고서:</span>
+              {savedReports.map((r, i) => (
+                <button
+                  key={i}
+                  onClick={() => { setSelectedSaved(r); setReport(null) }}
+                  className="text-[10px] px-2.5 py-1 rounded-full transition-all"
+                  style={{
+                    background: selectedSaved?.generated_at === r.generated_at
+                      ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    color: selectedSaved?.generated_at === r.generated_at ? '#a5b4fc' : '#64748b',
+                  }}
+                >
+                  {r.company_name} · {new Date(r.generated_at).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })}
+                </button>
               ))}
             </div>
-          </div>
+          )}
 
-          {/* Report body */}
-          <div className="card p-6">
-            <div className="flex items-center gap-2 mb-4 pb-3 border-b border-bg-border">
-              <Building2 size={14} className="text-brand-light" />
-              <span className="text-xs font-semibold text-slate-200">{displayed.company_name} 주간 경영보고서</span>
+          {/* Loading */}
+          {generating && (
+            <div className="card p-8 text-center">
+              <Loader2 size={32} className="animate-spin text-brand mx-auto mb-3" />
+              <div className="text-sm text-slate-300 font-medium">AI가 주간 데이터를 분석하고 있습니다…</div>
+              <div className="text-xs text-slate-600 mt-1">업무 로그 종합 → 부문 분석 → 인사이트 도출</div>
             </div>
-            <div className="prose-sm max-w-none">
-              {renderMd(displayed.report)}
+          )}
+
+          {/* Report display */}
+          {displayed && !generating && (
+            <div className="space-y-4">
+              {/* Meta bar */}
+              <div className="card p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="text-sm font-bold text-slate-100">{displayed.company_name}</div>
+                    <div className="text-[10px] text-slate-500">{displayed.company_industry}</div>
+                  </div>
+                  <div className="text-[10px] text-slate-600 flex items-center gap-1">
+                    <Calendar size={10} />
+                    {new Date(displayed.generated_at).toLocaleString('ko-KR')} 생성
+                  </div>
+                </div>
+                <div className="grid grid-cols-4 gap-3">
+                  {[
+                    { icon: Calendar, label: '분석 기간', value: `최근 ${displayed.period_days}일`, color: '#60a5fa' },
+                    { icon: RefreshCw, label: '업무 사이클', value: `${displayed.total_cycles}회`, color: '#34d399' },
+                    { icon: Users, label: 'AI 보고서', value: `${displayed.total_logs}건`, color: '#a78bfa' },
+                    { icon: MessageCircle, label: 'P2P 메시지', value: `${displayed.p2p_messages}건`, color: '#fbbf24' },
+                  ].map(({ icon: Icon, label, value, color }) => (
+                    <div key={label} className="rounded-lg p-3 text-center"
+                      style={{ background: `${color}10`, border: `1px solid ${color}25` }}>
+                      <Icon size={14} className="mx-auto mb-1" style={{ color }} />
+                      <div className="text-base font-bold" style={{ color }}>{value}</div>
+                      <div className="text-[9px] text-slate-600 mt-0.5">{label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Report body */}
+              <div className="card p-6">
+                <div className="flex items-center gap-2 mb-4 pb-3 border-b border-bg-border">
+                  <Building2 size={14} className="text-brand-light" />
+                  <span className="text-xs font-semibold text-slate-200">{displayed.company_name} 주간 경영보고서</span>
+                </div>
+                <div className="prose-sm max-w-none">
+                  {renderMd(displayed.report)}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          )}
+
+          {/* Empty state */}
+          {!displayed && !generating && (
+            <div className="card p-12 text-center">
+              <FileText size={40} className="mx-auto mb-4 text-slate-700" />
+              <div className="text-slate-500 text-sm font-medium mb-1">보고서를 생성하세요</div>
+              <div className="text-slate-700 text-xs">
+                계열사를 선택하고 "보고서 생성" 버튼을 누르면<br />
+                최근 7일 업무 데이터를 AI가 분석합니다.
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Empty state */}
-      {!displayed && !generating && (
-        <div className="card p-12 text-center">
-          <FileText size={40} className="mx-auto mb-4 text-slate-700" />
-          <div className="text-slate-500 text-sm font-medium mb-1">보고서를 생성하세요</div>
-          <div className="text-slate-700 text-xs">
-            계열사를 선택하고 "보고서 생성" 버튼을 누르면<br />
-            최근 7일 업무 데이터를 AI가 분석합니다.
+      {/* ── 그룹 브리핑 탭 ── */}
+      {activeTab === 'briefing' && (
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <button
+              onClick={generateBriefing}
+              disabled={briefingGenerating}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium transition-all"
+              style={{
+                background: briefingGenerating ? 'rgba(99,102,241,0.06)' : 'rgba(99,102,241,0.15)',
+                border: '1px solid rgba(99,102,241,0.35)', color: '#a5b4fc',
+              }}
+            >
+              {briefingGenerating ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+              {briefingGenerating ? '브리핑 생성 중…' : '브리핑 생성'}
+            </button>
           </div>
+
+          {briefingGenerating && (
+            <div className="card p-8 text-center">
+              <Loader2 size={32} className="animate-spin text-brand mx-auto mb-3" />
+              <div className="text-sm text-slate-300 font-medium">그룹 전체 데이터를 종합하고 있습니다…</div>
+              <div className="text-xs text-slate-600 mt-1">전략 항목 · KPI · 수집 데이터 통합 분석</div>
+            </div>
+          )}
+
+          {briefing && !briefingGenerating && (
+            <div className="space-y-4">
+              {/* 메타 */}
+              <div className="card p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { label: '기간', value: briefing.period, color: '#60a5fa' },
+                  { label: '데이터 건수', value: `${briefing.data_count}건`, color: '#34d399' },
+                  { label: '전략 건수', value: `${briefing.strategy_count}건`, color: '#a78bfa' },
+                  { label: 'KPI 건수', value: `${briefing.kpi_count}건`, color: '#fbbf24' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="rounded-lg p-3 text-center"
+                    style={{ background: `${color}10`, border: `1px solid ${color}25` }}>
+                    <div className="text-base font-bold" style={{ color }}>{value}</div>
+                    <div className="text-[9px] text-slate-600 mt-0.5">{label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 브리핑 본문 */}
+              <div className="card p-6">
+                <div className="flex items-center gap-2 mb-4 pb-3 border-b border-bg-border">
+                  <FileText size={14} className="text-brand-light" />
+                  <span className="text-xs font-semibold text-slate-200">그룹 전체 브리핑</span>
+                </div>
+                <div className="prose-sm max-w-none">
+                  {renderMd(briefing.briefing)}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!briefing && !briefingGenerating && (
+            <div className="card p-12 text-center">
+              <FileText size={40} className="mx-auto mb-4 text-slate-700" />
+              <div className="text-slate-500 text-sm font-medium mb-1">그룹 전체 브리핑</div>
+              <div className="text-slate-700 text-xs">
+                "브리핑 생성" 버튼을 누르면 모든 계열사 데이터를<br />
+                AI가 종합하여 그룹 브리핑을 작성합니다.
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
