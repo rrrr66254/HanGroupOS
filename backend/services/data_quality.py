@@ -51,6 +51,42 @@ DEFAULT_POLICY = {
 }
 
 
+def get_policy(db: Session, source: str, company_id: Optional[int] = None) -> dict:
+    """DB에서 수집 정책 조회. 회사별 > 글로벌 > 하드코딩 순으로 폴백."""
+    from models.models import DataCollectionPolicy
+
+    # 1) 회사별 정책
+    if company_id:
+        p = db.query(DataCollectionPolicy).filter(
+            DataCollectionPolicy.source == source,
+            DataCollectionPolicy.company_id == company_id,
+            DataCollectionPolicy.is_active == True,
+        ).first()
+        if p:
+            return {
+                "max_records": p.max_records,
+                "retention_days": p.retention_days,
+            }
+
+    # 2) 글로벌 정책 (company_id=None)
+    p = db.query(DataCollectionPolicy).filter(
+        DataCollectionPolicy.source == source,
+        DataCollectionPolicy.company_id == None,
+        DataCollectionPolicy.is_active == True,
+    ).first()
+    if p:
+        return {
+            "max_records": p.max_records,
+            "retention_days": p.retention_days,
+        }
+
+    # 3) 하드코딩 기본값
+    return {
+        "max_records": DEFAULT_POLICY["max_per_source"].get(source),
+        "retention_days": DEFAULT_POLICY["raw_retention_days"],
+    }
+
+
 def compute_hash(title: str, content: str) -> str:
     """제목+내용 앞 500자를 SHA256 해싱."""
     text = f"{title}|{content[:500]}"
@@ -104,6 +140,7 @@ def should_save(
     - 중복이면 저장 안 함
     - 용량 초과면 저장 안 함
     - 저품질(short)은 저장하되 플래그만
+    DB에서 정책 조회 (get_policy), 없으면 하드코딩 기본값 사용.
     """
     from models.models import CollectedData
 
@@ -113,8 +150,9 @@ def should_save(
     if quality_flag == "empty":
         return False, "empty"
 
-    # 소스별 용량 제한
-    max_src = DEFAULT_POLICY["max_per_source"].get(source)
+    # 소스별 용량 제한 (DB 정책 우선)
+    policy = get_policy(db, source, company_id)
+    max_src = policy.get("max_records") or DEFAULT_POLICY["max_per_source"].get(source)
     if max_src:
         cnt = db.query(func.count(CollectedData.id)).filter(
             CollectedData.source == source

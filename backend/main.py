@@ -3,7 +3,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import init_db, SessionLocal
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links
 
 
 app = FastAPI(
@@ -46,6 +46,8 @@ app.include_router(audit.router)          # 감사 로그 (승인/반려/터미�
 app.include_router(video_gen.router)      # 영상 생성 (HuggingFace Inference API)
 app.include_router(notifications.router)  # 알림 시스템 (DB 영속화)
 app.include_router(docs.router)           # AI 문서 자동 생성기 (사업계획서/IR/시장분석)
+app.include_router(competitors.router)    # 경쟁사 모니터링
+app.include_router(kpi_links.router)      # KPI 데이터 연동
 
 
 @app.get("/health")
@@ -307,6 +309,48 @@ def _seed_data():
 
 
 # ── Background Scheduler ──────────────────────────────────────────────────────
+def _update_source_status(db, source: str, success: bool, error: str = ""):
+    """DataSourceStatus 업데이트. 연속 3회 실패 시 알림 발송."""
+    from datetime import datetime, timedelta
+    from models.models import DataSourceStatus, User as UserModel
+    from routers.notifications import create_notification
+
+    now = datetime.utcnow()
+    status = db.query(DataSourceStatus).filter(DataSourceStatus.source == source).first()
+    if not status:
+        status = DataSourceStatus(source=source)
+        db.add(status)
+
+    if success:
+        status.consecutive_failures = 0
+        status.total_successes = (status.total_successes or 0) + 1
+        status.last_success_at = now
+    else:
+        status.consecutive_failures = (status.consecutive_failures or 0) + 1
+        status.total_failures = (status.total_failures or 0) + 1
+        status.last_failure_at = now
+        status.last_error = error
+
+        # 연속 3회 이상 실패하고 24시간 내 알림 미발송이면 알림
+        if status.consecutive_failures >= 3:
+            alert_cutoff = now - timedelta(hours=24)
+            if not status.alert_sent_at or status.alert_sent_at < alert_cutoff:
+                admin = db.query(UserModel).filter(UserModel.username == "admin").first()
+                admin_id = admin.id if admin else None
+                create_notification(
+                    db=db,
+                    user_id=admin_id,
+                    title=f"[수집 실패 알림] {source}",
+                    body=f"연속 {status.consecutive_failures}회 실패\n최근 오류: {error[:200]}",
+                    notif_type="error",
+                    icon="🚨",
+                    link="/data",
+                )
+                status.alert_sent_at = now
+
+    db.commit()
+
+
 def _auto_collect_news():
     """6시간마다 전체 계열사 업종 관련 뉴스 + 글로벌 데이터 자동 수집 (스마트 필터링 적용)."""
     from datetime import datetime
@@ -378,8 +422,10 @@ def _auto_collect_news():
                         company_id=company.id,
                         keywords=keywords,
                     )
+                _update_source_status(db, "company_news", True)
             except Exception as e:
                 print(f"[Scheduler] {company.name} 뉴스 수집 실패: {e}")
+                _update_source_status(db, "company_news", False, str(e))
 
         # ── 2. HackerNews 글로벌 테크 트렌드 수집 ───────────────────────────
         try:
@@ -399,8 +445,10 @@ def _auto_collect_news():
                     tags=["hackernews", "tech", "trend", "free", "auto"],
                 )
                 print(f"[Scheduler] HackerNews {len(hn_result['stories'])}개 스토리 수집")
+            _update_source_status(db, "hackernews", True)
         except Exception as e:
             print(f"[Scheduler] HackerNews 수집 실패: {e}")
+            _update_source_status(db, "hackernews", False, str(e))
 
         # ── 3. World Bank 한국 GDP 성장률 수집 ───────────────────────────────
         try:
@@ -420,13 +468,45 @@ def _auto_collect_news():
                     tags=["worldbank", "economic", "korea", "gdp", "auto"],
                 )
                 print(f"[Scheduler] World Bank GDP 데이터 {len(wb_result['data'])}건 수집")
+            _update_source_status(db, "worldbank", True)
         except Exception as e:
             print(f"[Scheduler] World Bank 수집 실패: {e}")
+            _update_source_status(db, "worldbank", False, str(e))
+
+        # ── 4. 경쟁사 뉴스 수집 ───────────────────────────────────────────────
+        from models.models import Company as CompanyModel
+        competitor_companies = db.query(CompanyModel).filter(CompanyModel.is_competitor == True).all()
+        for comp in competitor_companies[:5]:
+            try:
+                keywords = comp.competitor_keywords or [comp.name]
+                query = " ".join(keywords[:3]) if keywords else comp.name
+                result = collector.news_search(query=query, language="ko", days_back=1)
+                articles = result.get("articles", [])
+                if articles:
+                    content = "\n".join(
+                        f"{a.get('title','')}: {a.get('description','')}"
+                        for a in articles[:10]
+                    )
+                    _smart_save(
+                        title=f"[경쟁사] {comp.name} 뉴스",
+                        content=content,
+                        data_type="news",
+                        source=result.get("source", "auto"),
+                        query=query,
+                        structured=result,
+                        tags=["competitor", "news", "auto_collected"],
+                        company_id=comp.id,
+                        keywords=keywords,
+                    )
+                _update_source_status(db, "competitor_news", True)
+            except Exception as e:
+                print(f"[Scheduler] 경쟁사 {comp.name} 뉴스 수집 실패: {e}")
+                _update_source_status(db, "competitor_news", False, str(e))
 
         db.commit()
         print(f"[Scheduler] 수집 완료 — 저장 {saved_total}건 / 스킵 {skipped_total}건 (중복·용량·품질 필터)")
 
-        # ── 4. 활성 회사별 자동 인사이트 생성 ────────────────────────────────
+        # ── 5. 활성 회사별 자동 인사이트 생성 ────────────────────────────────
         try:
             _auto_generate_insights(db, companies[:5])
         except Exception as e:

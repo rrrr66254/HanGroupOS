@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from core.database import get_db
 from core.security import get_current_user
-from models.models import ExternalApiKey, CollectedData, StrategyItem, User, MarketKeywordAlert
+from models.models import ExternalApiKey, CollectedData, StrategyItem, User, MarketKeywordAlert, DataCollectionPolicy
 from schemas.schemas import (
     ExternalApiKeyCreate, ExternalApiKeyUpdate, ExternalApiKeyOut,
     WebSearchRequest, NewsSearchRequest, ScrapeRequest,
@@ -1275,6 +1275,95 @@ def hash_existing_data(
         updated += 1
     db.commit()
     return {"updated": updated, "message": f"{updated}건 해시/품질플래그 적용 완료"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 데이터 수집 정책 관리 (DataCollectionPolicy CRUD)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class PolicyCreateRequest(BaseModel):
+    company_id: Optional[int] = None
+    source: str
+    max_records: Optional[int] = None
+    retention_days: Optional[int] = None
+    memo: str = ""
+
+
+@router.get("/policies", summary="수집 정책 목록")
+def list_policies(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    policies = db.query(DataCollectionPolicy).order_by(DataCollectionPolicy.id).all()
+    return [
+        {
+            "id": p.id,
+            "company_id": p.company_id,
+            "source": p.source,
+            "max_records": p.max_records,
+            "retention_days": p.retention_days,
+            "is_active": p.is_active,
+            "memo": p.memo,
+            "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+        }
+        for p in policies
+    ]
+
+
+@router.post("/policies", summary="수집 정책 생성/수정")
+def upsert_policy(
+    req: PolicyCreateRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    existing = db.query(DataCollectionPolicy).filter(
+        DataCollectionPolicy.source == req.source,
+        DataCollectionPolicy.company_id == req.company_id,
+    ).first()
+    if existing:
+        existing.max_records = req.max_records
+        existing.retention_days = req.retention_days
+        existing.memo = req.memo
+        existing.is_active = True
+        db.commit()
+        db.refresh(existing)
+        policy = existing
+    else:
+        policy = DataCollectionPolicy(
+            company_id=req.company_id,
+            source=req.source,
+            max_records=req.max_records,
+            retention_days=req.retention_days,
+            memo=req.memo,
+            is_active=True,
+        )
+        db.add(policy)
+        db.commit()
+        db.refresh(policy)
+    return {
+        "id": policy.id,
+        "company_id": policy.company_id,
+        "source": policy.source,
+        "max_records": policy.max_records,
+        "retention_days": policy.retention_days,
+        "is_active": policy.is_active,
+        "memo": policy.memo,
+        "updated_at": policy.updated_at.isoformat() if policy.updated_at else None,
+    }
+
+
+@router.delete("/policies/{policy_id}", summary="수집 정책 삭제")
+def delete_policy(
+    policy_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    policy = db.query(DataCollectionPolicy).filter(DataCollectionPolicy.id == policy_id).first()
+    if not policy:
+        raise HTTPException(404, "정책을 찾을 수 없습니다.")
+    db.delete(policy)
+    db.commit()
+    return {"message": "삭제되었습니다."}
 
 
 @router.get("/export/{company_id}", summary="수집 데이터 JSON 내보내기")

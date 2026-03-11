@@ -25,6 +25,8 @@ class Company(Base):
     industry = Column(String(100), default="")
     status = Column(String(20), default="active")  # active | inactive | planning
     vision = Column(Text, default="")
+    is_competitor = Column(Boolean, default=False)          # True=경쟁사
+    competitor_keywords = Column(JSON, default=[])          # 경쟁사 모니터링 키워드
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -527,4 +529,51 @@ class MediaPost(Base):
     status = Column(String(20), default="draft")     # draft | published | failed
     platform_meta = Column(JSON, default={})         # 플랫폼별 추가 정보
     published_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ── 데이터 수집 정책 ───────────────────────────────────────────────────────────
+class DataCollectionPolicy(Base):
+    """소스별·회사별 데이터 수집 용량 정책 (DB 기반, 코드 상수 오버라이드)."""
+    __tablename__ = "data_collection_policies"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)  # None=전체 기본값
+    source = Column(String(100), nullable=False)     # hackernews|worldbank|reddit 등
+    max_records = Column(Integer, nullable=True)     # None=기본 정책 사용
+    retention_days = Column(Integer, nullable=True)  # raw 데이터 보관 기간
+    is_active = Column(Boolean, default=True)
+    memo = Column(String(200), default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── 수집 소스 상태 (실패 감지) ────────────────────────────────────────────────
+class DataSourceStatus(Base):
+    """소스별 수집 성공/실패 카운터 — 연속 실패 감지 + 알림용."""
+    __tablename__ = "data_source_statuses"
+    id = Column(Integer, primary_key=True, index=True)
+    source = Column(String(100), unique=True, nullable=False, index=True)
+    consecutive_failures = Column(Integer, default=0)
+    total_failures = Column(Integer, default=0)
+    total_successes = Column(Integer, default=0)
+    last_success_at = Column(DateTime, nullable=True)
+    last_failure_at = Column(DateTime, nullable=True)
+    last_error = Column(Text, default="")
+    alert_sent_at = Column(DateTime, nullable=True)   # 마지막 알림 발송 시각
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── KPI ↔ 데이터 소스 연동 ────────────────────────────────────────────────────
+class KpiDataLink(Base):
+    """수집 데이터 소스를 StrategyItem KPI에 자동 연동하는 규칙."""
+    __tablename__ = "kpi_data_links"
+    id = Column(Integer, primary_key=True, index=True)
+    strategy_item_id = Column(Integer, ForeignKey("strategy_items.id"), nullable=False)
+    source = Column(String(100), nullable=False)      # fred | worldbank | ecos | kosis
+    series_id = Column(String(200), nullable=False)   # DEXKOUS | NY.GDP.MKTP.KD.ZG 등
+    field_path = Column(String(200), default="data[0].value")  # JSON 경로로 값 추출
+    transform = Column(String(50), default="latest")  # latest | avg | sum | pct_change
+    unit = Column(String(50), default="")
+    last_value = Column(Float, nullable=True)
+    last_updated_at = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
