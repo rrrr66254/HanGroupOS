@@ -110,6 +110,7 @@ export const approvalsApi = {
   counts: () => api.get('/approvals/counts'),
   create: (data: object) => api.post('/approvals', data),
   review: (id: number, data: object) => api.post(`/approvals/${id}/review`, data),
+  aiReview: (id: number) => api.post(`/approvals/${id}/ai-review`),
   delete: (id: number) => api.delete(`/approvals/${id}`),
 }
 
@@ -356,6 +357,8 @@ export const dataApi = {
   collectFred: (data?: object) => api.post('/data/collect/fred', data || {}),
   collectAlphaVantage: (data?: object) => api.post('/data/collect/alphavantage', data || {}),
   collectKosis: (data?: object) => api.post('/data/collect/kosis', data || {}),
+  autoTag: (data?: { limit?: number; data_type?: string; source?: string; force?: boolean }) =>
+    api.post('/data/auto-tag', data || {}),
   flow: (companyId?: number) => api.get('/data/flow', { params: companyId ? { company_id: companyId } : {} }),
   // 품질 관리
   quality: () => api.get('/data/quality'),

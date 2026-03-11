@@ -3,7 +3,7 @@ import {
   Database, TrendingUp, Download, RefreshCw, Loader,
   Globe, Hash, Building2, Calendar, Activity, GitBranch,
   ShieldCheck, Trash2, Copy, Zap, AlertTriangle, Plus, Settings2, X,
-  CheckCircle, XCircle, AlertCircle, Edit2, Check, Upload, FileDown,
+  CheckCircle, XCircle, AlertCircle, Edit2, Check, Upload, FileDown, Tags,
 } from 'lucide-react'
 import { dataApi, companiesApi, policyApi } from '../api/client'
 import type { Company } from '../types'
@@ -188,10 +188,10 @@ const TYPE_COLORS: Record<string, string> = {
 }
 
 const FREE_SOURCES = [
-  { id: 'hackernews', label: 'HackerNews 트렌드', desc: '글로벌 테크 스토리', action: () => dataApi.collectHackernews({ limit: 15, save: true }) },
-  { id: 'worldbank', label: 'World Bank GDP', desc: '한국 GDP 성장률', action: () => dataApi.collectWorldBank({ indicator: 'NY.GDP.MKTP.KD.ZG', country: 'KR', save: true }) },
-  { id: 'reddit_tech', label: 'Reddit /r/technology', desc: '기술 커뮤니티 트렌드', action: () => dataApi.collectReddit({ subreddit: 'technology', limit: 20, save: true }) },
-  { id: 'reddit_startup', label: 'Reddit /r/startups', desc: '스타트업 동향', action: () => dataApi.collectReddit({ subreddit: 'startups', limit: 15, save: true }) },
+  { id: 'hackernews', label: 'HackerNews 트렌드', desc: '글로벌 테크 스토리', countKey: 'stories', action: () => dataApi.collectHackernews({ limit: 15, save: true }) },
+  { id: 'worldbank', label: 'World Bank GDP', desc: '한국 GDP 성장률', countKey: 'data', action: () => dataApi.collectWorldBank({ indicator: 'NY.GDP.MKTP.KD.ZG', country: 'KR', save: true }) },
+  { id: 'reddit_tech', label: 'Reddit /r/technology', desc: '기술 커뮤니티 트렌드', countKey: 'posts', action: () => dataApi.collectReddit({ subreddit: 'technology', limit: 20, save: true }) },
+  { id: 'reddit_startup', label: 'Reddit /r/startups', desc: '스타트업 동향', countKey: 'posts', action: () => dataApi.collectReddit({ subreddit: 'startups', limit: 15, save: true }) },
 ]
 
 // KOSIS requires API key — separate section
@@ -206,6 +206,9 @@ export default function DataAnalytics() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
   const [collecting, setCollecting] = useState<string | null>(null)
+  const [collectResults, setCollectResults] = useState<Record<string, { count: number; ts: number }>>({})
+  const [autoTagging, setAutoTagging] = useState(false)
+  const [autoTagResult, setAutoTagResult] = useState<{ tagged: number; skipped: number } | null>(null)
   const [exportCompany, setExportCompany] = useState('')
   const [exporting, setExporting] = useState(false)
   const [kosisCollecting, setKosisCollecting] = useState<string | null>(null)
@@ -311,13 +314,28 @@ export default function DataAnalytics() {
     loadSourceStatus()
   }, [])
 
-  const runCollect = async (id: string, action: () => Promise<unknown>) => {
+  const runCollect = async (id: string, action: () => Promise<{ data: Record<string, unknown> }>, countKey?: string) => {
     setCollecting(id)
     try {
-      await action()
+      const r = await action()
+      const count = countKey
+        ? ((r.data[countKey] as unknown[])?.length ?? (r.data['item_count'] as number) ?? 0)
+        : 0
+      setCollectResults((prev) => ({ ...prev, [id]: { count, ts: Date.now() } }))
       await loadStats()
     } finally {
       setCollecting(null)
+    }
+  }
+
+  const runAutoTag = async () => {
+    setAutoTagging(true)
+    setAutoTagResult(null)
+    try {
+      const r = await dataApi.autoTag({ limit: 20 })
+      setAutoTagResult(r.data)
+    } finally {
+      setAutoTagging(false)
     }
   }
 
@@ -563,23 +581,47 @@ export default function DataAnalytics() {
           <span className="text-[10px] text-slate-500 font-normal ml-auto">키 불필요 소스</span>
         </h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {FREE_SOURCES.map((src) => (
-            <button
-              key={src.id}
-              onClick={() => runCollect(src.id, src.action)}
-              disabled={collecting !== null}
-              className="p-3 rounded-lg border border-bg-border bg-bg-elevated hover:border-success/40 hover:bg-success/5 transition-all text-left"
-            >
-              {collecting === src.id ? (
-                <Loader size={13} className="animate-spin text-success mb-2" />
-              ) : (
-                <div className="text-success text-base mb-1">+</div>
-              )}
-              <div className="text-xs font-medium text-slate-200">{src.label}</div>
-              <div className="text-[10px] text-slate-500 mt-0.5">{src.desc}</div>
-            </button>
-          ))}
+          {FREE_SOURCES.map((src) => {
+            const result = collectResults[src.id]
+            const isRecent = result && Date.now() - result.ts < 60000
+            return (
+              <button
+                key={src.id}
+                onClick={() => runCollect(src.id, src.action as () => Promise<{ data: Record<string, unknown> }>, src.countKey)}
+                disabled={collecting !== null}
+                className={`p-3 rounded-lg border bg-bg-elevated transition-all text-left ${
+                  isRecent
+                    ? 'border-success/40 bg-success/5'
+                    : 'border-bg-border hover:border-success/40 hover:bg-success/5'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  {collecting === src.id ? (
+                    <Loader size={13} className="animate-spin text-success" />
+                  ) : isRecent ? (
+                    <CheckCircle size={13} className="text-success" />
+                  ) : (
+                    <div className="text-success text-base leading-none">+</div>
+                  )}
+                  {isRecent && result.count > 0 && (
+                    <span className="text-[10px] text-success font-medium">{result.count}개</span>
+                  )}
+                </div>
+                <div className="text-xs font-medium text-slate-200">{src.label}</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">{src.desc}</div>
+                {isRecent && (
+                  <div className="text-[9px] text-success/70 mt-1">✓ 방금 수집됨</div>
+                )}
+              </button>
+            )
+          })}
         </div>
+        {Object.keys(collectResults).length > 0 && (
+          <div className="mt-3 flex items-center gap-2 text-[10px] text-slate-500">
+            <CheckCircle size={10} className="text-success" />
+            수집 완료. 아래 「데이터 품질 관리」→ AI 자동 태깅으로 분류하거나, 「데이터 흐름 관계도」로 확인하세요.
+          </div>
+        )}
       </div>
 
       {/* 데이터 관계 시각화 */}
@@ -730,11 +772,36 @@ export default function DataAnalytics() {
         </div>
 
         {/* 즉시 실행 액션 */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          {/* AI 자동 태깅 */}
+          <button
+            onClick={runAutoTag}
+            disabled={autoTagging || qualityAction !== null}
+            className={`p-3 rounded-lg border transition-all text-left ${
+              autoTagResult
+                ? 'border-purple-500/40 bg-purple-500/5'
+                : 'border-bg-border bg-bg-elevated hover:border-purple-500/40 hover:bg-purple-500/5'
+            }`}
+          >
+            {autoTagging ? (
+              <Loader size={13} className="animate-spin text-purple-400 mb-2" />
+            ) : autoTagResult ? (
+              <CheckCircle size={13} className="text-purple-400 mb-2" />
+            ) : (
+              <Tags size={13} className="text-purple-400 mb-2" />
+            )}
+            <div className="text-xs font-medium text-slate-200">AI 자동 태깅</div>
+            {autoTagResult ? (
+              <div className="text-[10px] text-purple-300 mt-0.5">✓ {autoTagResult.tagged}개 태깅됨</div>
+            ) : (
+              <div className="text-[10px] text-slate-500 mt-0.5">산업·감성·키워드 자동 분류</div>
+            )}
+          </button>
+
           {/* 중복 제거 */}
           <button
             onClick={() => runQualityAction('dedup')}
-            disabled={qualityAction !== null}
+            disabled={qualityAction !== null || autoTagging}
             className="p-3 rounded-lg border border-bg-border bg-bg-elevated hover:border-brand/40 hover:bg-brand/5 transition-all text-left"
           >
             {qualityAction === 'dedup' ? (
@@ -764,7 +831,7 @@ export default function DataAnalytics() {
             </div>
             <button
               onClick={() => runQualityAction('cleanup')}
-              disabled={qualityAction !== null}
+              disabled={qualityAction !== null || autoTagging}
               className="w-full text-[10px] py-1 rounded bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors"
             >
               {qualityAction === 'cleanup' ? '정리 중...' : '실행'}
@@ -774,7 +841,7 @@ export default function DataAnalytics() {
           {/* 해시 일괄 적용 */}
           <button
             onClick={() => runQualityAction('hash')}
-            disabled={qualityAction !== null}
+            disabled={qualityAction !== null || autoTagging}
             className="p-3 rounded-lg border border-bg-border bg-bg-elevated hover:border-teal-500/40 hover:bg-teal-500/5 transition-all text-left"
           >
             {qualityAction === 'hash' ? (

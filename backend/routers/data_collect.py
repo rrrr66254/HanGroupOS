@@ -85,6 +85,12 @@ class AlertCreateRequest(BaseModel):
 class AlertToggleRequest(BaseModel):
     is_active: bool
 
+class AutoTagRequest(BaseModel):
+    limit: int = 20
+    data_type: Optional[str] = None
+    source: Optional[str] = None
+    force: bool = False  # True면 이미 ai_tagged인 것도 재태깅
+
 router = APIRouter(prefix="/api/data", tags=["data-collection"])
 
 
@@ -713,7 +719,8 @@ def collect_hackernews(
         db.commit()
         db.refresh(obj)
         saved_id = obj.id
-    return {**result, "saved_id": saved_id}
+    item_count = len(result.get("stories", []))
+    return {**result, "saved_id": saved_id, "item_count": item_count}
 
 
 @router.post("/collect/worldbank", summary="World Bank 거시경제 지표 수집 (무료)")
@@ -743,7 +750,8 @@ def collect_worldbank(
         db.commit()
         db.refresh(obj)
         saved_id = obj.id
-    return {**result, "saved_id": saved_id}
+    item_count = len(result.get("data", []))
+    return {**result, "saved_id": saved_id, "item_count": item_count}
 
 
 @router.post("/collect/reddit", summary="Reddit 커뮤니티 트렌드 수집 (무료)")
@@ -776,7 +784,8 @@ def collect_reddit(
         db.commit()
         db.refresh(obj)
         saved_id = obj.id
-    return {**result, "saved_id": saved_id}
+    item_count = len(result.get("posts", []))
+    return {**result, "saved_id": saved_id, "item_count": item_count}
 
 
 @router.post("/collect/kosis", summary="KOSIS 국가통계포털 데이터 수집")
@@ -1541,3 +1550,90 @@ def import_policies(
             created += 1
     db.commit()
     return {"created": created, "updated": updated, "total": created + updated}
+
+
+# ── AI 자동 태깅 ───────────────────────────────────────────────────────────────
+
+@router.post("/auto-tag", summary="AI 자동 태깅")
+def auto_tag_collected(
+    req: AutoTagRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """수집된 CollectedData에 AI가 자동으로 산업 카테고리·감성·키워드 태그를 부착."""
+    import re as _re
+
+    from services.ai_provider import get_provider_from_db, AIProvider
+    try:
+        ai = get_provider_from_db(db)
+    except Exception:
+        ai = AIProvider()
+
+    q = db.query(CollectedData)
+    if req.data_type:
+        q = q.filter(CollectedData.data_type == req.data_type)
+    if req.source:
+        q = q.filter(CollectedData.source == req.source)
+
+    # 최근 항목 우선, 여유분 확보 후 Python 레벨에서 필터
+    candidates = q.order_by(CollectedData.created_at.desc()).limit(req.limit * 4).all()
+
+    to_process = []
+    skipped_count = 0
+    for item in candidates:
+        existing_tags = item.tags or []
+        if not req.force and "ai_tagged" in existing_tags:
+            skipped_count += 1
+            continue
+        if not item.title and not item.content:
+            skipped_count += 1
+            continue
+        to_process.append(item)
+        if len(to_process) >= req.limit:
+            break
+
+    tagged_count = 0
+    for item in to_process:
+        content_preview = (item.content or "")[:400]
+        prompt = (
+            f"다음 데이터를 분석하여 JSON만 반환하세요.\n"
+            f"제목: {item.title or ''}\n"
+            f"유형: {item.data_type}\n"
+            f"출처: {item.source}\n"
+            f"내용: {content_preview}\n\n"
+            '{"industry":"tech|finance|healthcare|manufacturing|retail|energy|media|government|other",'
+            '"sentiment":"positive|negative|neutral",'
+            '"topics":["태그1","태그2"],'
+            '"entities":["기관/기술"]}'
+        )
+        try:
+            response = ai.chat(
+                messages=[{"role": "user", "content": prompt}],
+                system="데이터 분류 전문가입니다. JSON만 반환합니다.",
+                max_tokens=200,
+            )
+            jm = _re.search(r'\{[\s\S]*?\}', response)
+            if jm:
+                tag_data = __import__('json').loads(jm.group())
+                existing = item.tags or []
+                new_tags = list(set(
+                    existing
+                    + ["ai_tagged"]
+                    + [f"industry:{tag_data.get('industry', 'other')}"]
+                    + [f"sentiment:{tag_data.get('sentiment', 'neutral')}"]
+                    + [t for t in tag_data.get("topics", []) if isinstance(t, str)][:3]
+                    + [e for e in tag_data.get("entities", []) if isinstance(e, str)][:2]
+                ))
+                item.tags = new_tags
+                tagged_count += 1
+            else:
+                skipped_count += 1
+        except Exception:
+            skipped_count += 1
+
+    db.commit()
+    return {
+        "tagged": tagged_count,
+        "skipped": skipped_count,
+        "total_candidates": len(to_process),
+    }

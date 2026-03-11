@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
+import json
+import re
 from core.database import get_db
 from core.security import get_current_user
 from models.models import ApprovalRequest, User
@@ -118,6 +120,76 @@ def review_approval(
             print(f"[video_gen] 자동 시작 실패 (무시): {e}")
 
     return approval
+
+
+@router.post("/{approval_id}/ai-review")
+def ai_review_approval(
+    approval_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """AI가 결재 요청을 사전 분석하여 위험도·권고사항을 반환하고 meta에 저장."""
+    approval = db.query(ApprovalRequest).filter(ApprovalRequest.id == approval_id).first()
+    if not approval:
+        raise HTTPException(404, "Approval not found")
+
+    from services.ai_provider import get_provider_from_db, AIProvider
+    try:
+        ai = get_provider_from_db(db)
+    except Exception:
+        ai = AIProvider()
+
+    TYPE_LABELS_KO = {
+        "company_create": "계열사 설립",
+        "org_change": "조직 변경",
+        "strategy": "전략 결정",
+        "capability_update": "역량 활성화",
+        "video_gen": "영상 생성",
+        "general": "일반",
+    }
+    type_label = TYPE_LABELS_KO.get(approval.request_type, approval.request_type)
+
+    meta_str = ""
+    if approval.meta:
+        try:
+            meta_str = f"\n추가 정보: {json.dumps(approval.meta, ensure_ascii=False, default=str)}"
+        except Exception:
+            pass
+
+    prompt = f"""다음 결재 요청을 분석하여 아래 JSON 형식으로만 응답하세요.
+
+결재 요청:
+- 유형: {type_label}
+- 제목: {approval.title}
+- 요청자: {approval.requester}
+- 내용: {approval.description or '내용 없음'}{meta_str}
+
+JSON 형식으로만 응답하세요:
+{{"risk_level": "low|medium|high", "risk_factors": ["위험요소1"], "recommendation": "approve|reject|review", "recommendation_reason": "권고 이유 (2문장)", "key_points": ["핵심포인트1", "핵심포인트2"], "questions": ["확인필요사항1"]}}"""
+
+    response = ai.chat(
+        messages=[{"role": "user", "content": prompt}],
+        system="기업 결재 위험 분석 전문가입니다. 반드시 JSON 형식으로만 응답합니다.",
+        max_tokens=600,
+    )
+
+    review_data: dict = {}
+    try:
+        jm = re.search(r'\{[\s\S]*\}', response)
+        if jm:
+            review_data = json.loads(jm.group())
+        else:
+            review_data = {"error": "AI 응답 파싱 실패", "raw": response[:300]}
+    except Exception:
+        review_data = {"error": "AI 응답 파싱 실패", "raw": response[:300]}
+
+    # meta에 저장
+    meta = dict(approval.meta or {})
+    meta["ai_review"] = {**review_data, "reviewed_at": datetime.utcnow().isoformat()}
+    approval.meta = meta
+    db.commit()
+
+    return review_data
 
 
 @router.delete("/{approval_id}")

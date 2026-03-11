@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckSquare, X, Check, Mail, Clock, AlertCircle, Terminal } from 'lucide-react'
+import { CheckSquare, X, Check, Mail, Clock, AlertCircle, Terminal, Bot, Loader, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react'
 import { approvalsApi, terminalApi } from '../api/client'
 import { useAppStore } from '../store/useStore'
 import type { ApprovalRequest } from '../types'
@@ -35,6 +35,28 @@ interface TerminalRequest {
   decided_at?: string
 }
 
+interface AiReviewResult {
+  risk_level?: 'low' | 'medium' | 'high'
+  risk_factors?: string[]
+  recommendation?: 'approve' | 'reject' | 'review'
+  recommendation_reason?: string
+  key_points?: string[]
+  questions?: string[]
+  error?: string
+}
+
+const RISK_CONFIG = {
+  low: { label: '낮음', color: 'text-success', bg: 'bg-success/10', Icon: ShieldCheck },
+  medium: { label: '보통', color: 'text-warning', bg: 'bg-warning/10', Icon: ShieldQuestion },
+  high: { label: '높음', color: 'text-danger', bg: 'bg-danger/10', Icon: ShieldAlert },
+}
+
+const REC_CONFIG = {
+  approve: { label: '승인 권고', color: 'text-success', bg: 'bg-success/10' },
+  reject: { label: '반려 권고', color: 'text-danger', bg: 'bg-danger/10' },
+  review: { label: '추가 검토 필요', color: 'text-warning', bg: 'bg-warning/10' },
+}
+
 function ApprovalDetail({
   approval,
   onReview,
@@ -46,6 +68,10 @@ function ApprovalDetail({
 }) {
   const [note, setNote] = useState('')
   const [loading, setLoading] = useState(false)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiReview, setAiReview] = useState<AiReviewResult | null>(
+    approval.meta?.ai_review ? (approval.meta.ai_review as AiReviewResult) : null
+  )
 
   const handleReview = async (status: string) => {
     setLoading(true)
@@ -53,9 +79,22 @@ function ApprovalDetail({
     setLoading(false)
   }
 
+  const handleAiReview = async () => {
+    setAiLoading(true)
+    try {
+      const r = await approvalsApi.aiReview(approval.id)
+      setAiReview(r.data)
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const riskCfg = aiReview?.risk_level ? RISK_CONFIG[aiReview.risk_level] : null
+  const recCfg = aiReview?.recommendation ? REC_CONFIG[aiReview.recommendation] : null
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="card w-full max-w-lg p-6 animate-slide-in">
+      <div className="card w-full max-w-lg p-6 animate-slide-in overflow-y-auto max-h-[90vh]">
         <div className="flex items-start justify-between mb-4">
           <div>
             <div className={TYPE_COLORS[approval.request_type] || 'badge-inactive'}>
@@ -89,6 +128,94 @@ function ApprovalDetail({
             {approval.description || '설명이 없습니다.'}
           </div>
         )}
+
+        {/* AI 사전 검토 */}
+        <div className="mb-4">
+          {!aiReview ? (
+            <button
+              onClick={handleAiReview}
+              disabled={aiLoading}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-brand/30 bg-brand/5 hover:bg-brand/10 text-brand-light text-xs transition-colors"
+            >
+              {aiLoading ? <Loader size={12} className="animate-spin" /> : <Bot size={12} />}
+              {aiLoading ? 'AI 분석 중...' : 'AI 사전 검토 요청'}
+            </button>
+          ) : aiReview.error ? (
+            <div className="bg-danger/10 rounded-lg p-3 text-xs text-danger flex items-center gap-2">
+              <AlertCircle size={12} /> AI 분석 실패: {aiReview.error}
+              <button onClick={handleAiReview} className="ml-auto text-slate-400 hover:text-slate-200">재시도</button>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-bg-border bg-bg-elevated p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-medium text-slate-300">
+                  <Bot size={12} className="text-brand-light" /> AI 검토 결과
+                </div>
+                <button onClick={handleAiReview} disabled={aiLoading} className="text-[10px] text-slate-500 hover:text-slate-300">
+                  {aiLoading ? <Loader size={10} className="animate-spin" /> : '재분석'}
+                </button>
+              </div>
+
+              {/* 위험도 + 권고 */}
+              <div className="flex gap-2">
+                {riskCfg && (
+                  <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium ${riskCfg.bg} ${riskCfg.color}`}>
+                    <riskCfg.Icon size={11} />
+                    위험도 {riskCfg.label}
+                  </div>
+                )}
+                {recCfg && (
+                  <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium ${recCfg.bg} ${recCfg.color}`}>
+                    {recCfg.label}
+                  </div>
+                )}
+              </div>
+
+              {/* 권고 이유 */}
+              {aiReview.recommendation_reason && (
+                <p className="text-[11px] text-slate-400 leading-relaxed">{aiReview.recommendation_reason}</p>
+              )}
+
+              {/* 위험 요소 */}
+              {aiReview.risk_factors && aiReview.risk_factors.length > 0 && (
+                <div>
+                  <div className="text-[10px] text-slate-500 mb-1">위험 요소</div>
+                  <ul className="space-y-0.5">
+                    {aiReview.risk_factors.map((f, i) => (
+                      <li key={i} className="text-[11px] text-slate-400 flex items-start gap-1.5">
+                        <span className="text-danger mt-0.5">•</span>{f}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* 핵심 포인트 */}
+              {aiReview.key_points && aiReview.key_points.length > 0 && (
+                <div>
+                  <div className="text-[10px] text-slate-500 mb-1">핵심 포인트</div>
+                  <ul className="space-y-0.5">
+                    {aiReview.key_points.map((p, i) => (
+                      <li key={i} className="text-[11px] text-slate-400 flex items-start gap-1.5">
+                        <span className="text-brand-light mt-0.5">·</span>{p}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* 확인 필요 사항 */}
+              {aiReview.questions && aiReview.questions.length > 0 && (
+                <div className="bg-warning/5 rounded-md p-2">
+                  <div className="text-[10px] text-warning mb-1">확인 필요</div>
+                  {aiReview.questions.map((q, i) => (
+                    <div key={i} className="text-[11px] text-slate-400">Q{i + 1}. {q}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         {approval.status === 'pending' && (
           <>
