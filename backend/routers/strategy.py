@@ -547,3 +547,64 @@ def team_strategy_discussion(
         "discussion": discussion_result,
         "formatted": formatted,
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 인사이트 Bulk 격상
+# ══════════════════════════════════════════════════════════════════════════════
+
+from pydantic import BaseModel as _BaseModel
+
+
+class BulkPromoteItem(_BaseModel):
+    insight_id: int
+    item_type: str = "objective"
+    company_id: Optional[int] = None
+
+
+class BulkPromoteRequest(_BaseModel):
+    items: List[BulkPromoteItem]
+
+
+@router.post("/bulk-promote", summary="인사이트 bulk 격상 (여러 개 한번에 전략으로 격상)")
+def bulk_promote_insights(
+    req: BulkPromoteRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    created = []
+    skipped = []
+    for item in req.items:
+        insight = db.query(StrategyItem).filter(StrategyItem.id == item.insight_id).first()
+        if not insight:
+            skipped.append({"id": item.insight_id, "reason": "not found"})
+            continue
+        # 이미 격상된 인사이트 여부 확인 (source_insight_id로 역 추적)
+        already = db.query(StrategyItem).filter(
+            StrategyItem.source_insight_id == item.insight_id
+        ).first()
+        if already:
+            skipped.append({"id": item.insight_id, "reason": "already promoted", "strategy_id": already.id})
+            continue
+
+        new_item = StrategyItem(
+            company_id=item.company_id,
+            title=insight.title.replace("[자동인사이트] ", ""),
+            description=insight.description,
+            item_type=item.item_type,
+            priority=insight.priority,
+            status="active",
+            progress=0,
+            source_insight_id=insight.id,
+        )
+        db.add(new_item)
+        db.flush()
+        created.append({"insight_id": item.insight_id, "strategy_id": new_item.id, "title": new_item.title})
+
+    db.commit()
+    return {
+        "created": len(created),
+        "skipped": len(skipped),
+        "items": created,
+        "skipped_items": skipped,
+    }

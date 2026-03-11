@@ -199,3 +199,99 @@ def collect_competitor_news(
         "skipped": skipped,
         "collected_at": datetime.utcnow().isoformat(),
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 경쟁사 vs 자사 AI 비교분석
+# ══════════════════════════════════════════════════════════════════════════════
+
+class CompareRequest(BaseModel):
+    competitor_id: int
+    subsidiary_id: int   # 비교 대상 계열사 (is_competitor=False)
+    focus: str = ""      # 분석 포커스 (선택)
+
+
+@router.post("/compare", summary="경쟁사 vs 계열사 AI 비교분석 (계열사 존재 시 사용 가능)")
+def compare_competitor(
+    req: CompareRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # 계열사(is_competitor=False) 존재 확인
+    subsidiary_count = db.query(Company).filter(Company.is_competitor == False).count()
+    if subsidiary_count == 0:
+        raise HTTPException(400, "비교분석은 계열사가 1개 이상 등록된 후 사용 가능합니다.")
+
+    competitor = db.query(Company).filter(
+        Company.id == req.competitor_id, Company.is_competitor == True
+    ).first()
+    if not competitor:
+        raise HTTPException(404, "경쟁사를 찾을 수 없습니다.")
+
+    subsidiary = db.query(Company).filter(
+        Company.id == req.subsidiary_id, Company.is_competitor == False
+    ).first()
+    if not subsidiary:
+        raise HTTPException(404, "계열사를 찾을 수 없습니다.")
+
+    # 각각 최신 수집 데이터 가져오기
+    comp_data = (
+        db.query(CollectedData)
+        .filter(CollectedData.company_id == req.competitor_id)
+        .order_by(CollectedData.created_at.desc())
+        .limit(5)
+        .all()
+    )
+    subs_data = (
+        db.query(CollectedData)
+        .filter(CollectedData.company_id == req.subsidiary_id)
+        .order_by(CollectedData.created_at.desc())
+        .limit(5)
+        .all()
+    )
+
+    comp_summary = "\n".join(
+        f"- {d.title}: {d.content[:200]}" for d in comp_data
+    ) or "(수집된 데이터 없음)"
+    subs_summary = "\n".join(
+        f"- {d.title}: {d.content[:200]}" for d in subs_data
+    ) or "(수집된 데이터 없음)"
+
+    focus_line = f"\n분석 포커스: {req.focus}" if req.focus else ""
+
+    prompt = f"""다음 두 회사를 비교 분석해주세요.{focus_line}
+
+[경쟁사: {competitor.name}] ({competitor.industry})
+최신 동향:
+{comp_summary}
+
+[자사 계열사: {subsidiary.name}] ({subsidiary.industry})
+최신 동향:
+{subs_summary}
+
+아래 항목으로 구조화된 비교 분석을 제공하세요:
+1. 사업 영역 겹침 / 경쟁 강도
+2. 경쟁사 최근 동향 및 위협 요소
+3. 자사 계열사의 차별화 강점
+4. 전략적 대응 권고사항 (3가지)
+5. 종합 평가 (1문장)"""
+
+    from services.ai_provider import get_provider_from_db
+    provider = get_provider_from_db(db, current_user.id)
+    analysis = provider.chat(
+        [{"role": "user", "content": prompt}],
+        system="당신은 기업 전략 분석 전문가입니다. 구체적이고 실용적인 분석을 제공합니다.",
+        session_type="general",
+    )
+
+    return {
+        "competitor_id": req.competitor_id,
+        "competitor_name": competitor.name,
+        "subsidiary_id": req.subsidiary_id,
+        "subsidiary_name": subsidiary.name,
+        "focus": req.focus,
+        "analysis": analysis,
+        "analyzed_at": datetime.utcnow().isoformat(),
+        "competitor_data_count": len(comp_data),
+        "subsidiary_data_count": len(subs_data),
+    }

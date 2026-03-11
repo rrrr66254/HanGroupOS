@@ -203,6 +203,8 @@ export const strategyApi = {
   createCollaboration: (data: object) => api.post('/strategy/collaborations', data),
   generate: (companyId: number, focus?: string) =>
     api.post('/strategy/generate', { company_id: companyId, focus }),
+  bulkPromote: (data: { items: Array<{ insight_id: number; item_type: string; company_id: number | null }> }) =>
+    api.post('/strategy/bulk-promote', data),
 }
 
 // ── Knowledge / Dashboard ─────────────────────────────────────────────────────
@@ -379,6 +381,8 @@ export const competitorApi = {
   news: (id: number, limit?: number) =>
     api.get(`/competitors/${id}/news`, { params: { limit } }),
   collect: (id: number) => api.post(`/competitors/${id}/collect`),
+  compare: (data: { competitor_id: number; subsidiary_id: number; focus?: string }) =>
+    api.post('/competitors/compare', data),
 }
 
 // ── KPI Links ─────────────────────────────────────────────────────────────────
@@ -396,7 +400,11 @@ export const kpiLinksApi = {
 export const policyApi = {
   list: (source?: string) => api.get('/data/policies', { params: source ? { source } : {} }),
   create: (data: object) => api.post('/data/policies', data),
+  patch: (id: number, data: object) => api.patch(`/data/policies/${id}`, data),
   delete: (id: number) => api.delete(`/data/policies/${id}`),
+  exportJson: () => api.get('/data/policies/export-json'),
+  importJson: (data: { policies: object[] }) => api.post('/data/policies/import-json', data),
+  sourceStatus: () => api.get('/data/source-status'),
 }
 
 // ── Document Generator ────────────────────────────────────────────────────────

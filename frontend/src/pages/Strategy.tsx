@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Map, Plus, X, Trophy, Target, Milestone, BarChart3, LayoutGrid, List, Sparkles } from 'lucide-react'
-import { strategyApi, companiesApi } from '../api/client'
+import { Map, Plus, X, Trophy, Target, Milestone, BarChart3, LayoutGrid, List, Sparkles, Link2, RefreshCw, Loader, Trash2 } from 'lucide-react'
+import { strategyApi, companiesApi, kpiLinksApi } from '../api/client'
 import type { StrategyItem, Company, CEOPerformance } from '../types'
 import { format } from 'date-fns'
 
@@ -41,15 +41,194 @@ function ProgressBar({ value, color }: { value: number; color?: string }) {
   )
 }
 
+// ── KPI Link Panel ─────────────────────────────────────────────────────────
+interface KpiLink {
+  id: number
+  strategy_item_id: number
+  source: string
+  series_id: string
+  field_path: string
+  transform: string
+  unit: string
+  last_value: number | null
+  last_updated_at: string | null
+  is_active: boolean
+}
+
+function KpiLinkPanel({ item, onClose }: { item: StrategyItem; onClose: () => void }) {
+  const [links, setLinks] = useState<KpiLink[]>([])
+  const [loading, setLoading] = useState(true)
+  const [syncing, setSyncing] = useState<number | null>(null)
+  const [syncingAll, setSyncingAll] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ source: 'fred', series_id: '', field_path: 'data[0].value', transform: 'latest', unit: '' })
+  const [saving, setSaving] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const r = await kpiLinksApi.list(item.id)
+      setLinks(r.data)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [item.id])
+
+  const handleSync = async (linkId: number) => {
+    setSyncing(linkId)
+    try { await kpiLinksApi.sync(linkId); await load() } catch { /* ignore */ }
+    setSyncing(null)
+  }
+
+  const handleSyncAll = async () => {
+    setSyncingAll(true)
+    try { await kpiLinksApi.syncAll(); await load() } catch { /* ignore */ }
+    setSyncingAll(false)
+  }
+
+  const handleCreate = async () => {
+    if (!form.series_id.trim()) return
+    setSaving(true)
+    try {
+      await kpiLinksApi.create({ ...form, strategy_item_id: item.id })
+      setForm({ source: 'fred', series_id: '', field_path: 'data[0].value', transform: 'latest', unit: '' })
+      setShowForm(false)
+      await load()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (id: number) => {
+    await kpiLinksApi.delete(id)
+    await load()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-end md:items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="card w-full max-w-lg p-5 space-y-4 animate-slide-in" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Link2 size={16} className="text-blue-400" />
+            <div>
+              <h3 className="text-sm font-semibold text-slate-100">KPI 데이터 링크</h3>
+              <p className="text-[10px] text-slate-500">{item.title}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {links.length > 0 && (
+              <button onClick={handleSyncAll} disabled={syncingAll} className="btn-ghost text-xs flex items-center gap-1">
+                {syncingAll ? <Loader size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                전체 동기화
+              </button>
+            )}
+            <button onClick={() => setShowForm((v) => !v)} className="btn-primary text-xs flex items-center gap-1">
+              {showForm ? <X size={11} /> : <Plus size={11} />}
+              {showForm ? '취소' : '링크 추가'}
+            </button>
+            <button onClick={onClose} className="text-slate-500 hover:text-slate-300 p-1"><X size={15} /></button>
+          </div>
+        </div>
+
+        {/* Add form */}
+        {showForm && (
+          <div className="p-3 rounded-lg bg-bg-elevated border border-bg-border space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-slate-400">소스</label>
+                <select className="input w-full text-xs mt-0.5" value={form.source} onChange={(e) => setForm((f) => ({ ...f, source: e.target.value }))}>
+                  <option value="fred">FRED</option>
+                  <option value="worldbank">World Bank</option>
+                  <option value="ecos">ECOS</option>
+                  <option value="kosis">KOSIS</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-400">시리즈 ID</label>
+                <input className="input w-full text-xs mt-0.5" placeholder="예: DEXKOUS" value={form.series_id} onChange={(e) => setForm((f) => ({ ...f, series_id: e.target.value }))} />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[10px] text-slate-400">변환</label>
+                <select className="input w-full text-xs mt-0.5" value={form.transform} onChange={(e) => setForm((f) => ({ ...f, transform: e.target.value }))}>
+                  <option value="latest">최신값</option>
+                  <option value="avg">평균</option>
+                  <option value="pct_change">변화율</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-400">단위</label>
+                <input className="input w-full text-xs mt-0.5" placeholder="원, %, 억" value={form.unit} onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))} />
+              </div>
+              <div className="flex items-end">
+                <button onClick={handleCreate} disabled={saving || !form.series_id.trim()} className="btn-primary w-full text-xs flex items-center justify-center gap-1">
+                  {saving && <Loader size={10} className="animate-spin" />} 저장
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Links list */}
+        {loading ? (
+          <div className="flex items-center justify-center py-6 text-slate-500 gap-2">
+            <Loader size={14} className="animate-spin" /> 로딩 중...
+          </div>
+        ) : links.length === 0 ? (
+          <div className="text-center py-6 text-slate-600 text-xs">
+            연결된 KPI 데이터 소스가 없습니다.<br />
+            <span className="text-slate-500">FRED, World Bank 등의 시계열 데이터를 KPI와 연결하세요.</span>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {links.map((lnk) => (
+              <div key={lnk.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-bg-elevated border border-bg-border">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">{lnk.source.toUpperCase()}</span>
+                    <span className="text-xs font-mono text-slate-200">{lnk.series_id}</span>
+                    {!lnk.is_active && <span className="text-[9px] text-slate-600">(비활성)</span>}
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                    {lnk.last_value !== null && (
+                      <span className="text-green-400 font-mono font-semibold">{lnk.last_value.toFixed(3)} {lnk.unit}</span>
+                    )}
+                    {lnk.last_updated_at && (
+                      <span>· {new Date(lnk.last_updated_at).toLocaleDateString('ko-KR')}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button onClick={() => handleSync(lnk.id)} disabled={syncing === lnk.id} className="p-1.5 rounded text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 transition-colors">
+                    {syncing === lnk.id ? <Loader size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                  </button>
+                  <button onClick={() => handleDelete(lnk.id)} className="p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Strategy card ──────────────────────────────────────────────────────────
 function StrategyCard({
-  item, onProgressChange, onDelete, laneColor, onDragStart,
+  item, onProgressChange, onDelete, laneColor, onDragStart, onKpiClick,
 }: {
   item: StrategyItem
   onProgressChange: (id: number, v: number) => void
   onDelete: (id: number) => void
   laneColor: string
   onDragStart: (e: React.DragEvent, itemId: number) => void
+  onKpiClick: (item: StrategyItem) => void
 }) {
   const typeMeta = ITEM_TYPE_META[item.item_type] ?? ITEM_TYPE_META.objective
   const priorityMeta = PRIORITY_META[item.priority] ?? PRIORITY_META.medium
@@ -77,8 +256,15 @@ function StrategyCard({
           {priorityMeta.label}
         </div>
         <button
+          onClick={(e) => { e.stopPropagation(); onKpiClick(item) }}
+          className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-blue-400 transition-all ml-1 p-0.5"
+          title="KPI 데이터 링크"
+        >
+          <Link2 size={9} />
+        </button>
+        <button
           onClick={() => onDelete(item.id)}
-          className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-400 transition-all ml-1 p-0.5"
+          className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-red-400 transition-all ml-0.5 p-0.5"
         >
           <X size={9} />
         </button>
@@ -113,7 +299,7 @@ function StrategyCard({
 
 // ── Lane (one per company) ─────────────────────────────────────────────────
 function CompanyLane({
-  company, items, color, onProgressChange, onDelete, onDragStart, onDrop,
+  company, items, color, onProgressChange, onDelete, onDragStart, onDrop, onKpiClick,
 }: {
   company: { id: number | null; name: string }
   items: StrategyItem[]
@@ -122,6 +308,7 @@ function CompanyLane({
   onDelete: (id: number) => void
   onDragStart: (e: React.DragEvent, itemId: number) => void
   onDrop: (targetCompanyId: number | null) => void
+  onKpiClick: (item: StrategyItem) => void
 }) {
   const [isDragOver, setIsDragOver] = useState(false)
 
@@ -185,6 +372,7 @@ function CompanyLane({
               onProgressChange={onProgressChange}
               onDelete={onDelete}
               onDragStart={onDragStart}
+              onKpiClick={onKpiClick}
             />
           ))
         )}
@@ -213,6 +401,7 @@ export default function Strategy() {
   const [genFocus, setGenFocus] = useState('')
   const [generating, setGenerating] = useState(false)
   const [genResult, setGenResult] = useState<{ generated: number; company: string } | null>(null)
+  const [kpiPanelItem, setKpiPanelItem] = useState<StrategyItem | null>(null)
 
   const load = async () => {
     // Always fetch all items; board view filters client-side for lane layout
@@ -390,6 +579,7 @@ export default function Strategy() {
                           onDelete={deleteItem}
                           onDragStart={handleDragStart}
                           onDrop={handleDrop}
+                          onKpiClick={setKpiPanelItem}
                         />
                       )
                     }
@@ -412,6 +602,7 @@ export default function Strategy() {
                           onDelete={deleteItem}
                           onDragStart={handleDragStart}
                           onDrop={handleDrop}
+                          onKpiClick={setKpiPanelItem}
                         />
                       )
                     })
@@ -670,6 +861,11 @@ export default function Strategy() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* KPI Link Panel */}
+      {kpiPanelItem && (
+        <KpiLinkPanel item={kpiPanelItem} onClose={() => setKpiPanelItem(null)} />
       )}
     </div>
   )

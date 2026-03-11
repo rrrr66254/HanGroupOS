@@ -1,9 +1,35 @@
 from sqlalchemy import (
     Column, Integer, String, Text, DateTime, Boolean, Float, ForeignKey, JSON
 )
+from sqlalchemy.types import TypeDecorator, LargeBinary
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from core.database import Base
+import zlib
+
+
+class CompressedText(TypeDecorator):
+    """텍스트를 zlib으로 압축해 BLOB으로 저장 — 저장 시 자동 압축/해제."""
+    impl = LargeBinary
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return zlib.compress(value.encode("utf-8"), level=6)
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        try:
+            return zlib.decompress(value).decode("utf-8")
+        except Exception:
+            # 압축되지 않은 기존 데이터 그대로 반환
+            if isinstance(value, (bytes, bytearray)):
+                return value.decode("utf-8", errors="replace")
+            return value
 
 
 class User(Base):
@@ -283,6 +309,8 @@ class StrategyItem(Base):
     parent_id = Column(Integer, ForeignKey("strategy_items.id"), nullable=True)
     progress = Column(Integer, default=0)  # 0-100
     due_date = Column(String(50), default="")
+    kpi_current = Column(Float, nullable=True)      # KPI 최신 동기화 값
+    source_insight_id = Column(Integer, nullable=True)  # 인사이트 격상 원본 ID 추적
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -427,7 +455,7 @@ class CollectedData(Base):
     source = Column(String(200), default="")         # URL or API name
     query = Column(String(500), default="")          # 검색어 또는 요청 파라미터
     title = Column(String(500), default="")
-    content = Column(Text, default="")               # 원본 텍스트
+    content = Column(CompressedText, default="")     # 원본 텍스트 (zlib 압축 저장)
     structured = Column(JSON, default={})            # 구조화된 데이터 (articles, results 등)
     tags = Column(JSON, default=[])
     status = Column(String(20), default="raw")       # raw | processed | analyzed

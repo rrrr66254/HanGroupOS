@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from core.database import get_db
 from core.security import get_current_user
-from models.models import ExternalApiKey, CollectedData, StrategyItem, User, MarketKeywordAlert, DataCollectionPolicy
+from models.models import ExternalApiKey, CollectedData, StrategyItem, User, MarketKeywordAlert, DataCollectionPolicy, DataSourceStatus
 from schemas.schemas import (
     ExternalApiKeyCreate, ExternalApiKeyUpdate, ExternalApiKeyOut,
     WebSearchRequest, NewsSearchRequest, ScrapeRequest,
@@ -1401,3 +1401,143 @@ def export_data(
                  "exported_at": datetime.utcnow().isoformat(), "data": export_data_list},
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 수집 정책 PATCH (인라인 편집)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class PolicyPatchRequest(BaseModel):
+    max_records: Optional[int] = None
+    retention_days: Optional[int] = None
+    memo: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@router.patch("/policies/{policy_id}", summary="수집 정책 수정")
+def patch_policy(
+    policy_id: int,
+    req: PolicyPatchRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    policy = db.query(DataCollectionPolicy).filter(DataCollectionPolicy.id == policy_id).first()
+    if not policy:
+        raise HTTPException(404, "정책을 찾을 수 없습니다.")
+    if req.max_records is not None:
+        policy.max_records = req.max_records
+    if req.retention_days is not None:
+        policy.retention_days = req.retention_days
+    if req.memo is not None:
+        policy.memo = req.memo
+    if req.is_active is not None:
+        policy.is_active = req.is_active
+    db.commit()
+    db.refresh(policy)
+    return {
+        "id": policy.id, "source": policy.source, "company_id": policy.company_id,
+        "max_records": policy.max_records, "retention_days": policy.retention_days,
+        "is_active": policy.is_active, "memo": policy.memo,
+        "updated_at": policy.updated_at.isoformat() if policy.updated_at else None,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# DataSourceStatus — 소스별 수집 상태 대시보드
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/source-status", summary="소스별 수집 상태 조회")
+def get_source_status(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    rows = db.query(DataSourceStatus).order_by(DataSourceStatus.source).all()
+    return [
+        {
+            "id": r.id,
+            "source": r.source,
+            "consecutive_failures": r.consecutive_failures,
+            "total_failures": r.total_failures,
+            "total_successes": r.total_successes,
+            "last_success_at": r.last_success_at.isoformat() if r.last_success_at else None,
+            "last_failure_at": r.last_failure_at.isoformat() if r.last_failure_at else None,
+            "last_error": r.last_error,
+            "alert_sent_at": r.alert_sent_at.isoformat() if r.alert_sent_at else None,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            "health": (
+                "ok" if r.consecutive_failures == 0
+                else "warning" if r.consecutive_failures < 3
+                else "error"
+            ),
+        }
+        for r in rows
+    ]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 수집 정책 Import / Export (JSON)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/policies/export-json", summary="수집 정책 JSON 내보내기")
+def export_policies(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    policies = db.query(DataCollectionPolicy).order_by(DataCollectionPolicy.id).all()
+    data = [
+        {
+            "source": p.source,
+            "company_id": p.company_id,
+            "max_records": p.max_records,
+            "retention_days": p.retention_days,
+            "is_active": p.is_active,
+            "memo": p.memo,
+        }
+        for p in policies
+    ]
+    filename = f"han_group_policies_{datetime.utcnow().strftime('%Y%m%d')}.json"
+    return JSONResponse(
+        content={"exported_at": datetime.utcnow().isoformat(), "count": len(data), "policies": data},
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+class PolicyImportRequest(BaseModel):
+    policies: list
+
+
+@router.post("/policies/import-json", summary="수집 정책 JSON 불러오기")
+def import_policies(
+    req: PolicyImportRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    created = 0
+    updated = 0
+    for item in req.policies:
+        source = item.get("source", "").strip()
+        if not source:
+            continue
+        company_id = item.get("company_id")
+        existing = db.query(DataCollectionPolicy).filter(
+            DataCollectionPolicy.source == source,
+            DataCollectionPolicy.company_id == company_id,
+        ).first()
+        if existing:
+            existing.max_records = item.get("max_records")
+            existing.retention_days = item.get("retention_days")
+            existing.memo = item.get("memo", "")
+            existing.is_active = item.get("is_active", True)
+            updated += 1
+        else:
+            db.add(DataCollectionPolicy(
+                source=source,
+                company_id=company_id,
+                max_records=item.get("max_records"),
+                retention_days=item.get("retention_days"),
+                memo=item.get("memo", ""),
+                is_active=item.get("is_active", True),
+            ))
+            created += 1
+    db.commit()
+    return {"created": created, "updated": updated, "total": created + updated}

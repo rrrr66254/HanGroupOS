@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Lightbulb, RefreshCw, Loader, ChevronDown, ChevronUp,
-  Building2, Calendar, Zap, TrendingUp, BarChart3, Play, ArrowUpCircle, X,
+  Building2, Calendar, Zap, TrendingUp, BarChart3, Play, ArrowUpCircle, X, CheckSquare, Square,
 } from 'lucide-react'
 import { dataApi, companiesApi, strategyApi } from '../api/client'
 import MarkdownMessage from '../components/MarkdownMessage'
@@ -238,6 +238,11 @@ export default function InsightsDashboard() {
   const [filterType, setFilterType] = useState<'all' | 'auto' | 'manual'>('all')
   const [generating, setGenerating] = useState<number | null>(null)
   const [stats, setStats] = useState<InsightStats | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [bulkPromoting, setBulkPromoting] = useState(false)
+  const [bulkTargetCompany, setBulkTargetCompany] = useState('')
+  const [bulkItemType, setBulkItemType] = useState('objective')
+  const [showBulkPanel, setShowBulkPanel] = useState(false)
 
   const loadInsights = async () => {
     setLoading(true)
@@ -293,6 +298,41 @@ export default function InsightsDashboard() {
   const getCompanyName = (id: number | null) => {
     if (!id) return '그룹 공통'
     return companies.find((c) => c.id === id)?.name || `회사 #${id}`
+  }
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === insights.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(insights.map((i) => i.id)))
+    }
+  }
+
+  const handleBulkPromote = async () => {
+    if (selectedIds.size === 0) return
+    setBulkPromoting(true)
+    try {
+      const items = Array.from(selectedIds).map((id) => ({
+        insight_id: id,
+        item_type: bulkItemType,
+        company_id: bulkTargetCompany ? parseInt(bulkTargetCompany) : null,
+      }))
+      await strategyApi.bulkPromote({ items })
+      setSelectedIds(new Set())
+      setShowBulkPanel(false)
+      await loadInsights()
+    } finally {
+      setBulkPromoting(false)
+    }
   }
 
   return (
@@ -390,10 +430,69 @@ export default function InsightsDashboard() {
           ))}
         </div>
 
-        <span className="text-xs text-slate-500 ml-auto">{insights.length}건</span>
+        <div className="flex items-center gap-2 ml-auto">
+          <span className="text-xs text-slate-500">{insights.length}건</span>
+          {selectedIds.size > 0 && (
+            <button
+              onClick={() => setShowBulkPanel((v) => !v)}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg font-medium transition-colors"
+              style={{ background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.3)' }}
+            >
+              <ArrowUpCircle size={11} />
+              {selectedIds.size}개 선택 — bulk 격상
+            </button>
+          )}
+        </div>
       </div>
 
+      {/* Bulk 격상 패널 */}
+      {showBulkPanel && selectedIds.size > 0 && (
+        <div className="card p-4 space-y-3 border border-brand/30 bg-brand/5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+              <ArrowUpCircle size={13} className="text-brand-light" />
+              {selectedIds.size}개 인사이트 일괄 격상
+            </span>
+            <button onClick={() => setShowBulkPanel(false)} className="text-slate-500 hover:text-slate-300 p-1"><X size={13} /></button>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-400">대상 계열사</label>
+              <select className="input w-full text-xs" value={bulkTargetCompany} onChange={(e) => setBulkTargetCompany(e.target.value)}>
+                <option value="">그룹 공통</option>
+                {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-slate-400">전략 유형</label>
+              <select className="input w-full text-xs" value={bulkItemType} onChange={(e) => setBulkItemType(e.target.value)}>
+                <option value="objective">전략 목표</option>
+                <option value="milestone">마일스톤</option>
+                <option value="action">실행 과제</option>
+                <option value="initiative">이니셔티브</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => { setShowBulkPanel(false); setSelectedIds(new Set()) }} className="btn-ghost text-xs">취소</button>
+            <button onClick={handleBulkPromote} disabled={bulkPromoting} className="btn-primary text-xs flex items-center gap-1.5">
+              {bulkPromoting && <Loader size={11} className="animate-spin" />}
+              <ArrowUpCircle size={11} />
+              {selectedIds.size}개 격상
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 인사이트 목록 */}
+      {!loading && insights.length > 0 && (
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <button onClick={toggleSelectAll} className="flex items-center gap-1 hover:text-slate-300 transition-colors">
+            {selectedIds.size === insights.length ? <CheckSquare size={12} className="text-brand-light" /> : <Square size={12} />}
+            {selectedIds.size === insights.length ? '전체 해제' : '전체 선택'}
+          </button>
+        </div>
+      )}
       {loading ? (
         <div className="card p-12 flex items-center justify-center gap-3 text-slate-500">
           <Loader size={20} className="animate-spin" />
@@ -408,13 +507,22 @@ export default function InsightsDashboard() {
       ) : (
         <div className="space-y-3">
           {insights.map((insight) => (
-            <InsightCard
-              key={insight.id}
-              insight={insight}
-              companyName={getCompanyName(insight.company_id)}
-              companies={companies}
-              onPromoted={loadInsights}
-            />
+            <div key={insight.id} className="flex items-start gap-2">
+              <button
+                onClick={() => toggleSelect(insight.id)}
+                className="mt-3 flex-shrink-0 text-slate-500 hover:text-brand-light transition-colors"
+              >
+                {selectedIds.has(insight.id) ? <CheckSquare size={14} className="text-brand-light" /> : <Square size={14} />}
+              </button>
+              <div className="flex-1 min-w-0">
+                <InsightCard
+                  insight={insight}
+                  companyName={getCompanyName(insight.company_id)}
+                  companies={companies}
+                  onPromoted={loadInsights}
+                />
+              </div>
+            </div>
           ))}
         </div>
       )}

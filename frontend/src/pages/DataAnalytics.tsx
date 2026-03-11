@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Database, TrendingUp, Download, RefreshCw, Loader,
   Globe, Hash, Building2, Calendar, Activity, GitBranch,
   ShieldCheck, Trash2, Copy, Zap, AlertTriangle, Plus, Settings2, X,
+  CheckCircle, XCircle, AlertCircle, Edit2, Check, Upload, FileDown,
 } from 'lucide-react'
 import { dataApi, companiesApi, policyApi } from '../api/client'
 import type { Company } from '../types'
@@ -224,6 +225,24 @@ export default function DataAnalytics() {
   const [showPolicyForm, setShowPolicyForm] = useState(false)
   const [policyForm, setPolicyForm] = useState({ source: '', company_id: '', max_records: '', retention_days: '', memo: '' })
   const [savingPolicy, setSavingPolicy] = useState(false)
+  const [editPolicyId, setEditPolicyId] = useState<number | null>(null)
+  const [editPolicyForm, setEditPolicyForm] = useState({ max_records: '', retention_days: '', memo: '' })
+  const importRef = useRef<HTMLInputElement>(null)
+
+  // 소스 상태 모니터링
+  interface SourceStatus { id: number; source: string; consecutive_failures: number; total_failures: number; total_successes: number; last_success_at: string | null; last_failure_at: string | null; last_error: string; health: string }
+  const [sourceStatuses, setSourceStatuses] = useState<SourceStatus[]>([])
+  const [sourceStatusLoading, setSourceStatusLoading] = useState(false)
+
+  const loadSourceStatus = async () => {
+    setSourceStatusLoading(true)
+    try {
+      const r = await policyApi.sourceStatus()
+      setSourceStatuses(r.data)
+    } finally {
+      setSourceStatusLoading(false)
+    }
+  }
 
   const loadPolicies = async () => {
     setPolicyLoading(true)
@@ -233,6 +252,47 @@ export default function DataAnalytics() {
     } finally {
       setPolicyLoading(false)
     }
+  }
+
+  const handleExportPolicies = async () => {
+    const r = await policyApi.exportJson()
+    const blob = new Blob([JSON.stringify(r.data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `han_policies_${new Date().toISOString().slice(0,10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleImportPolicies = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const text = await file.text()
+    try {
+      const json = JSON.parse(text)
+      const policiesArr = json.policies || json
+      await policyApi.importJson({ policies: policiesArr })
+      await loadPolicies()
+    } catch {
+      alert('정책 파일 형식이 올바르지 않습니다.')
+    }
+    if (importRef.current) importRef.current.value = ''
+  }
+
+  const startEditPolicy = (p: typeof policies[0]) => {
+    setEditPolicyId(p.id)
+    setEditPolicyForm({ max_records: p.max_records != null ? String(p.max_records) : '', retention_days: p.retention_days != null ? String(p.retention_days) : '', memo: p.memo })
+  }
+
+  const saveEditPolicy = async (id: number) => {
+    await policyApi.patch(id, {
+      max_records: editPolicyForm.max_records ? parseInt(editPolicyForm.max_records) : null,
+      retention_days: editPolicyForm.retention_days ? parseInt(editPolicyForm.retention_days) : null,
+      memo: editPolicyForm.memo,
+    })
+    setEditPolicyId(null)
+    await loadPolicies()
   }
 
   const loadStats = async () => {
@@ -248,6 +308,7 @@ export default function DataAnalytics() {
   useEffect(() => {
     loadStats()
     companiesApi.list().then((r) => setCompanies(r.data))
+    loadSourceStatus()
   }, [])
 
   const runCollect = async (id: string, action: () => Promise<unknown>) => {
@@ -813,7 +874,14 @@ export default function DataAnalytics() {
             수집 정책 관리
             <span className="text-[10px] text-slate-500 font-normal ml-1">소스별 용량·보관 기간 커스텀 설정</span>
           </h3>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={handleExportPolicies} className="btn-ghost flex items-center gap-1 text-xs">
+              <FileDown size={11} /> 내보내기
+            </button>
+            <button onClick={() => importRef.current?.click()} className="btn-ghost flex items-center gap-1 text-xs">
+              <Upload size={11} /> 불러오기
+            </button>
+            <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImportPolicies} />
             <button onClick={loadPolicies} disabled={policyLoading} className="btn-ghost flex items-center gap-1 text-xs">
               <RefreshCw size={11} className={policyLoading ? 'animate-spin' : ''} />
               새로고침
@@ -910,26 +978,128 @@ export default function DataAnalytics() {
                     <td className="py-1.5 pr-3 text-slate-400">
                       {p.company_id ? (companies.find((c) => c.id === p.company_id)?.name || `#${p.company_id}`) : '글로벌'}
                     </td>
-                    <td className="py-1.5 pr-3 text-right text-slate-300">{p.max_records ?? '-'}</td>
-                    <td className="py-1.5 pr-3 text-right text-slate-300">{p.retention_days != null ? `${p.retention_days}일` : '-'}</td>
-                    <td className="py-1.5 pr-3 text-slate-500">{p.memo || '-'}</td>
+                    {editPolicyId === p.id ? (
+                      <>
+                        <td className="py-1 pr-2">
+                          <input className="input w-20 text-xs text-right" type="number" value={editPolicyForm.max_records} onChange={(e) => setEditPolicyForm((f) => ({ ...f, max_records: e.target.value }))} placeholder="-" />
+                        </td>
+                        <td className="py-1 pr-2">
+                          <input className="input w-20 text-xs text-right" type="number" value={editPolicyForm.retention_days} onChange={(e) => setEditPolicyForm((f) => ({ ...f, retention_days: e.target.value }))} placeholder="-" />
+                        </td>
+                        <td className="py-1 pr-2">
+                          <input className="input w-32 text-xs" value={editPolicyForm.memo} onChange={(e) => setEditPolicyForm((f) => ({ ...f, memo: e.target.value }))} placeholder="메모" />
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="py-1.5 pr-3 text-right text-slate-300">{p.max_records ?? '-'}</td>
+                        <td className="py-1.5 pr-3 text-right text-slate-300">{p.retention_days != null ? `${p.retention_days}일` : '-'}</td>
+                        <td className="py-1.5 pr-3 text-slate-500">{p.memo || '-'}</td>
+                      </>
+                    )}
                     <td className="py-1.5 text-center">
                       <span className={`text-[9px] px-1.5 py-0.5 rounded border ${p.is_active ? 'text-success bg-success/10 border-success/30' : 'text-slate-500 bg-slate-500/10 border-slate-500/30'}`}>
                         {p.is_active ? '활성' : '비활성'}
                       </span>
                     </td>
                     <td className="py-1.5 pl-2">
-                      <button
-                        onClick={async () => { await policyApi.delete(p.id); await loadPolicies() }}
-                        className="text-slate-600 hover:text-red-400 transition-colors p-1"
-                      >
-                        <Trash2 size={11} />
-                      </button>
+                      <div className="flex items-center gap-0.5">
+                        {editPolicyId === p.id ? (
+                          <>
+                            <button onClick={() => saveEditPolicy(p.id)} className="text-green-400 hover:text-green-300 p-1"><Check size={11} /></button>
+                            <button onClick={() => setEditPolicyId(null)} className="text-slate-600 hover:text-slate-400 p-1"><X size={11} /></button>
+                          </>
+                        ) : (
+                          <button onClick={() => startEditPolicy(p)} className="text-slate-600 hover:text-blue-400 transition-colors p-1"><Edit2 size={11} /></button>
+                        )}
+                        <button
+                          onClick={async () => { await policyApi.delete(p.id); await loadPolicies() }}
+                          className="text-slate-600 hover:text-red-400 transition-colors p-1"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      {/* 소스 상태 모니터링 */}
+      <div className="card p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+            <Activity size={14} className="text-brand-light" />
+            데이터 소스 상태 모니터링
+            <span className="text-[10px] text-slate-500 font-normal ml-1">연속 실패 · 성공률 추적</span>
+          </h3>
+          <button onClick={loadSourceStatus} disabled={sourceStatusLoading} className="btn-ghost flex items-center gap-1 text-xs">
+            <RefreshCw size={11} className={sourceStatusLoading ? 'animate-spin' : ''} />
+            새로고침
+          </button>
+        </div>
+
+        {sourceStatusLoading ? (
+          <div className="flex items-center gap-2 text-slate-500 text-xs py-4 justify-center">
+            <Loader size={14} className="animate-spin" /> 로딩 중...
+          </div>
+        ) : sourceStatuses.length === 0 ? (
+          <div className="text-xs text-slate-500 py-4 text-center">
+            아직 수집 기록이 없습니다. 자동 수집 스케줄러가 실행되면 상태가 표시됩니다.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {sourceStatuses.map((s) => (
+              <div key={s.id} className={`p-3 rounded-lg border ${
+                s.health === 'ok' ? 'border-green-500/20 bg-green-500/5'
+                : s.health === 'warning' ? 'border-amber-500/20 bg-amber-500/5'
+                : 'border-red-500/20 bg-red-500/5'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    {s.health === 'ok' ? <CheckCircle size={12} className="text-green-400" />
+                      : s.health === 'warning' ? <AlertCircle size={12} className="text-amber-400" />
+                      : <XCircle size={12} className="text-red-400" />}
+                    <span className="text-xs font-mono font-semibold text-slate-200">{s.source}</span>
+                  </div>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+                    s.health === 'ok' ? 'text-green-400 bg-green-500/10'
+                    : s.health === 'warning' ? 'text-amber-400 bg-amber-500/10'
+                    : 'text-red-400 bg-red-500/10'
+                  }`}>
+                    {s.health === 'ok' ? '정상' : s.health === 'warning' ? '주의' : '오류'}
+                  </span>
+                </div>
+                <div className="space-y-1 text-[10px] text-slate-500">
+                  <div className="flex justify-between">
+                    <span>성공</span>
+                    <span className="text-green-400">{s.total_successes}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>실패</span>
+                    <span className="text-red-400">{s.total_failures}</span>
+                  </div>
+                  {s.consecutive_failures > 0 && (
+                    <div className="flex justify-between">
+                      <span>연속 실패</span>
+                      <span className="text-red-400 font-semibold">{s.consecutive_failures}회</span>
+                    </div>
+                  )}
+                  {s.last_success_at && (
+                    <div className="flex justify-between">
+                      <span>마지막 성공</span>
+                      <span>{new Date(s.last_success_at).toLocaleDateString('ko-KR')}</span>
+                    </div>
+                  )}
+                  {s.last_error && s.health !== 'ok' && (
+                    <div className="mt-1 text-red-400/70 truncate" title={s.last_error}>{s.last_error.slice(0, 60)}...</div>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

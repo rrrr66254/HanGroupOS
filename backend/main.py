@@ -681,15 +681,159 @@ def _check_market_alerts(db, create_notification):
         print(f"[Scheduler] 시장 알림 {triggered}건 발송")
 
 
+def _weekly_competitor_collect():
+    """주 1회 경쟁사 뉴스 자동 수집 + WebSocket 알림."""
+    from models.models import Company as _Company, ExternalApiKey as _ExtKey, CollectedData as _CD
+    from services.data_collector import DataCollector as _DC
+    from services.data_quality import compute_hash, check_quality, should_save
+    from routers.notifications import create_notification
+
+    db = SessionLocal()
+    try:
+        competitors = db.query(_Company).filter(_Company.is_competitor == True).all()
+        api_keys = {r.service: r.api_key for r in db.query(_ExtKey).filter(_ExtKey.is_active == True).all()}
+        extra_configs = {r.service: r.extra_config for r in db.query(_ExtKey).filter(_ExtKey.is_active == True, _ExtKey.extra_config != None).all()}
+        collector = _DC(api_keys=api_keys, extra_configs=extra_configs)
+
+        saved_total = 0
+        for comp in competitors:
+            try:
+                keywords = comp.competitor_keywords or [comp.name]
+                query = " ".join(keywords[:3]) if keywords else comp.name
+                result = collector.news_search(query=query, language="ko", days_back=7)
+                articles = result.get("articles", [])
+                if articles:
+                    content = "\n".join(
+                        f"{a.get('title','')}: {a.get('description','')}"
+                        for a in articles[:10]
+                    )
+                    c_hash = compute_hash(f"[경쟁사 주간] {comp.name}", content)
+                    q_flag = check_quality(f"[경쟁사 주간] {comp.name}", content, c_hash, db)
+                    ok, _ = should_save(db, result.get("source", "auto"), "news", comp.id, q_flag)
+                    if ok:
+                        db.add(_CD(
+                            company_id=comp.id,
+                            data_type="news",
+                            source=result.get("source", "auto"),
+                            query=query,
+                            title=f"[경쟁사 주간] {comp.name} 뉴스",
+                            content=content[:10000],
+                            structured=result,
+                            tags=["competitor", "news", "weekly"],
+                            status="raw",
+                            content_hash=c_hash,
+                            quality_flag=q_flag,
+                        ))
+                        saved_total += 1
+                _update_source_status(db, "competitor_news", True)
+            except Exception as e:
+                _update_source_status(db, "competitor_news", False, str(e))
+        db.commit()
+
+        if saved_total > 0:
+            create_notification(
+                db,
+                title="경쟁사 주간 뉴스 수집 완료",
+                body=f"{len(competitors)}개 경쟁사, {saved_total}건 저장",
+                notif_type="success",
+                icon="🎯",
+                link="/competitors",
+            )
+            # WebSocket 브로드캐스트
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.ensure_future(notif_manager.broadcast({
+                        "type": "competitor_collect",
+                        "title": "경쟁사 주간 뉴스 수집 완료",
+                        "saved": saved_total,
+                        "competitors": len(competitors),
+                    }))
+            except Exception:
+                pass
+        print(f"[WeeklyScheduler] 경쟁사 수집 완료 — {saved_total}건 저장")
+    except Exception as e:
+        print(f"[WeeklyScheduler] 경쟁사 수집 오류: {e}")
+    finally:
+        db.close()
+
+
+def _kpi_sync_all():
+    """6시간마다 모든 활성 KPI 링크 자동 동기화 + 변화량 알림."""
+    from models.models import KpiDataLink as _KpiLink, CollectedData as _CD, StrategyItem as _SI
+    from routers.notifications import create_notification
+
+    db = SessionLocal()
+    try:
+        links = db.query(_KpiLink).filter(_KpiLink.is_active == True).all()
+        changed = []
+        for lnk in links:
+            row = (
+                db.query(_CD)
+                .filter(_CD.source == lnk.source, _CD.query.contains(lnk.series_id))
+                .order_by(_CD.created_at.desc())
+                .first()
+            )
+            if not row or not row.structured:
+                continue
+            try:
+                data = row.structured
+                parts = lnk.field_path.replace("]", "").replace("[", ".").split(".")
+                cur = data
+                for part in parts:
+                    if part.isdigit():
+                        cur = cur[int(part)]
+                    elif part and isinstance(cur, dict):
+                        cur = cur.get(part)
+                    if cur is None:
+                        break
+                if cur is None:
+                    continue
+                value = float(cur)
+            except Exception:
+                continue
+
+            prev = lnk.last_value
+            item = db.query(_SI).filter(_SI.id == lnk.strategy_item_id).first()
+            if item:
+                item.kpi_current = value
+            lnk.last_value = value
+            lnk.last_updated_at = __import__("datetime").datetime.utcnow()
+            if prev is not None and abs(value - prev) > 0.001:
+                changed.append({"series": lnk.series_id, "prev": prev, "new": value})
+
+        db.commit()
+        if changed:
+            body = " | ".join(f"{c['series']}: {c['prev']:.3f}→{c['new']:.3f}" for c in changed[:5])
+            create_notification(
+                db,
+                title="KPI 데이터 변화 감지",
+                body=body,
+                notif_type="info",
+                icon="📊",
+                link="/strategy",
+            )
+        print(f"[KpiScheduler] KPI 동기화 완료 — {len(links)}개 링크, {len(changed)}개 변화")
+    except Exception as e:
+        print(f"[KpiScheduler] KPI 동기화 오류: {e}")
+    finally:
+        db.close()
+
+
 def _start_scheduler():
     """APScheduler 백그라운드 스케줄러 시작."""
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         scheduler = BackgroundScheduler(timezone="Asia/Seoul")
-        # 6시간마다 뉴스 자동 수집
+        # 6시간마다 회사 뉴스 + 글로벌 데이터 자동 수집
         scheduler.add_job(_auto_collect_news, "interval", hours=6, id="auto_news")
+        # 매주 월요일 09:00 경쟁사 뉴스 수집
+        scheduler.add_job(_weekly_competitor_collect, "cron", day_of_week="mon", hour=9, id="weekly_competitor")
+        # 6시간마다 KPI 링크 자동 동기화
+        scheduler.add_job(_kpi_sync_all, "interval", hours=6, id="kpi_sync")
         scheduler.start()
-        print("✓ 데이터 수집 스케줄러 시작 (6시간 간격 뉴스 자동 수집)")
+        print("✓ 데이터 수집 스케줄러 시작 (뉴스 6h · 경쟁사 주1회 · KPI 6h)")
     except Exception as e:
         print(f"⚠️  스케줄러 시작 실패 (무시): {e}")
 

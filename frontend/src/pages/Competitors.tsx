@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import {
   Crosshair, Plus, Trash2, RefreshCw, Loader, ChevronDown, ChevronUp,
-  Newspaper, X, Search,
+  Newspaper, X, Search, GitCompare, Building2,
 } from 'lucide-react'
-import { competitorApi } from '../api/client'
+import { competitorApi, companiesApi } from '../api/client'
+import MarkdownMessage from '../components/MarkdownMessage'
 
 interface Competitor {
   id: number
@@ -148,18 +149,46 @@ export default function Competitors() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: '', industry: '', keywords: '' })
   const [saving, setSaving] = useState(false)
+  const [subsidiaries, setSubsidiaries] = useState<Array<{ id: number; name: string }>>([])
+  const [compareForm, setCompareForm] = useState({ competitor_id: '', subsidiary_id: '', focus: '' })
+  const [compareResult, setCompareResult] = useState<string | null>(null)
+  const [comparing, setComparing] = useState(false)
+  const [showCompare, setShowCompare] = useState(false)
 
   const load = async () => {
     setLoading(true)
     try {
-      const r = await competitorApi.list()
-      setCompetitors(r.data)
+      const [cr, sr] = await Promise.all([
+        competitorApi.list(),
+        companiesApi.list(),
+      ])
+      setCompetitors(cr.data)
+      setSubsidiaries(sr.data.filter((c: { id: number; name: string; is_competitor?: boolean }) => !c.is_competitor))
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => { load() }, [])
+
+  const handleCompare = async () => {
+    if (!compareForm.competitor_id || !compareForm.subsidiary_id) return
+    setComparing(true)
+    setCompareResult(null)
+    try {
+      const r = await competitorApi.compare({
+        competitor_id: parseInt(compareForm.competitor_id),
+        subsidiary_id: parseInt(compareForm.subsidiary_id),
+        focus: compareForm.focus,
+      })
+      setCompareResult(r.data.analysis)
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      setCompareResult(`오류: ${err?.response?.data?.detail || '비교 분석 실패'}`)
+    } finally {
+      setComparing(false)
+    }
+  }
 
   const handleCreate = async () => {
     if (!form.name.trim()) return
@@ -196,6 +225,16 @@ export default function Competitors() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {subsidiaries.length > 0 && (
+            <button
+              onClick={() => { setShowCompare((v) => !v); setCompareResult(null) }}
+              className="btn-ghost flex items-center gap-1.5 text-xs"
+              style={{ color: showCompare ? '#818cf8' : undefined }}
+            >
+              <GitCompare size={13} />
+              {showCompare ? '비교분석 닫기' : '비교분석'}
+            </button>
+          )}
           <button onClick={load} disabled={loading} className="btn-ghost flex items-center gap-1.5 text-xs">
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
             새로고침
@@ -209,6 +248,51 @@ export default function Competitors() {
           </button>
         </div>
       </div>
+
+      {/* 비교분석 패널 (계열사 1개 이상일 때만) */}
+      {showCompare && subsidiaries.length > 0 && (
+        <div className="card p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <GitCompare size={16} className="text-indigo-400" />
+            <h3 className="text-sm font-semibold text-slate-100">경쟁사 vs 계열사 AI 비교분석</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs text-slate-400 flex items-center gap-1"><Crosshair size={10} /> 경쟁사 *</label>
+              <select className="input w-full text-sm" value={compareForm.competitor_id} onChange={(e) => setCompareForm((f) => ({ ...f, competitor_id: e.target.value }))}>
+                <option value="">선택...</option>
+                {competitors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-slate-400 flex items-center gap-1"><Building2 size={10} /> 비교 계열사 *</label>
+              <select className="input w-full text-sm" value={compareForm.subsidiary_id} onChange={(e) => setCompareForm((f) => ({ ...f, subsidiary_id: e.target.value }))}>
+                <option value="">선택...</option>
+                {subsidiaries.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-slate-400">분석 포커스 (선택)</label>
+              <input className="input w-full text-sm" placeholder="예: 시장 점유율, 기술력..." value={compareForm.focus} onChange={(e) => setCompareForm((f) => ({ ...f, focus: e.target.value }))} />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button
+              onClick={handleCompare}
+              disabled={comparing || !compareForm.competitor_id || !compareForm.subsidiary_id}
+              className="btn-primary text-sm flex items-center gap-2"
+            >
+              {comparing ? <Loader size={13} className="animate-spin" /> : <GitCompare size={13} />}
+              {comparing ? 'AI 분석 중...' : '비교분석 실행'}
+            </button>
+          </div>
+          {compareResult && (
+            <div className="p-4 rounded-lg bg-bg-elevated border border-bg-border">
+              <MarkdownMessage content={compareResult} />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 추가 폼 */}
       {showForm && (
