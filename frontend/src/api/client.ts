@@ -370,6 +370,35 @@ export const dataApi = {
   deleteAlert: (id: number) => api.delete(`/data/alerts/${id}`),
 }
 
+// ── Competitors ───────────────────────────────────────────────────────────────
+export const competitorApi = {
+  list: () => api.get('/competitors'),
+  create: (data: { name: string; industry?: string; keywords?: string[] }) =>
+    api.post('/competitors', data),
+  delete: (id: number) => api.delete(`/competitors/${id}`),
+  news: (id: number, limit?: number) =>
+    api.get(`/competitors/${id}/news`, { params: { limit } }),
+  collect: (id: number) => api.post(`/competitors/${id}/collect`),
+}
+
+// ── KPI Links ─────────────────────────────────────────────────────────────────
+export const kpiLinksApi = {
+  list: (strategyItemId?: number) =>
+    api.get('/kpi-links', { params: strategyItemId ? { strategy_item_id: strategyItemId } : {} }),
+  create: (data: object) => api.post('/kpi-links', data),
+  delete: (id: number) => api.delete(`/kpi-links/${id}`),
+  toggle: (id: number) => api.patch(`/kpi-links/${id}/toggle`),
+  sync: (id: number) => api.post(`/kpi-links/${id}/sync`),
+  syncAll: () => api.post('/kpi-links/sync-all'),
+}
+
+// ── Data Collection Policies ──────────────────────────────────────────────────
+export const policyApi = {
+  list: (source?: string) => api.get('/data/policies', { params: source ? { source } : {} }),
+  create: (data: object) => api.post('/data/policies', data),
+  delete: (id: number) => api.delete(`/data/policies/${id}`),
+}
+
 // ── Document Generator ────────────────────────────────────────────────────────
 export const docsApi = {
   businessPlan: (companyId: number) => api.post(`/docs/business-plan/${companyId}`),

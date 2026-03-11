@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import {
   Database, TrendingUp, Download, RefreshCw, Loader,
   Globe, Hash, Building2, Calendar, Activity, GitBranch,
-  ShieldCheck, Trash2, Copy, Zap, AlertTriangle,
+  ShieldCheck, Trash2, Copy, Zap, AlertTriangle, Plus, Settings2, X,
 } from 'lucide-react'
-import { dataApi, companiesApi } from '../api/client'
+import { dataApi, companiesApi, policyApi } from '../api/client'
 import type { Company } from '../types'
 
 interface QualityReport {
@@ -217,6 +217,23 @@ export default function DataAnalytics() {
   const [qualityAction, setQualityAction] = useState<string | null>(null)
   const [qualityMsg, setQualityMsg] = useState<string | null>(null)
   const [cleanupDays, setCleanupDays] = useState(30)
+
+  // 정책 관리 상태
+  const [policies, setPolicies] = useState<{id:number;source:string;company_id:number|null;max_records:number|null;retention_days:number|null;is_active:boolean;memo:string}[]>([])
+  const [policyLoading, setPolicyLoading] = useState(false)
+  const [showPolicyForm, setShowPolicyForm] = useState(false)
+  const [policyForm, setPolicyForm] = useState({ source: '', company_id: '', max_records: '', retention_days: '', memo: '' })
+  const [savingPolicy, setSavingPolicy] = useState(false)
+
+  const loadPolicies = async () => {
+    setPolicyLoading(true)
+    try {
+      const r = await policyApi.list()
+      setPolicies(r.data)
+    } finally {
+      setPolicyLoading(false)
+    }
+  }
 
   const loadStats = async () => {
     setLoading(true)
@@ -784,6 +801,135 @@ export default function DataAnalytics() {
             <p className="text-[9px] text-slate-600">
               정책: raw {quality.policy.raw_retention_days}일 / processed {quality.policy.processed_retention_days}일 보관 · 최소 콘텐츠 {quality.policy.min_content_length}자
             </p>
+          </div>
+        )}
+      </div>
+
+      {/* 수집 정책 관리 */}
+      <div className="card p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+            <Settings2 size={14} className="text-brand-light" />
+            수집 정책 관리
+            <span className="text-[10px] text-slate-500 font-normal ml-1">소스별 용량·보관 기간 커스텀 설정</span>
+          </h3>
+          <div className="flex items-center gap-2">
+            <button onClick={loadPolicies} disabled={policyLoading} className="btn-ghost flex items-center gap-1 text-xs">
+              <RefreshCw size={11} className={policyLoading ? 'animate-spin' : ''} />
+              새로고침
+            </button>
+            <button onClick={() => { setShowPolicyForm((v) => !v); loadPolicies() }} className="btn-primary flex items-center gap-1 text-xs">
+              {showPolicyForm ? <X size={11} /> : <Plus size={11} />}
+              {showPolicyForm ? '취소' : '정책 추가'}
+            </button>
+          </div>
+        </div>
+
+        {showPolicyForm && (
+          <div className="p-4 rounded-lg bg-bg-elevated border border-bg-border space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400">소스 *</label>
+                <input className="input w-full text-xs" placeholder="hackernews, fred, worldbank..." value={policyForm.source} onChange={(e) => setPolicyForm((f) => ({ ...f, source: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400">계열사 (미입력=글로벌)</label>
+                <select className="input w-full text-xs" value={policyForm.company_id} onChange={(e) => setPolicyForm((f) => ({ ...f, company_id: e.target.value }))}>
+                  <option value="">글로벌 정책</option>
+                  {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400">최대 레코드 수</label>
+                <input className="input w-full text-xs" type="number" placeholder="500" value={policyForm.max_records} onChange={(e) => setPolicyForm((f) => ({ ...f, max_records: e.target.value }))} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400">보관 기간 (일)</label>
+                <input className="input w-full text-xs" type="number" placeholder="30" value={policyForm.retention_days} onChange={(e) => setPolicyForm((f) => ({ ...f, retention_days: e.target.value }))} />
+              </div>
+              <div className="space-y-1 col-span-2">
+                <label className="text-[10px] text-slate-400">메모</label>
+                <input className="input w-full text-xs" placeholder="정책 설명..." value={policyForm.memo} onChange={(e) => setPolicyForm((f) => ({ ...f, memo: e.target.value }))} />
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button
+                disabled={savingPolicy || !policyForm.source.trim()}
+                className="btn-primary text-xs flex items-center gap-1.5"
+                onClick={async () => {
+                  setSavingPolicy(true)
+                  try {
+                    await policyApi.create({
+                      source: policyForm.source,
+                      company_id: policyForm.company_id ? parseInt(policyForm.company_id) : null,
+                      max_records: policyForm.max_records ? parseInt(policyForm.max_records) : null,
+                      retention_days: policyForm.retention_days ? parseInt(policyForm.retention_days) : null,
+                      memo: policyForm.memo,
+                    })
+                    setPolicyForm({ source: '', company_id: '', max_records: '', retention_days: '', memo: '' })
+                    setShowPolicyForm(false)
+                    await loadPolicies()
+                  } finally {
+                    setSavingPolicy(false)
+                  }
+                }}
+              >
+                {savingPolicy && <Loader size={11} className="animate-spin" />}
+                저장
+              </button>
+            </div>
+          </div>
+        )}
+
+        {policyLoading ? (
+          <div className="flex items-center gap-2 text-slate-500 text-xs py-4 justify-center">
+            <Loader size={14} className="animate-spin" /> 로딩 중...
+          </div>
+        ) : policies.length === 0 ? (
+          <div className="text-xs text-slate-500 py-4 text-center">
+            설정된 정책이 없습니다. 하드코딩 기본값이 적용됩니다.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-bg-border text-[10px] text-slate-500">
+                  <th className="text-left py-1.5 pr-3">소스</th>
+                  <th className="text-left py-1.5 pr-3">계열사</th>
+                  <th className="text-right py-1.5 pr-3">최대 레코드</th>
+                  <th className="text-right py-1.5 pr-3">보관 기간</th>
+                  <th className="text-left py-1.5 pr-3">메모</th>
+                  <th className="text-center py-1.5">상태</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {policies.map((p) => (
+                  <tr key={p.id} className="border-b border-bg-border/50 hover:bg-bg-elevated/30">
+                    <td className="py-1.5 pr-3 font-mono text-brand-light">{p.source}</td>
+                    <td className="py-1.5 pr-3 text-slate-400">
+                      {p.company_id ? (companies.find((c) => c.id === p.company_id)?.name || `#${p.company_id}`) : '글로벌'}
+                    </td>
+                    <td className="py-1.5 pr-3 text-right text-slate-300">{p.max_records ?? '-'}</td>
+                    <td className="py-1.5 pr-3 text-right text-slate-300">{p.retention_days != null ? `${p.retention_days}일` : '-'}</td>
+                    <td className="py-1.5 pr-3 text-slate-500">{p.memo || '-'}</td>
+                    <td className="py-1.5 text-center">
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded border ${p.is_active ? 'text-success bg-success/10 border-success/30' : 'text-slate-500 bg-slate-500/10 border-slate-500/30'}`}>
+                        {p.is_active ? '활성' : '비활성'}
+                      </span>
+                    </td>
+                    <td className="py-1.5 pl-2">
+                      <button
+                        onClick={async () => { await policyApi.delete(p.id); await loadPolicies() }}
+                        className="text-slate-600 hover:text-red-400 transition-colors p-1"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

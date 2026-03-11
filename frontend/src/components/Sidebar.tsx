@@ -6,7 +6,7 @@ import {
   Brain, Settings, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Zap, Home, Bell, FileText, Globe, Star, GitMerge, BarChart2, UserCheck,
   Terminal, Gamepad2, Shield, Briefcase, Users, Film, ListVideo,
-  DatabaseZap, ScrollText, Lightbulb,
+  DatabaseZap, ScrollText, Lightbulb, Crosshair,
 } from 'lucide-react'
 import { useAppStore } from '../store/useStore'
 import { approvalsApi, terminalApi } from '../api/client'
@@ -41,6 +41,7 @@ const NAV_GROUPS = [
       { to: '/simulation', icon: FlaskConical, label: '시뮬레이션' },
       { to: '/data-analytics', icon: DatabaseZap, label: '데이터 분석' },
       { to: '/insights', icon: Lightbulb, label: '인사이트' },
+      { to: '/competitors', icon: Crosshair, label: '경쟁사 모니터링' },
     ],
   },
   {
