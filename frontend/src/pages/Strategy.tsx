@@ -1,8 +1,31 @@
 import { useEffect, useState } from 'react'
-import { Map, Plus, X, Trophy, Target, Milestone, BarChart3, LayoutGrid, List, Sparkles, Link2, RefreshCw, Loader, Trash2 } from 'lucide-react'
+import { Map, Plus, X, Trophy, Target, Milestone, BarChart3, LayoutGrid, List, Sparkles, Link2, RefreshCw, Loader, Trash2, Bot, Stethoscope, Printer } from 'lucide-react'
 import { strategyApi, companiesApi, kpiLinksApi } from '../api/client'
 import type { StrategyItem, Company, CEOPerformance } from '../types'
 import { format } from 'date-fns'
+
+interface DiagResult {
+  health?: string
+  progress_assessment?: string
+  risks?: string[]
+  improvements?: string[]
+  next_actions?: string[]
+  score?: number
+  error?: string
+}
+
+function Sparkline({ data }: { data: number[] }) {
+  if (data.length < 2) return null
+  const min = Math.min(...data), max = Math.max(...data)
+  const range = max - min || 1
+  const w = 60, h = 20
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / range) * h}`)
+  return (
+    <svg width={w} height={h} className="opacity-60">
+      <polyline points={pts.join(' ')} fill="none" stroke="#60a5fa" strokeWidth="1.5" />
+    </svg>
+  )
+}
 
 const ITEM_TYPE_ICONS: Record<string, React.ElementType> = {
   objective: Target,
@@ -63,12 +86,25 @@ function KpiLinkPanel({ item, onClose }: { item: StrategyItem; onClose: () => vo
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ source: 'fred', series_id: '', field_path: 'data[0].value', transform: 'latest', unit: '' })
   const [saving, setSaving] = useState(false)
+  const [historyMap, setHistoryMap] = useState<Record<number, { value: number; synced_at: string }[]>>({})
 
   const load = async () => {
     setLoading(true)
     try {
       const r = await kpiLinksApi.list(item.id)
       setLinks(r.data)
+      // Fetch history for each link
+      const entries = await Promise.all(
+        r.data.map(async (lnk: KpiLink) => {
+          try {
+            const h = await kpiLinksApi.history(lnk.id)
+            return [lnk.id, h.data] as [number, { value: number; synced_at: string }[]]
+          } catch {
+            return [lnk.id, []] as [number, { value: number; synced_at: string }[]]
+          }
+        })
+      )
+      setHistoryMap(Object.fromEntries(entries))
     } finally {
       setLoading(false)
     }
@@ -200,6 +236,9 @@ function KpiLinkPanel({ item, onClose }: { item: StrategyItem; onClose: () => vo
                     {lnk.last_updated_at && (
                       <span>· {new Date(lnk.last_updated_at).toLocaleDateString('ko-KR')}</span>
                     )}
+                    {historyMap[lnk.id] && historyMap[lnk.id].length >= 2 && (
+                      <Sparkline data={historyMap[lnk.id].map((h) => h.value)} />
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
@@ -221,7 +260,7 @@ function KpiLinkPanel({ item, onClose }: { item: StrategyItem; onClose: () => vo
 
 // ── Strategy card ──────────────────────────────────────────────────────────
 function StrategyCard({
-  item, onProgressChange, onDelete, laneColor, onDragStart, onKpiClick,
+  item, onProgressChange, onDelete, laneColor, onDragStart, onKpiClick, onDiagnose, diagnosing, diagResult,
 }: {
   item: StrategyItem
   onProgressChange: (id: number, v: number) => void
@@ -229,10 +268,18 @@ function StrategyCard({
   laneColor: string
   onDragStart: (e: React.DragEvent, itemId: number) => void
   onKpiClick: (item: StrategyItem) => void
+  onDiagnose: (item: StrategyItem) => void
+  diagnosing: boolean
+  diagResult?: DiagResult
 }) {
   const typeMeta = ITEM_TYPE_META[item.item_type] ?? ITEM_TYPE_META.objective
   const priorityMeta = PRIORITY_META[item.priority] ?? PRIORITY_META.medium
   const Icon = ITEM_TYPE_ICONS[item.item_type] ?? Target
+
+  const healthColor = diagResult?.health === 'good' ? '#34d399'
+    : diagResult?.health === 'warning' ? '#fbbf24'
+    : diagResult?.health === 'critical' ? '#f87171'
+    : '#94a3b8'
 
   return (
     <div
@@ -255,6 +302,13 @@ function StrategyCard({
         >
           {priorityMeta.label}
         </div>
+        <button
+          onClick={(e) => { e.stopPropagation(); onDiagnose(item) }}
+          className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-purple-400 transition-all ml-1 p-0.5"
+          title="AI 진단"
+        >
+          {diagnosing ? <Loader size={9} className="animate-spin" /> : <Stethoscope size={9} />}
+        </button>
         <button
           onClick={(e) => { e.stopPropagation(); onKpiClick(item) }}
           className="opacity-0 group-hover:opacity-100 text-slate-700 hover:text-blue-400 transition-all ml-1 p-0.5"
@@ -293,13 +347,55 @@ function StrategyCard({
           )}
         </div>
       </div>
+
+      {/* AI Diagnosis result */}
+      {diagResult && (
+        <div
+          className="mt-2 p-2 rounded-lg text-[9px] space-y-1"
+          style={{ background: 'rgba(0,0,0,0.3)', border: `1px solid ${healthColor}40` }}
+        >
+          <div className="flex items-center gap-1.5">
+            <Bot size={9} style={{ color: healthColor }} />
+            <span
+              className="px-1.5 py-0.5 rounded-full font-semibold"
+              style={{ background: `${healthColor}20`, color: healthColor }}
+            >
+              {diagResult.health ?? '—'}
+            </span>
+            {diagResult.score !== undefined && (
+              <span className="text-slate-400 ml-auto font-mono">{diagResult.score}/10</span>
+            )}
+          </div>
+          {diagResult.error ? (
+            <p className="text-red-400">{diagResult.error}</p>
+          ) : (
+            <>
+              {diagResult.progress_assessment && (
+                <p className="text-slate-400 leading-relaxed">{diagResult.progress_assessment}</p>
+              )}
+              {diagResult.risks && diagResult.risks.length > 0 && (
+                <div>
+                  <span className="text-red-400 font-semibold">리스크: </span>
+                  <span className="text-slate-500">{diagResult.risks.slice(0, 2).join(', ')}</span>
+                </div>
+              )}
+              {diagResult.next_actions && diagResult.next_actions.length > 0 && (
+                <div>
+                  <span className="text-green-400 font-semibold">다음: </span>
+                  <span className="text-slate-500">{diagResult.next_actions[0]}</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
 // ── Lane (one per company) ─────────────────────────────────────────────────
 function CompanyLane({
-  company, items, color, onProgressChange, onDelete, onDragStart, onDrop, onKpiClick,
+  company, items, color, onProgressChange, onDelete, onDragStart, onDrop, onKpiClick, onDiagnose, diagnosing, diagnoseResults,
 }: {
   company: { id: number | null; name: string }
   items: StrategyItem[]
@@ -309,6 +405,9 @@ function CompanyLane({
   onDragStart: (e: React.DragEvent, itemId: number) => void
   onDrop: (targetCompanyId: number | null) => void
   onKpiClick: (item: StrategyItem) => void
+  onDiagnose: (item: StrategyItem) => void
+  diagnosing: number | null
+  diagnoseResults: Record<number, DiagResult>
 }) {
   const [isDragOver, setIsDragOver] = useState(false)
 
@@ -373,6 +472,9 @@ function CompanyLane({
               onDelete={onDelete}
               onDragStart={onDragStart}
               onKpiClick={onKpiClick}
+              onDiagnose={onDiagnose}
+              diagnosing={diagnosing === item.id}
+              diagResult={diagnoseResults[item.id]}
             />
           ))
         )}
@@ -402,6 +504,20 @@ export default function Strategy() {
   const [generating, setGenerating] = useState(false)
   const [genResult, setGenResult] = useState<{ generated: number; company: string } | null>(null)
   const [kpiPanelItem, setKpiPanelItem] = useState<StrategyItem | null>(null)
+  const [diagnosing, setDiagnosing] = useState<number | null>(null)
+  const [diagnoseResults, setDiagnoseResults] = useState<Record<number, DiagResult>>({})
+
+  const handleDiagnose = async (item: StrategyItem) => {
+    setDiagnosing(item.id)
+    try {
+      const res = await strategyApi.diagnose(item.id)
+      setDiagnoseResults((prev) => ({ ...prev, [item.id]: res.data }))
+    } catch (e: any) {
+      setDiagnoseResults((prev) => ({ ...prev, [item.id]: { error: e?.message ?? '진단 실패' } }))
+    } finally {
+      setDiagnosing(null)
+    }
+  }
 
   const load = async () => {
     // Always fetch all items; board view filters client-side for lane layout
@@ -454,6 +570,18 @@ export default function Strategy() {
       await load()
     } finally {
       setGenerating(false)
+    }
+  }
+
+  const handlePrintPDF = () => {
+    const el = document.querySelector('.strategy-print-area')
+    if (el) {
+      const win = window.open('', '_blank')
+      win?.document.write(`<html><head><title>전략 맵</title><style>body{background:#0f172a;color:#e2e8f0;font-family:sans-serif;padding:20px} .card{border:1px solid #334155;border-radius:8px;padding:12px;margin:8px 0;background:#1e293b} h3{color:#818cf8} .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px}</style></head><body>`)
+      win?.document.write(el.innerHTML)
+      win?.document.write('</body></html>')
+      win?.document.close()
+      win?.print()
     }
   }
 
@@ -540,6 +668,13 @@ export default function Strategy() {
 
             <div className="flex items-center gap-2 ml-auto">
               <button
+                onClick={handlePrintPDF}
+                className="flex items-center gap-1.5 text-xs py-1.5 px-3 rounded-lg font-medium transition-colors"
+                style={{ background: 'rgba(100,116,139,0.15)', color: '#94a3b8', border: '1px solid rgba(100,116,139,0.25)' }}
+              >
+                <Printer size={12} /> PDF 저장
+              </button>
+              <button
                 onClick={() => { setShowGenerate(true); setGenResult(null) }}
                 className="flex items-center gap-1.5 text-xs py-1.5 px-3 rounded-lg font-medium transition-colors"
                 style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.25)' }}
@@ -562,7 +697,7 @@ export default function Strategy() {
                 </div>
               ) : (
                 <div
-                  className="flex gap-3 overflow-x-auto pb-3"
+                  className="strategy-print-area flex gap-3 overflow-x-auto pb-3"
                   style={{ minHeight: 400 }}
                 >
                   {/* Group-level lane (no company) */}
@@ -580,6 +715,9 @@ export default function Strategy() {
                           onDragStart={handleDragStart}
                           onDrop={handleDrop}
                           onKpiClick={setKpiPanelItem}
+                          onDiagnose={handleDiagnose}
+                          diagnosing={diagnosing}
+                          diagnoseResults={diagnoseResults}
                         />
                       )
                     }
@@ -603,6 +741,9 @@ export default function Strategy() {
                           onDragStart={handleDragStart}
                           onDrop={handleDrop}
                           onKpiClick={setKpiPanelItem}
+                          onDiagnose={handleDiagnose}
+                          diagnosing={diagnosing}
+                          diagnoseResults={diagnoseResults}
                         />
                       )
                     })
