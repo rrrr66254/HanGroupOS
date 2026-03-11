@@ -18,6 +18,10 @@ from schemas.schemas import (
     WebSearchRequest, NewsSearchRequest, ScrapeRequest,
     RssFetchRequest, ComtradeRequest, CollectedDataOut,
 )
+from services.data_quality import (
+    compute_hash, compute_relevance, check_quality, should_save,
+    cleanup_old_data, dedup_data, get_quality_report,
+)
 from services.data_collector import DataCollector, SERVICE_INFO
 from services.ai_provider import get_provider_from_db, MARKET_ANALYST_SYSTEM
 
@@ -113,8 +117,9 @@ def _save_collected(
     query: str,
     result: dict,
     company_id: Optional[int] = None,
-) -> CollectedData:
-    """수집 결과를 DB에 저장."""
+    keywords: Optional[List[str]] = None,
+) -> Optional[CollectedData]:
+    """수집 결과를 DB에 저장 (중복/용량/품질 필터 적용)."""
     title = result.get("query", "") or result.get("feed_title", "") or source
     content = ""
     if "content" in result:
@@ -130,16 +135,34 @@ def _save_collected(
             for r in result["results"][:10]
         )
 
+    title = title[:500]
+    content = content[:10000]
+
+    # 해시 계산 + 품질 체크
+    c_hash = compute_hash(title, content)
+    q_flag = check_quality(title, content, c_hash, db)
+
+    # 저장 여부 판단
+    ok, reason = should_save(db, source, data_type, company_id, q_flag)
+    if not ok:
+        return None  # 중복/용량 초과 스킵
+
+    # 관련성 점수
+    rel_score = compute_relevance(content, keywords or []) if keywords else None
+
     obj = CollectedData(
         company_id=company_id,
         data_type=data_type,
         source=source,
         query=query,
-        title=title[:500],
-        content=content[:10000],
+        title=title,
+        content=content,
         structured=result,
         tags=[data_type],
         status="raw",
+        content_hash=c_hash,
+        relevance_score=rel_score,
+        quality_flag=q_flag,
     )
     db.add(obj)
     db.commit()
@@ -1186,6 +1209,72 @@ def get_data_flow(
             "strategy_items": sum(cnt for _, cnt in item_rows),
         },
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 데이터 품질 관리
+# ══════════════════════════════════════════════════════════════════════════════
+
+class CleanupRequest(BaseModel):
+    raw_days: int = 30
+    processed_days: int = 90
+
+@router.get("/quality", summary="데이터 품질 리포트")
+def data_quality_report(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """중복률·저품질률·용량 사용률·만료 예정 등 품질 리포트."""
+    return get_quality_report(db)
+
+
+@router.post("/quality/cleanup", summary="오래된 데이터 정리")
+def data_cleanup(
+    req: CleanupRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    raw_days일 이상 된 raw 데이터 + processed_days일 이상 된 processed 데이터 삭제.
+    기본값: raw 30일, processed 90일
+    """
+    result = cleanup_old_data(db, raw_days=req.raw_days, processed_days=req.processed_days)
+    return {**result, "message": f"정리 완료 — 총 {result['total_deleted']}건 삭제"}
+
+
+@router.post("/quality/dedup", summary="중복 데이터 제거")
+def data_dedup(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """content_hash 기준 중복 레코드 제거 (최신 것 보존)."""
+    result = dedup_data(db)
+    return {**result, "message": f"중복 제거 완료 — {result['duplicates_removed']}건 삭제"}
+
+
+@router.post("/quality/hash-all", summary="기존 데이터 해시 일괄 계산")
+def hash_existing_data(
+    limit: int = 1000,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """hash/quality_flag 없는 기존 데이터에 일괄 적용 (마이그레이션용)."""
+    rows = (
+        db.query(CollectedData)
+        .filter(CollectedData.content_hash == None)
+        .limit(limit)
+        .all()
+    )
+    updated = 0
+    for row in rows:
+        c_hash = compute_hash(row.title or "", row.content or "")
+        row.content_hash = c_hash
+        if not row.quality_flag:
+            flag = check_quality(row.title or "", row.content or "", c_hash, db)
+            row.quality_flag = flag
+        updated += 1
+    db.commit()
+    return {"updated": updated, "message": f"{updated}건 해시/품질플래그 적용 완료"}
 
 
 @router.get("/export/{company_id}", summary="수집 데이터 JSON 내보내기")

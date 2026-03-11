@@ -308,10 +308,11 @@ def _seed_data():
 
 # ── Background Scheduler ──────────────────────────────────────────────────────
 def _auto_collect_news():
-    """6시간마다 전체 계열사 업종 관련 뉴스 + 글로벌 데이터 자동 수집."""
+    """6시간마다 전체 계열사 업종 관련 뉴스 + 글로벌 데이터 자동 수집 (스마트 필터링 적용)."""
     from datetime import datetime
     from models.models import Company, ExternalApiKey, CollectedData, MarketKeywordAlert
     from services.data_collector import DataCollector
+    from services.data_quality import compute_hash, check_quality, should_save, cleanup_old_data
     from routers.notifications import create_notification
 
     db = SessionLocal()
@@ -327,11 +328,38 @@ def _auto_collect_news():
                 extra_configs[row.service] = row.extra_config
 
         collector = DataCollector(api_keys=api_keys, extra_configs=extra_configs)
+        saved_total = 0
+        skipped_total = 0
+
+        def _smart_save(title: str, content: str, data_type: str, source: str,
+                        query: str, structured: dict, tags: list,
+                        company_id=None, keywords=None):
+            """중복·용량·품질 필터 통과 시에만 저장."""
+            nonlocal saved_total, skipped_total
+            from services.data_quality import compute_relevance
+            c_hash = compute_hash(title, content)
+            q_flag = check_quality(title, content, c_hash, db)
+            ok, reason = should_save(db, source, data_type, company_id, q_flag)
+            if not ok:
+                skipped_total += 1
+                return None
+            rel_score = compute_relevance(content, keywords or []) if keywords else None
+            obj = CollectedData(
+                company_id=company_id, data_type=data_type, source=source,
+                query=query, title=title[:500], content=content[:10000],
+                structured=structured, tags=tags, status="raw",
+                content_hash=c_hash, relevance_score=rel_score, quality_flag=q_flag,
+            )
+            db.add(obj)
+            saved_total += 1
+            return obj
 
         # ── 1. 회사별 업종 뉴스 수집 ─────────────────────────────────────────
         for company in companies[:5]:
             try:
                 industry = company.industry or company.name
+                keywords = [kw.strip() for kw in (company.industry or "").split(",") if kw.strip()]
+                keywords += [company.name]
                 result = collector.news_search(query=industry, language="ko", days_back=1)
                 articles = result.get("articles", [])
                 if articles:
@@ -339,18 +367,17 @@ def _auto_collect_news():
                         f"{a.get('title','')}: {a.get('description','')}"
                         for a in articles[:10]
                     )
-                    obj = CollectedData(
-                        company_id=company.id,
+                    _smart_save(
+                        title=f"[자동수집] {industry} 뉴스",
+                        content=content,
                         data_type="news",
                         source=result.get("source", "auto"),
                         query=industry,
-                        title=f"[자동수집] {industry} 뉴스",
-                        content=content[:10000],
                         structured=result,
                         tags=["news", "auto_collected"],
-                        status="raw",
+                        company_id=company.id,
+                        keywords=keywords,
                     )
-                    db.add(obj)
             except Exception as e:
                 print(f"[Scheduler] {company.name} 뉴스 수집 실패: {e}")
 
@@ -362,22 +389,20 @@ def _auto_collect_news():
                     f"{s.get('title','')}: {s.get('url','')}"
                     for s in hn_result["stories"]
                 )
-                db.add(CollectedData(
-                    company_id=None,
+                _smart_save(
+                    title=f"[HackerNews] 글로벌 테크 트렌드 ({datetime.utcnow().strftime('%Y-%m-%d')})",
+                    content=content,
                     data_type="tech_trend",
                     source="hackernews",
                     query="hackernews_top",
-                    title=f"[HackerNews] 글로벌 테크 트렌드 ({datetime.utcnow().strftime('%Y-%m-%d')})",
-                    content=content[:10000],
                     structured=hn_result,
                     tags=["hackernews", "tech", "trend", "free", "auto"],
-                    status="raw",
-                ))
+                )
                 print(f"[Scheduler] HackerNews {len(hn_result['stories'])}개 스토리 수집")
         except Exception as e:
             print(f"[Scheduler] HackerNews 수집 실패: {e}")
 
-        # ── 3. World Bank 한국 GDP 성장률 수집 (일 1회 정도) ─────────────────
+        # ── 3. World Bank 한국 GDP 성장률 수집 ───────────────────────────────
         try:
             wb_result = collector.collect_worldbank(indicator="NY.GDP.MKTP.KD.ZG", country="KR")
             if wb_result.get("data"):
@@ -385,23 +410,21 @@ def _auto_collect_news():
                     f"{d.get('year','')}: {d.get('value','')}%"
                     for d in wb_result["data"]
                 )
-                db.add(CollectedData(
-                    company_id=None,
+                _smart_save(
+                    title="[World Bank] 한국 GDP 성장률",
+                    content=content,
                     data_type="economic",
                     source="worldbank",
                     query="KR:NY.GDP.MKTP.KD.ZG",
-                    title="[World Bank] 한국 GDP 성장률",
-                    content=content[:5000],
                     structured=wb_result,
                     tags=["worldbank", "economic", "korea", "gdp", "auto"],
-                    status="raw",
-                ))
+                )
                 print(f"[Scheduler] World Bank GDP 데이터 {len(wb_result['data'])}건 수집")
         except Exception as e:
             print(f"[Scheduler] World Bank 수집 실패: {e}")
 
         db.commit()
-        print(f"[Scheduler] 데이터 자동 수집 완료 ({len(companies[:5])}개 회사 + HN + WB)")
+        print(f"[Scheduler] 수집 완료 — 저장 {saved_total}건 / 스킵 {skipped_total}건 (중복·용량·품질 필터)")
 
         # ── 4. 활성 회사별 자동 인사이트 생성 ────────────────────────────────
         try:

@@ -190,6 +190,8 @@ export const memoryApi = {
 export const strategyApi = {
   map: (companyId?: number) =>
     api.get('/strategy/map', { params: { company_id: companyId } }),
+  items: (params?: { company_id?: number; item_type?: string; limit?: number }) =>
+    api.get('/strategy/items', { params }),
   createItem: (data: object) => api.post('/strategy/map', data),
   updateItem: (id: number, data: object) => api.patch(`/strategy/map/${id}`, data),
   deleteItem: (id: number) => api.delete(`/strategy/map/${id}`),
@@ -353,6 +355,12 @@ export const dataApi = {
   collectAlphaVantage: (data?: object) => api.post('/data/collect/alphavantage', data || {}),
   collectKosis: (data?: object) => api.post('/data/collect/kosis', data || {}),
   flow: (companyId?: number) => api.get('/data/flow', { params: companyId ? { company_id: companyId } : {} }),
+  // 품질 관리
+  quality: () => api.get('/data/quality'),
+  cleanup: (rawDays = 30, processedDays = 90) =>
+    api.post('/data/quality/cleanup', { raw_days: rawDays, processed_days: processedDays }),
+  dedup: () => api.post('/data/quality/dedup'),
+  hashAll: (limit = 1000) => api.post('/data/quality/hash-all', null, { params: { limit } }),
   // 시장 알림
   alerts: () => api.get('/data/alerts'),
   createAlert: (keyword: string, companyId?: number) =>

@@ -2,9 +2,23 @@ import { useEffect, useState } from 'react'
 import {
   Database, TrendingUp, Download, RefreshCw, Loader,
   Globe, Hash, Building2, Calendar, Activity, GitBranch,
+  ShieldCheck, Trash2, Copy, Zap, AlertTriangle,
 } from 'lucide-react'
 import { dataApi, companiesApi } from '../api/client'
 import type { Company } from '../types'
+
+interface QualityReport {
+  total: number
+  by_status: Record<string, number>
+  by_flag: Record<string, number>
+  hashed: number
+  unhashed: number
+  stale_raw: number
+  duplicate_hash_groups: number
+  source_usage: { source: string; count: number; limit: number | null; usage_pct: number | null }[]
+  avg_relevance_score: number | null
+  policy: { raw_retention_days: number; processed_retention_days: number; min_content_length: number }
+}
 
 interface DataStats {
   total: number
@@ -198,6 +212,11 @@ export default function DataAnalytics() {
   const [flow, setFlow] = useState<DataFlow | null>(null)
   const [flowLoading, setFlowLoading] = useState(false)
   const [flowCompany, setFlowCompany] = useState('')
+  const [quality, setQuality] = useState<QualityReport | null>(null)
+  const [qualityLoading, setQualityLoading] = useState(false)
+  const [qualityAction, setQualityAction] = useState<string | null>(null)
+  const [qualityMsg, setQualityMsg] = useState<string | null>(null)
+  const [cleanupDays, setCleanupDays] = useState(30)
 
   const loadStats = async () => {
     setLoading(true)
@@ -221,6 +240,32 @@ export default function DataAnalytics() {
       await loadStats()
     } finally {
       setCollecting(null)
+    }
+  }
+
+  const loadQuality = async () => {
+    setQualityLoading(true)
+    try {
+      const r = await dataApi.quality()
+      setQuality(r.data)
+    } finally {
+      setQualityLoading(false)
+    }
+  }
+
+  const runQualityAction = async (action: 'cleanup' | 'dedup' | 'hash') => {
+    setQualityAction(action)
+    setQualityMsg(null)
+    try {
+      let r
+      if (action === 'cleanup') r = await dataApi.cleanup(cleanupDays)
+      else if (action === 'dedup') r = await dataApi.dedup()
+      else r = await dataApi.hashAll(2000)
+      setQualityMsg(r.data.message)
+      await loadQuality()
+      await loadStats()
+    } finally {
+      setQualityAction(null)
     }
   }
 
@@ -587,6 +632,160 @@ export default function DataAnalytics() {
         <p className="text-[10px] text-slate-600 mt-2">
           최대 500건의 수집 데이터를 JSON 형식으로 내보냅니다.
         </p>
+      </div>
+
+      {/* 데이터 품질 관리 */}
+      <div className="card p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+            <ShieldCheck size={15} className="text-success" />
+            데이터 품질 관리
+          </h3>
+          <button
+            onClick={loadQuality}
+            disabled={qualityLoading}
+            className="btn-ghost flex items-center gap-1 text-xs h-7"
+          >
+            {qualityLoading ? <Loader size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+            리포트
+          </button>
+        </div>
+
+        {/* 즉시 실행 액션 */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* 중복 제거 */}
+          <button
+            onClick={() => runQualityAction('dedup')}
+            disabled={qualityAction !== null}
+            className="p-3 rounded-lg border border-bg-border bg-bg-elevated hover:border-brand/40 hover:bg-brand/5 transition-all text-left"
+          >
+            {qualityAction === 'dedup' ? (
+              <Loader size={13} className="animate-spin text-brand-light mb-2" />
+            ) : (
+              <Copy size={13} className="text-brand-light mb-2" />
+            )}
+            <div className="text-xs font-medium text-slate-200">중복 제거</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">해시 기반 중복 레코드 삭제</div>
+          </button>
+
+          {/* 오래된 데이터 정리 */}
+          <div className="p-3 rounded-lg border border-bg-border bg-bg-elevated space-y-2">
+            <div className="flex items-center gap-2">
+              <Trash2 size={13} className="text-red-400" />
+              <div className="text-xs font-medium text-slate-200">오래된 데이터 정리</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={7} max={365}
+                value={cleanupDays}
+                onChange={(e) => setCleanupDays(parseInt(e.target.value) || 30)}
+                className="input text-xs h-6 py-0 w-16 text-center"
+              />
+              <span className="text-[10px] text-slate-500">일 이상된 raw 삭제</span>
+            </div>
+            <button
+              onClick={() => runQualityAction('cleanup')}
+              disabled={qualityAction !== null}
+              className="w-full text-[10px] py-1 rounded bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 transition-colors"
+            >
+              {qualityAction === 'cleanup' ? '정리 중...' : '실행'}
+            </button>
+          </div>
+
+          {/* 해시 일괄 적용 */}
+          <button
+            onClick={() => runQualityAction('hash')}
+            disabled={qualityAction !== null}
+            className="p-3 rounded-lg border border-bg-border bg-bg-elevated hover:border-teal-500/40 hover:bg-teal-500/5 transition-all text-left"
+          >
+            {qualityAction === 'hash' ? (
+              <Loader size={13} className="animate-spin text-teal-400 mb-2" />
+            ) : (
+              <Zap size={13} className="text-teal-400 mb-2" />
+            )}
+            <div className="text-xs font-medium text-slate-200">해시 일괄 적용</div>
+            <div className="text-[10px] text-slate-500 mt-0.5">기존 데이터 중복감지 활성화</div>
+          </button>
+        </div>
+
+        {qualityMsg && (
+          <div className="text-xs text-success bg-success/10 border border-success/30 rounded px-3 py-2">
+            ✓ {qualityMsg}
+          </div>
+        )}
+
+        {/* 품질 리포트 */}
+        {quality && (
+          <div className="space-y-3 border-t border-bg-border pt-3">
+            {/* 요약 */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center">
+              {[
+                { label: '전체', value: quality.total, color: 'text-slate-100' },
+                { label: '중복그룹', value: quality.duplicate_hash_groups, color: quality.duplicate_hash_groups > 0 ? 'text-amber-400' : 'text-success' },
+                { label: '만료 예정', value: quality.stale_raw, color: quality.stale_raw > 0 ? 'text-red-400' : 'text-success' },
+                { label: '평균 관련성', value: quality.avg_relevance_score != null ? `${Math.round((quality.avg_relevance_score) * 100)}%` : 'N/A', color: 'text-brand-light' },
+              ].map((item) => (
+                <div key={item.label} className="bg-bg-elevated rounded p-2">
+                  <div className={`text-base font-bold ${item.color}`}>{item.value}</div>
+                  <div className="text-[9px] text-slate-500">{item.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* 품질 플래그 분포 */}
+            {Object.keys(quality.by_flag).length > 0 && (
+              <div>
+                <div className="text-[10px] text-slate-500 mb-1.5 flex items-center gap-1">
+                  <AlertTriangle size={9} /> 품질 플래그 분포
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(quality.by_flag).map(([flag, cnt]) => (
+                    <span key={flag} className={`text-[9px] px-2 py-0.5 rounded border ${
+                      flag === 'ok' ? 'bg-success/10 border-success/30 text-success' :
+                      flag === 'duplicate' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' :
+                      flag === 'short' ? 'bg-slate-500/10 border-slate-500/30 text-slate-400' :
+                      'bg-red-500/10 border-red-500/30 text-red-400'
+                    }`}>
+                      {flag}: {cnt}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 소스별 용량 */}
+            {quality.source_usage.length > 0 && (
+              <div>
+                <div className="text-[10px] text-slate-500 mb-1.5">소스별 용량 사용률</div>
+                <div className="space-y-1">
+                  {quality.source_usage.slice(0, 8).map((su) => (
+                    <div key={su.source} className="flex items-center gap-2 text-[10px]">
+                      <span className="text-slate-400 w-28 truncate">{su.source}</span>
+                      <div className="flex-1 bg-bg-elevated rounded-full h-1.5">
+                        <div
+                          className={`h-1.5 rounded-full transition-all ${
+                            (su.usage_pct || 0) > 80 ? 'bg-red-400' :
+                            (su.usage_pct || 0) > 50 ? 'bg-amber-400' : 'bg-success/60'
+                          }`}
+                          style={{ width: `${Math.min(100, su.usage_pct || 0)}%` }}
+                        />
+                      </div>
+                      <span className="text-slate-500 w-16 text-right">
+                        {su.count}{su.limit ? `/${su.limit}` : ''}
+                        {su.usage_pct != null ? ` (${su.usage_pct}%)` : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <p className="text-[9px] text-slate-600">
+              정책: raw {quality.policy.raw_retention_days}일 / processed {quality.policy.processed_retention_days}일 보관 · 최소 콘텐츠 {quality.policy.min_content_length}자
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )

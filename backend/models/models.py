@@ -429,6 +429,9 @@ class CollectedData(Base):
     structured = Column(JSON, default={})            # 구조화된 데이터 (articles, results 등)
     tags = Column(JSON, default=[])
     status = Column(String(20), default="raw")       # raw | processed | analyzed
+    content_hash = Column(String(64), nullable=True, index=True)  # SHA256 중복 감지
+    relevance_score = Column(Float, nullable=True)   # 0.0~1.0 관련성 점수
+    quality_flag = Column(String(20), nullable=True) # ok | short | duplicate | low_quality
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

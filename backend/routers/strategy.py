@@ -126,13 +126,34 @@ JSON 배열만 출력하고 다른 텍스트는 포함하지 마세요."""
 @router.get("/map", response_model=List[StrategyItemOut])
 def strategy_map(
     company_id: Optional[int] = None,
+    item_type: Optional[str] = None,
+    limit: int = 200,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     q = db.query(StrategyItem)
     if company_id is not None:
         q = q.filter(StrategyItem.company_id == company_id)
-    return q.order_by(StrategyItem.created_at).all()
+    if item_type is not None:
+        q = q.filter(StrategyItem.item_type == item_type)
+    return q.order_by(StrategyItem.created_at.desc()).limit(limit).all()
+
+
+@router.get("/items", response_model=List[StrategyItemOut])
+def list_strategy_items(
+    company_id: Optional[int] = None,
+    item_type: Optional[str] = None,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """인사이트 대시보드용 — item_type 필터 지원."""
+    q = db.query(StrategyItem)
+    if company_id is not None:
+        q = q.filter(StrategyItem.company_id == company_id)
+    if item_type is not None:
+        q = q.filter(StrategyItem.item_type == item_type)
+    return q.order_by(StrategyItem.created_at.desc()).limit(limit).all()
 
 
 @router.post("/map", response_model=StrategyItemOut)

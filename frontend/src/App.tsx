@@ -30,6 +30,7 @@ import VideoStudio from './pages/VideoStudio'
 import VideoJobs from './pages/VideoJobs'
 import DocGenerator from './pages/DocGenerator'
 import DataAnalytics from './pages/DataAnalytics'
+import InsightsDashboard from './pages/InsightsDashboard'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -92,6 +93,7 @@ export default function App() {
           <Route path="video-jobs" element={<VideoJobs />} />
           <Route path="doc-generator" element={<DocGenerator />} />
           <Route path="data-analytics" element={<DataAnalytics />} />
+          <Route path="insights" element={<InsightsDashboard />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>
