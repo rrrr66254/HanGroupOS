@@ -64,6 +64,16 @@ class AlphaVantageCollectRequest(BaseModel):
     company_id: Optional[int] = None
     save: bool = True
 
+class KosisCollectRequest(BaseModel):
+    org_id: str = "101"          # 기관코드 (101=통계청, 301=한국은행)
+    tbl_id: str = "DT_1DA7003S"  # 통계표ID (경제활동인구)
+    item_id: str = "T1"
+    start_prd_de: Optional[str] = None  # YYYYMM
+    end_prd_de: Optional[str] = None
+    page_size: int = 50
+    company_id: Optional[int] = None
+    save: bool = True
+
 class AlertCreateRequest(BaseModel):
     keyword: str
     company_id: Optional[int] = None
@@ -746,6 +756,46 @@ def collect_reddit(
     return {**result, "saved_id": saved_id}
 
 
+@router.post("/collect/kosis", summary="KOSIS 국가통계포털 데이터 수집")
+def collect_kosis(
+    req: KosisCollectRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """KOSIS 국가통계포털 — 인구·고용·물가 등 공식 국가통계 수집 (무료 키 필요)."""
+    collector = _get_collector(db)
+    result = collector.collect_kosis(
+        org_id=req.org_id,
+        tbl_id=req.tbl_id,
+        item_id=req.item_id,
+        start_prd_de=req.start_prd_de,
+        end_prd_de=req.end_prd_de,
+        page_size=req.page_size,
+    )
+    saved_id = None
+    if req.save and result.get("data"):
+        content = "\n".join(
+            f"{d.get('period','')} {d.get('item_name','')}: {d.get('value','')} {d.get('unit','')}"
+            for d in result["data"][:50]
+        )[:10000]
+        obj = CollectedData(
+            company_id=req.company_id,
+            data_type="statistics",
+            source="kosis",
+            query=f"{req.org_id}/{req.tbl_id}",
+            title=f"[KOSIS] {req.tbl_id} 통계 ({result.get('period','')})",
+            content=content,
+            structured=result,
+            tags=["kosis", "statistics", "korea", "government"],
+            status="raw",
+        )
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+        saved_id = obj.id
+    return {**result, "saved_id": saved_id}
+
+
 @router.post("/collect/dart", summary="DART 금융감독원 공시 수집")
 def collect_dart(
     req: DartCollectRequest,
@@ -1028,6 +1078,113 @@ def get_data_stats(
         "by_source": by_source,
         "by_company": by_company,
         "daily_7days": daily,
+    }
+
+
+@router.get("/flow", summary="데이터 흐름 관계 시각화용 통계")
+def get_data_flow(
+    company_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    수집 데이터 → 인사이트(StrategyItem) → 전략목표 관계 노드/링크 반환.
+    Sankey 차트 렌더링에 사용.
+    """
+    # 1. 소스별 수집량
+    source_q = (
+        db.query(CollectedData.source, CollectedData.data_type, func.count(CollectedData.id))
+        .group_by(CollectedData.source, CollectedData.data_type)
+    )
+    if company_id:
+        source_q = source_q.filter(
+            (CollectedData.company_id == company_id) | (CollectedData.company_id == None)
+        )
+    source_rows = source_q.order_by(func.count(CollectedData.id).desc()).limit(12).all()
+
+    # 2. 타입별 수집량
+    type_q = db.query(CollectedData.data_type, func.count(CollectedData.id)).group_by(CollectedData.data_type)
+    if company_id:
+        type_q = type_q.filter(
+            (CollectedData.company_id == company_id) | (CollectedData.company_id == None)
+        )
+    type_rows = type_q.all()
+
+    # 3. StrategyItem (인사이트 포함)
+    from models.models import StrategyItem
+    item_q = db.query(StrategyItem.item_type, func.count(StrategyItem.id)).group_by(StrategyItem.item_type)
+    if company_id:
+        item_q = item_q.filter(StrategyItem.company_id == company_id)
+    item_rows = item_q.all()
+
+    # 노드 구성: 소스 → 타입 → 전략
+    nodes = []
+    links = []
+
+    source_label_map = {
+        "hackernews": "HackerNews", "worldbank": "World Bank", "reddit": "Reddit",
+        "dart": "DART", "ecos": "ECOS", "kosis": "KOSIS", "fred": "FRED",
+        "alphavantage": "Alpha Vantage", "serpapi": "SerpAPI", "newsapi": "NewsAPI",
+        "auto": "자동수집", "un_comtrade": "UN Comtrade", "google_news_rss_free": "Google RSS",
+    }
+
+    type_label_map = {
+        "news": "뉴스", "tech_trend": "기술트렌드", "economic": "경제지표",
+        "community": "커뮤니티", "disclosure": "공시", "stock": "주가",
+        "web_search": "웹검색", "trade": "무역", "scraped": "스크래핑",
+        "rss": "RSS", "statistics": "국가통계",
+    }
+
+    strategy_label_map = {
+        "objective": "전략목표", "milestone": "마일스톤", "initiative": "이니셔티브",
+        "kpi": "KPI", "risk": "리스크",
+    }
+
+    # 소스 노드
+    added_sources = set()
+    added_types = set()
+    for src, dtype, cnt in source_rows:
+        src_label = source_label_map.get(src, src)
+        type_label = type_label_map.get(dtype, dtype)
+
+        if src_label not in added_sources:
+            nodes.append({"id": f"src_{src}", "label": src_label, "group": "source", "value": 0})
+            added_sources.add(src_label)
+
+        if type_label not in added_types:
+            nodes.append({"id": f"type_{dtype}", "label": type_label, "group": "type", "value": 0})
+            added_types.add(type_label)
+
+        links.append({"source": f"src_{src}", "target": f"type_{dtype}", "value": cnt})
+
+    # 타입 합계 업데이트
+    type_totals = {dtype: cnt for dtype, cnt in type_rows}
+    for n in nodes:
+        if n["group"] == "type":
+            dtype = n["id"].replace("type_", "")
+            n["value"] = type_totals.get(dtype, 0)
+
+    # 전략 노드
+    total_data = sum(type_totals.values()) if type_totals else 0
+    for itype, cnt in item_rows:
+        label = strategy_label_map.get(itype, itype)
+        nodes.append({"id": f"strategy_{itype}", "label": label, "group": "strategy", "value": cnt})
+        # 타입 → 전략 링크 (임의 분배: 전체 데이터의 비율로)
+        if total_data > 0:
+            for dtype, dcnt in type_totals.items():
+                proportion = dcnt / total_data
+                link_val = max(1, int(cnt * proportion))
+                links.append({"source": f"type_{dtype}", "target": f"strategy_{itype}", "value": link_val})
+
+    return {
+        "nodes": nodes,
+        "links": links,
+        "summary": {
+            "total_collected": total_data,
+            "source_count": len(added_sources),
+            "type_count": len(type_totals),
+            "strategy_items": sum(cnt for _, cnt in item_rows),
+        },
     }
 
 

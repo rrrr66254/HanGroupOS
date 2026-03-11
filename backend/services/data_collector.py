@@ -16,6 +16,7 @@ Data Collection Service
   - NewsAPI         : 뉴스 기사 (100회/일)
   - DART (금융감독원): 한국 상장사 공시 정보
   - ECOS (한국은행) : 금리·환율·물가 등 경제통계
+  - KOSIS (통계청)  : 한국 인구·산업·고용·물가 통계
   - FRED (미국 연준): 미국/글로벌 경제 지표
   - Alpha Vantage   : 주가·환율 데이터 (분당 5회)
 """
@@ -131,6 +132,15 @@ SERVICE_INFO = {
         "required_fields": [],
         "optional_fields": [],
         "key_required": False,
+    },
+    "kosis": {
+        "name": "KOSIS (국가통계포털)",
+        "description": "한국 인구·고용·산업·물가·에너지 등 공식 국가통계",
+        "url": "https://kosis.kr/openapi/",
+        "free_tier": "무료 (회원가입 후 즉시 발급, 일 10만회)",
+        "required_fields": ["api_key"],
+        "optional_fields": [],
+        "key_required": True,
     },
 }
 
@@ -691,6 +701,95 @@ class DataCollector:
             return {"source": "alphavantage", "symbol": symbol, "data": results, "total": len(results)}
         except Exception as e:
             return {"source": "alphavantage", "symbol": symbol, "data": [], "error": str(e)}
+
+    # ── KOSIS (국가통계포털) ───────────────────────────────────────────────────
+    def collect_kosis(
+        self,
+        org_id: str = "101",
+        tbl_id: str = "DT_1B04005N",
+        item_id: str = "T1",
+        prd_de: str = None,
+        start_prd_de: str = None,
+        end_prd_de: str = None,
+        page_no: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        """
+        KOSIS 국가통계포털 데이터 수집 (무료 키 필요).
+
+        주요 통계표 예시:
+          - org_id=101, tbl_id=DT_1B04005N  → 주민등록인구 (월별)
+          - org_id=101, tbl_id=DT_1DA7003S  → 경제활동인구 (고용률·실업률)
+          - org_id=301, tbl_id=DT_301001_C01 → 소비자물가지수(CPI)
+          - org_id=301, tbl_id=DT_301002_C01 → 생산자물가지수(PPI)
+          - org_id=101, tbl_id=DT_1B8000F   → 국내인구이동
+        """
+        kosis_key = self.api_keys.get("kosis")
+        if not kosis_key:
+            return {
+                "source": "kosis", "data": [], "requires_key": True,
+                "message": "🔑 KOSIS API 키를 등록하세요 (관리자 > 외부 API 키).",
+                "signup_url": "https://kosis.kr/openapi/",
+                "free_tier": "무료 (일 10만 회, 회원가입 후 즉시 발급)",
+            }
+        try:
+            from datetime import date
+            # 기간 기본값: 최근 12개월
+            if not end_prd_de:
+                end_prd_de = date.today().strftime("%Y%m")
+            if not start_prd_de and not prd_de:
+                from dateutil.relativedelta import relativedelta
+                start_prd_de = (date.today() - relativedelta(months=11)).strftime("%Y%m")
+
+            params = {
+                "method": "getList",
+                "apiKey": kosis_key,
+                "itmId": item_id,
+                "objL1": "ALL",
+                "format": "json",
+                "jsonVD": "Y",
+                "prdSe": "M",   # M=월별, Y=연도별, Q=분기별
+                "startPrdDe": start_prd_de or "",
+                "endPrdDe": end_prd_de or "",
+                "orgId": org_id,
+                "tblId": tbl_id,
+                "pageNo": page_no,
+                "pageSize": page_size,
+            }
+            if prd_de:
+                params["prdDe"] = prd_de
+
+            with httpx.Client(timeout=15) as client:
+                r = client.get("https://kosis.kr/openapi/Param/statisticsParameterData.do", params=params)
+                r.raise_for_status()
+                raw = r.json()
+
+            if isinstance(raw, list):
+                rows = []
+                for item in raw:
+                    rows.append({
+                        "period": item.get("PRD_DE", ""),
+                        "value": item.get("DT", ""),
+                        "unit": item.get("UNIT_NM", ""),
+                        "item_name": item.get("ITM_NM", ""),
+                        "category": item.get("C1_NM", ""),
+                    })
+                return {
+                    "source": "kosis",
+                    "org_id": org_id,
+                    "tbl_id": tbl_id,
+                    "data": rows,
+                    "total": len(rows),
+                    "period": f"{start_prd_de} ~ {end_prd_de}",
+                }
+            else:
+                err = raw.get("err", "") if isinstance(raw, dict) else str(raw)
+                return {"source": "kosis", "data": [], "error": f"KOSIS 오류: {err}"}
+        except ImportError:
+            # dateutil 미설치 시 폴백
+            return {"source": "kosis", "data": [], "error": "python-dateutil 패키지 필요: pip install python-dateutil"}
+        except Exception as e:
+            return {"source": "kosis", "org_id": org_id, "tbl_id": tbl_id, "data": [], "error": str(e)}
 
     # ── Utility ───────────────────────────────────────────────────────────────
     @staticmethod

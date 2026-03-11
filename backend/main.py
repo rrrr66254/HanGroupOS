@@ -309,6 +309,7 @@ def _seed_data():
 # ── Background Scheduler ──────────────────────────────────────────────────────
 def _auto_collect_news():
     """6시간마다 전체 계열사 업종 관련 뉴스 + 글로벌 데이터 자동 수집."""
+    from datetime import datetime
     from models.models import Company, ExternalApiKey, CollectedData, MarketKeywordAlert
     from services.data_collector import DataCollector
     from routers.notifications import create_notification
@@ -402,7 +403,13 @@ def _auto_collect_news():
         db.commit()
         print(f"[Scheduler] 데이터 자동 수집 완료 ({len(companies[:5])}개 회사 + HN + WB)")
 
-        # ── 4. 시장 모니터링 알림 키워드 매칭 ────────────────────────────────
+        # ── 4. 활성 회사별 자동 인사이트 생성 ────────────────────────────────
+        try:
+            _auto_generate_insights(db, companies[:5])
+        except Exception as e:
+            print(f"[Scheduler] 자동 인사이트 생성 실패: {e}")
+
+        # ── 5. 시장 모니터링 알림 키워드 매칭 ────────────────────────────────
         try:
             _check_market_alerts(db, create_notification)
         except Exception as e:
@@ -412,6 +419,111 @@ def _auto_collect_news():
         print(f"[Scheduler] 자동 수집 오류: {e}")
     finally:
         db.close()
+
+
+def _auto_generate_insights(db, companies):
+    """
+    자동 인사이트 스케줄링 — 수집 완료 후 각 회사별 최신 데이터 분석.
+    최근 6시간 내 수집 데이터가 3건 이상일 때만 AI 인사이트 생성.
+    생성된 인사이트는 StrategyItem으로 저장.
+    """
+    from datetime import datetime, timedelta
+    from sqlalchemy import func
+    from models.models import CollectedData, StrategyItem, User as UserModel
+    from services.ai_provider import get_provider_from_db, MARKET_ANALYST_SYSTEM
+
+    # Admin 유저로 AI 호출
+    admin = db.query(UserModel).filter(UserModel.username == "admin").first()
+    if not admin:
+        return
+
+    now = datetime.utcnow()
+    six_hours_ago = now - timedelta(hours=6)
+    generated = 0
+
+    for company in companies:
+        try:
+            # 최근 6시간 내 수집된 데이터 조회
+            recent_data = (
+                db.query(CollectedData)
+                .filter(
+                    CollectedData.company_id == company.id,
+                    CollectedData.created_at >= six_hours_ago,
+                )
+                .order_by(CollectedData.created_at.desc())
+                .limit(15)
+                .all()
+            )
+
+            # 글로벌 데이터 (company_id=None) 도 포함
+            global_data = (
+                db.query(CollectedData)
+                .filter(
+                    CollectedData.company_id == None,
+                    CollectedData.created_at >= six_hours_ago,
+                )
+                .order_by(CollectedData.created_at.desc())
+                .limit(5)
+                .all()
+            )
+
+            all_data = recent_data + global_data
+            if len(all_data) < 3:
+                print(f"[Scheduler] {company.name} 인사이트 스킵 (데이터 {len(all_data)}건 < 3건)")
+                continue
+
+            # 이미 오늘 인사이트가 생성되었는지 확인
+            today_insight = (
+                db.query(StrategyItem)
+                .filter(
+                    StrategyItem.company_id == company.id,
+                    StrategyItem.item_type == "initiative",
+                    StrategyItem.title.like("[자동인사이트]%"),
+                    func.date(StrategyItem.created_at) == now.date(),
+                )
+                .first()
+            )
+            if today_insight:
+                print(f"[Scheduler] {company.name} 오늘 인사이트 이미 생성됨, 스킵")
+                continue
+
+            # 데이터 텍스트 직렬화
+            data_text = ""
+            for i, row in enumerate(all_data, 1):
+                data_text += f"\n[{i}] [{row.data_type}] {row.title}\n{row.content[:400]}\n"
+
+            prompt = (
+                f"{company.name} ({company.industry or '미지정 업종'}) 관련 최신 데이터 {len(all_data)}건입니다.\n"
+                f"이 데이터를 바탕으로 전략적 인사이트 3가지를 도출하고, "
+                f"각각 구체적 액션 아이템을 한 줄씩 제안해주세요.\n\n"
+                f"{data_text}"
+            )
+
+            provider = get_provider_from_db(db, admin.id)
+            insights = provider.chat(
+                [{"role": "user", "content": prompt}],
+                system=MARKET_ANALYST_SYSTEM,
+                session_type="general",
+            )
+
+            item = StrategyItem(
+                company_id=company.id,
+                title=f"[자동인사이트] {company.name} — {now.strftime('%Y-%m-%d')}",
+                description=insights,
+                item_type="initiative",
+                status="active",
+                priority="medium",
+            )
+            db.add(item)
+            db.commit()
+            generated += 1
+            print(f"[Scheduler] {company.name} 자동 인사이트 생성 완료")
+
+        except Exception as e:
+            print(f"[Scheduler] {company.name} 인사이트 생성 실패: {e}")
+
+    if generated:
+        print(f"[Scheduler] 자동 인사이트 {generated}건 생성 완료")
 
 
 def _check_market_alerts(db, create_notification):

@@ -351,6 +351,8 @@ export const dataApi = {
   collectEcos: (data?: object) => api.post('/data/collect/ecos', data || {}),
   collectFred: (data?: object) => api.post('/data/collect/fred', data || {}),
   collectAlphaVantage: (data?: object) => api.post('/data/collect/alphavantage', data || {}),
+  collectKosis: (data?: object) => api.post('/data/collect/kosis', data || {}),
+  flow: (companyId?: number) => api.get('/data/flow', { params: companyId ? { company_id: companyId } : {} }),
   // 시장 알림
   alerts: () => api.get('/data/alerts'),
   createAlert: (keyword: string, companyId?: number) =>
