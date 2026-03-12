@@ -3,8 +3,11 @@ import { Link } from 'react-router-dom'
 import {
   Building2, Users, CheckSquare, Brain, FlaskConical,
   Map, TrendingUp, MessageSquare, ArrowRight, Zap, Activity,
-  Cpu, Thermometer, AlertTriangle,
+  Cpu, Thermometer, AlertTriangle, X, RefreshCw,
 } from 'lucide-react'
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine,
+} from 'recharts'
 import { dashboardApi, approvalsApi, companiesApi, healthApi, videoApi } from '../api/client'
 import type { DashboardStats, ApprovalRequest, Company } from '../types'
 
@@ -13,6 +16,9 @@ interface GpuStatus {
   temp_c?: number; util_pct?: number; vram_pct?: number; vram_warning?: boolean
   gpu_locked?: boolean; ollama_loaded_model?: string
 }
+
+interface GpuPoint { t: string; used: number; total: number; pct: number; temp: number; util: number }
+interface FallbackEvent { occurred_at: string; from_provider: string; to_provider: string; reason: string }
 
 interface HealthScore {
   id: number
@@ -58,18 +64,40 @@ export default function Dashboard() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [healthScores, setHealthScores] = useState<HealthScore[]>([])
   const [gpuStatus, setGpuStatus] = useState<GpuStatus | null>(null)
+  const [gpuHistory, setGpuHistory] = useState<GpuPoint[]>([])
+  const [fallbackEvents, setFallbackEvents] = useState<FallbackEvent[]>([])
+  const [dismissedFallbacks, setDismissedFallbacks] = useState<Set<string>>(new Set())
   const gpuPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const fallbackPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     dashboardApi.stats().then((r) => setStats(r.data))
     approvalsApi.inbox().then((r) => setPending(r.data.slice(0, 5)))
     companiesApi.list().then((r) => setCompanies(r.data.slice(0, 6)))
     healthApi.scores().then((r) => setHealthScores(r.data.slice(0, 6))).catch(() => {})
-    // GPU 폴링 — 5초마다 (대시보드는 가벼운 주기)
+
+    // GPU 상태 폴링 (5초)
     const fetchGpu = () => videoApi.gpuStatus().then((r) => setGpuStatus(r.data)).catch(() => {})
     fetchGpu()
     gpuPollRef.current = setInterval(fetchGpu, 5000)
-    return () => { if (gpuPollRef.current) clearInterval(gpuPollRef.current) }
+
+    // GPU 이력 최초 로드 + 5분마다 갱신
+    const fetchHistory = () =>
+      videoApi.gpuHistory(24).then((r) => setGpuHistory(r.data)).catch(() => {})
+    fetchHistory()
+    const historyIv = setInterval(fetchHistory, 5 * 60 * 1000)
+
+    // 폴백 이벤트 폴링 (30초)
+    const fetchFallback = () =>
+      videoApi.aiFallbackLog(10).then((r) => setFallbackEvents(r.data)).catch(() => {})
+    fetchFallback()
+    fallbackPollRef.current = setInterval(fetchFallback, 30000)
+
+    return () => {
+      if (gpuPollRef.current) clearInterval(gpuPollRef.current)
+      if (fallbackPollRef.current) clearInterval(fallbackPollRef.current)
+      clearInterval(historyIv)
+    }
   }, [])
 
   return (
@@ -275,6 +303,91 @@ export default function Dashboard() {
                 </div>
               )
             })}
+          </div>
+        </div>
+      )}
+
+      {/* AI Provider 폴백 토스트 알림 */}
+      {fallbackEvents.filter((e) => !dismissedFallbacks.has(e.occurred_at)).slice(0, 3).map((ev) => (
+        <div key={ev.occurred_at} className="flex items-start gap-3 bg-amber-500/10 border border-amber-500/25 rounded-xl px-4 py-3">
+          <Zap size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-semibold text-amber-300">
+              AI Provider 자동 폴백
+              <span className="ml-2 font-mono text-[10px] text-amber-500/70">
+                {new Date(ev.occurred_at + 'Z').toLocaleTimeString('ko-KR')}
+              </span>
+            </div>
+            <div className="text-[11px] text-amber-400/80 mt-0.5">
+              <span className="font-mono bg-amber-500/15 px-1 rounded">{ev.from_provider}</span>
+              {' → '}
+              <span className="font-mono bg-emerald-500/15 text-emerald-400 px-1 rounded">{ev.to_provider}</span>
+              {ev.reason && <span className="ml-2 text-slate-500">{ev.reason}</span>}
+            </div>
+          </div>
+          <button onClick={() => setDismissedFallbacks((s) => new Set([...s, ev.occurred_at]))}
+            className="text-slate-600 hover:text-slate-400 flex-shrink-0">
+            <X size={13} />
+          </button>
+        </div>
+      ))}
+
+      {/* GPU 24h 이력 차트 */}
+      {gpuHistory.length > 1 && (
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+              <Cpu size={14} className="text-purple-400" />
+              GPU VRAM 사용 이력 (24h)
+              {gpuStatus?.name && (
+                <span className="text-[10px] text-slate-500 font-normal">
+                  — {gpuStatus.name.replace('NVIDIA GeForce ', '')}
+                </span>
+              )}
+            </h3>
+            <button onClick={() => videoApi.gpuHistory(24).then((r) => setGpuHistory(r.data)).catch(() => {})}
+              className="text-slate-600 hover:text-slate-400">
+              <RefreshCw size={12} />
+            </button>
+          </div>
+          <ResponsiveContainer width="100%" height={120}>
+            <LineChart data={gpuHistory} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+              <XAxis
+                dataKey="t"
+                tickFormatter={(v) => new Date(v + 'Z').toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+                tick={{ fontSize: 9, fill: '#475569' }}
+                tickLine={false}
+                axisLine={false}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                domain={[0, 100]}
+                tick={{ fontSize: 9, fill: '#475569' }}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(v) => `${v}%`}
+              />
+              <Tooltip
+                contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
+                labelFormatter={(v) => new Date(String(v) + 'Z').toLocaleTimeString('ko-KR')}
+                formatter={(val: number, name: string) =>
+                  name === 'pct' ? [`${val.toFixed(1)}%`, 'VRAM'] :
+                  name === 'temp' ? [`${val}°C`, '온도'] :
+                  [`${val}%`, 'GPU']
+                }
+              />
+              <ReferenceLine y={90} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />
+              <ReferenceLine y={65} stroke="#eab308" strokeDasharray="3 3" strokeOpacity={0.4} />
+              <Line type="monotone" dataKey="pct" stroke="#a855f7" strokeWidth={1.5}
+                dot={false} name="pct" />
+              <Line type="monotone" dataKey="temp" stroke="#64748b" strokeWidth={1}
+                dot={false} name="temp" strokeDasharray="3 3" />
+            </LineChart>
+          </ResponsiveContainer>
+          <div className="flex gap-4 mt-1 text-[9px] text-slate-600 justify-end">
+            <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-purple-500 inline-block rounded" />VRAM %</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-slate-500 inline-block rounded border-dashed" />온도</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-px bg-red-500 inline-block" />90% 경고</span>
           </div>
         </div>
       )}

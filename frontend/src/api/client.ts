@@ -348,6 +348,8 @@ export const videoApi = {
   ollamaPull: (name: string) => api.post('/video/ollama/models/pull', { name }),
   ollamaSetDefault: (name: string) => api.post('/video/ollama/default', { name }),
   ollamaUnload: () => api.post('/video/ollama/unload', {}),
+  gpuHistory: (hours?: number) => api.get('/video/gpu-history', { params: { hours: hours ?? 24 } }),
+  aiFallbackLog: (limit?: number) => api.get('/video/ai-fallback-log', { params: { limit: limit ?? 20 } }),
 }
 
 // ── Audit Log ──────────────────────────────────────────────────────────────────

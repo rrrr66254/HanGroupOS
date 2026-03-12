@@ -12,6 +12,40 @@ import json
 from typing import Optional, List, Dict, Any
 from core.config import settings
 
+# ── 폴백 이벤트 인메모리 버퍼 (최근 50건) ────────────────────────────────────
+_FALLBACK_LOG: list = []   # [{occurred_at, from, to, reason, user_id}]
+_MAX_FALLBACK_LOG = 50
+
+
+def _record_fallback(from_provider: str, to_provider: str, reason: str, user_id: int = 0):
+    """폴백 이벤트를 인메모리 버퍼와 DB에 기록."""
+    from datetime import datetime
+    entry = {
+        "occurred_at": datetime.utcnow().isoformat(),
+        "from_provider": from_provider,
+        "to_provider": to_provider,
+        "reason": reason[:300],
+        "user_id": user_id,
+    }
+    _FALLBACK_LOG.append(entry)
+    if len(_FALLBACK_LOG) > _MAX_FALLBACK_LOG:
+        _FALLBACK_LOG.pop(0)
+    # DB 비동기 기록 (실패해도 무시)
+    try:
+        from core.database import SessionLocal
+        from models.models import AiProviderFallbackLog
+        db = SessionLocal()
+        db.add(AiProviderFallbackLog(
+            from_provider=from_provider,
+            to_provider=to_provider,
+            reason=reason[:300],
+            user_id=user_id or None,
+        ))
+        db.commit()
+        db.close()
+    except Exception:
+        pass
+
 # ── KTransformers 헬스체크 캐시 (30초) ────────────────────────────────────────
 _KT_HEALTH_CACHE: dict = {"ok": None, "ts": 0.0}
 _KT_CACHE_TTL: float = 30.0
@@ -129,6 +163,7 @@ class AIProvider:
                         provider_name="KTransformers",
                     )
                 else:
+                    _record_fallback("ktransformers", "ollama", "KTransformers 서버 미실행")
                     print("[AIProvider] KTransformers 미실행 → Ollama 자동 폴백")
                     return self._call_ollama(messages, system, max_tokens)
             else:
@@ -136,7 +171,12 @@ class AIProvider:
                 return self._call_ollama(messages, system, max_tokens)
         except Exception as e:
             err = str(e)
-            if "Connection" in err or "connect" in err.lower() or "ollama" in err.lower():
+            is_connection_err = "Connection" in err or "connect" in err.lower() or "ollama" in err.lower()
+            if is_connection_err:
+                # Ollama 연결 실패 → Cloud API 폴백 시도
+                fallback_result = self._try_cloud_fallback(messages, system, max_tokens)
+                if fallback_result:
+                    return fallback_result
                 return (
                     "⚠️ **Ollama 연결 실패**\n\n"
                     f"오류: {err}\n\n"
@@ -146,6 +186,34 @@ class AIProvider:
                     "예: `http://localhost:11434`"
                 )
             return f"⚠️ AI 응답 오류: {err}"
+
+    def _try_cloud_fallback(self, messages: List[Dict], system: str, max_tokens: int) -> Optional[str]:
+        """Ollama 실패 시 Cloud API(Anthropic→OpenAI→Gemini 순)로 자동 폴백."""
+        candidates = [
+            ("anthropic", settings.ANTHROPIC_API_KEY, settings.ANTHROPIC_DEFAULT_MODEL),
+            ("openai", settings.OPENAI_API_KEY, settings.OPENAI_DEFAULT_MODEL),
+            ("gemini", settings.GEMINI_API_KEY, settings.GEMINI_DEFAULT_MODEL),
+        ]
+        for prov, key, model in candidates:
+            if not key:
+                continue
+            try:
+                saved = (self.provider, self.model, self.api_key)
+                self.provider, self.model, self.api_key = prov, model, key
+                if prov == "anthropic":
+                    result = self._call_anthropic(messages, system, max_tokens)
+                elif prov == "openai":
+                    result = self._call_openai(messages, system, max_tokens)
+                else:
+                    result = self._call_gemini(messages, system, max_tokens)
+                self.provider, self.model, self.api_key = saved
+                _record_fallback("ollama", prov, "Ollama 연결 실패")
+                # 폴백 알림 접두어 추가
+                return f"> ⚡ **[자동 폴백]** Ollama 미응답 → {prov} ({model}) 로 대신 응답했습니다.\n\n{result}"
+            except Exception:
+                self.provider, self.model, self.api_key = saved
+                continue
+        return None
 
     def _to_anthropic_vision_messages(self, messages: List[Dict]) -> List[Dict]:
         """이미지가 포함된 메시지를 Anthropic Vision 형식으로 변환."""

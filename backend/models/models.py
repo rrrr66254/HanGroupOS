@@ -627,3 +627,25 @@ class WebhookToken(Base):
     last_used_at = Column(DateTime, nullable=True)
     trigger_source = Column(String(100), default="hackernews")  # 트리거할 수집 소스
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class GpuHistory(Base):
+    """GPU VRAM / 온도 / 사용률 1분 단위 수집 이력 (최근 24시간)."""
+    __tablename__ = "gpu_history"
+    id = Column(Integer, primary_key=True, index=True)
+    recorded_at = Column(DateTime, default=datetime.utcnow, index=True)
+    vram_used_mb = Column(Integer, default=0)
+    vram_total_mb = Column(Integer, default=0)
+    temp_c = Column(Integer, default=0)
+    util_pct = Column(Integer, default=0)
+
+
+class AiProviderFallbackLog(Base):
+    """AI Provider 자동 폴백 이벤트 로그."""
+    __tablename__ = "ai_provider_fallback_log"
+    id = Column(Integer, primary_key=True, index=True)
+    occurred_at = Column(DateTime, default=datetime.utcnow, index=True)
+    from_provider = Column(String(50), default="ollama")
+    to_provider = Column(String(50), default="")
+    reason = Column(String(500), default="")
+    user_id = Column(Integer, nullable=True)

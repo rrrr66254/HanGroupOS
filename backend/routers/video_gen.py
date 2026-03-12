@@ -1076,18 +1076,73 @@ def ollama_delete_model(model_name: str, current_user: User = Depends(get_curren
 
 @router.post("/ollama/models/pull")
 def ollama_pull_model(body: dict, current_user: User = Depends(get_current_user)):
-    """Ollama 모델 다운로드 (백그라운드)."""
+    """Ollama 모델 다운로드 — WebSocket /ws/ollama-pull 로 진행률 스트리밍."""
     model_name = body.get("name", "").strip()
     if not model_name:
         raise HTTPException(400, "모델 이름 필수")
-    import subprocess, threading
-    def _pull():
+    return {"ok": True, "pulling": model_name, "ws": "/api/video/ws/ollama-pull"}
+
+
+@router.websocket("/ws/ollama-pull")
+async def ws_ollama_pull(websocket: WebSocket, model: str = Query(""), token: str = Query("")):
+    """Ollama pull 진행률 실시간 스트리밍 WebSocket.
+    쿼리: ?model=gemma3:27b&token=<JWT>
+    메시지 형식: {type: "progress"|"done"|"error", status, pct, speed_mbs}
+    """
+    payload = decode_token(token) if token else None
+    if not payload:
+        await websocket.close(code=4001)
+        return
+    if not model.strip():
+        await websocket.close(code=4003)
+        return
+
+    await websocket.accept()
+    try:
+        import httpx, json as _json
+
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream(
+                "POST",
+                "http://localhost:11434/api/pull",
+                json={"name": model, "stream": True},
+            ) as response:
+                if response.status_code != 200:
+                    await websocket.send_json({"type": "error", "status": f"Ollama 오류: {response.status_code}"})
+                    return
+
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        data = _json.loads(line)
+                    except Exception:
+                        continue
+
+                    status = data.get("status", "")
+                    completed = data.get("completed", 0)
+                    total = data.get("total", 0)
+                    pct = round(completed / total * 100, 1) if total > 0 else 0
+                    # 속도 계산 (bytes/s → MB/s)
+                    speed = 0.0
+                    if data.get("digest"):
+                        speed = round(completed / max(total, 1) * 100, 1)
+
+                    msg = {"type": "progress", "status": status, "pct": pct,
+                           "completed": completed, "total": total}
+                    if status == "success":
+                        msg["type"] = "done"
+                        await websocket.send_json(msg)
+                        break
+                    await websocket.send_json(msg)
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
         try:
-            subprocess.run(["ollama", "pull", model_name], timeout=1800, check=False)
+            await websocket.send_json({"type": "error", "status": str(e)[:200]})
         except Exception:
             pass
-    threading.Thread(target=_pull, daemon=True).start()
-    return {"ok": True, "pulling": model_name}
 
 
 @router.post("/ollama/default")
@@ -1128,6 +1183,68 @@ def ollama_unload_now(current_user: User = Depends(get_current_user)):
     """Ollama 현재 모델 즉시 VRAM 언로드."""
     _ollama_unload()
     return {"ok": True}
+
+
+@router.get("/gpu-history")
+def gpu_history(hours: int = 24, db: Session = Depends(get_db)):
+    """최근 N시간 GPU 이력 반환."""
+    from models.models import GpuHistory
+    from datetime import timedelta
+    since = datetime.utcnow() - timedelta(hours=hours)
+    rows = (
+        db.query(GpuHistory)
+        .filter(GpuHistory.recorded_at >= since)
+        .order_by(GpuHistory.recorded_at.asc())
+        .all()
+    )
+    return [
+        {
+            "t": r.recorded_at.isoformat(),
+            "used": r.vram_used_mb,
+            "total": r.vram_total_mb,
+            "pct": round(r.vram_used_mb / max(r.vram_total_mb, 1) * 100, 1),
+            "temp": r.temp_c,
+            "util": r.util_pct,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/ai-fallback-log")
+def ai_fallback_log(limit: int = 20):
+    """최근 AI Provider 폴백 이벤트 로그 (인메모리)."""
+    from services.ai_provider import _FALLBACK_LOG
+    return list(reversed(_FALLBACK_LOG[-limit:]))
+
+
+def _record_gpu_history():
+    """1분마다 GPU 상태를 DB에 기록 (startup 스케줄러에서 호출)."""
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["nvidia-smi",
+             "--query-gpu=memory.used,memory.total,temperature.gpu,utilization.gpu",
+             "--format=csv,noheader,nounits"],
+            timeout=5,
+        ).decode().strip().splitlines()[0]
+        parts = [p.strip() for p in out.split(",")]
+        used, total, temp, util = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
+    except Exception:
+        return  # nvidia-smi 없으면 조용히 종료
+
+    try:
+        from core.database import SessionLocal
+        from models.models import GpuHistory
+        db = SessionLocal()
+        db.add(GpuHistory(vram_used_mb=used, vram_total_mb=total, temp_c=temp, util_pct=util))
+        # 25시간 이전 데이터 정리 (1분 1행 × 60 × 25 = 1500행 유지)
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(hours=25)
+        db.query(GpuHistory).filter(GpuHistory.recorded_at < cutoff).delete()
+        db.commit()
+        db.close()
+    except Exception:
+        pass
 
 
 @router.get("/gpu-status")

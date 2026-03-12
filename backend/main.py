@@ -846,8 +846,11 @@ def _start_scheduler():
         scheduler.add_job(_weekly_competitor_collect, "cron", day_of_week="mon", hour=9, id="weekly_competitor")
         # 6시간마다 KPI 링크 자동 동기화
         scheduler.add_job(_kpi_sync_all, "interval", hours=6, id="kpi_sync")
+        # 1분마다 GPU 상태 수집 (nvidia-smi 있을 때만 실제 동작)
+        from routers.video_gen import _record_gpu_history
+        scheduler.add_job(_record_gpu_history, "interval", minutes=1, id="gpu_history")
         scheduler.start()
-        print("✓ 데이터 수집 스케줄러 시작 (뉴스 6h · 경쟁사 주1회 · KPI 6h)")
+        print("✓ 데이터 수집 스케줄러 시작 (뉴스 6h · 경쟁사 주1회 · KPI 6h · GPU 1min)")
     except Exception as e:
         print(f"⚠️  스케줄러 시작 실패 (무시): {e}")
 

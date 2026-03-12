@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe, FlaskConical, Loader2, Webhook, Copy, HardDrive, Download, Star, Zap } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe, FlaskConical, Loader2, Webhook, Copy, HardDrive, Download, Star, Zap, XCircle } from 'lucide-react'
 import { modelsApi, externalKeyApi, webhooksApi, videoApi } from '../api/client'
+import { useAuthStore } from '../store/useStore'
 import type { ModelCatalog, ProviderConfig } from '../types'
 
 interface OllamaModel {
@@ -67,6 +68,8 @@ export default function Admin() {
   const [tokenLoading, setTokenLoading] = useState(false)
   const [copied, setCopied] = useState(false)
 
+  const token = useAuthStore((s) => s.token)
+
   // Ollama 관리
   const [ollamaInfo, setOllamaInfo] = useState<OllamaInfo | null>(null)
   const [ollamaLoading, setOllamaLoading] = useState(false)
@@ -74,6 +77,9 @@ export default function Admin() {
   const [ollamaMsg, setOllamaMsg] = useState('')
   const [deletingModel, setDeletingModel] = useState<string | null>(null)
   const [settingDefault, setSettingDefault] = useState<string | null>(null)
+  // Pull WebSocket 상태
+  const [pullProgress, setPullProgress] = useState<{ pct: number; status: string; active: boolean } | null>(null)
+  const pullWsRef = useRef<WebSocket | null>(null)
 
   const loadOllama = () => {
     setOllamaLoading(true)
@@ -110,16 +116,46 @@ export default function Admin() {
     }
   }
 
-  const handleOllamaPull = async () => {
+  const handleOllamaPull = () => {
     const name = ollamaPullName.trim()
     if (!name) return
-    setOllamaMsg(`⬇ "${name}" 다운로드 시작... (백그라운드 실행, 수 분 소요)`)
+    if (pullWsRef.current) { pullWsRef.current.close(); pullWsRef.current = null }
+
+    setPullProgress({ pct: 0, status: '연결 중...', active: true })
     setOllamaPullName('')
-    try {
-      await videoApi.ollamaPull(name)
-    } catch (e: any) {
-      setOllamaMsg(`✗ 다운로드 요청 실패: ${e.response?.data?.detail || e.message}`)
+    setOllamaMsg('')
+
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(`${proto}//${window.location.host}/api/video/ws/ollama-pull?model=${encodeURIComponent(name)}&token=${token}`)
+    pullWsRef.current = ws
+
+    ws.onmessage = (e) => {
+      try {
+        const d = JSON.parse(e.data)
+        if (d.type === 'done') {
+          setPullProgress({ pct: 100, status: '다운로드 완료!', active: false })
+          setOllamaMsg(`✓ "${name}" 다운로드 완료`)
+          loadOllama()
+        } else if (d.type === 'error') {
+          setPullProgress(null)
+          setOllamaMsg(`✗ ${d.status}`)
+        } else {
+          setPullProgress({ pct: d.pct ?? 0, status: d.status ?? '다운로드 중...', active: true })
+        }
+      } catch { /* ignore */ }
     }
+    ws.onerror = () => {
+      setPullProgress(null)
+      setOllamaMsg('✗ WebSocket 연결 실패')
+    }
+    ws.onclose = () => { pullWsRef.current = null }
+  }
+
+  const handleCancelPull = () => {
+    pullWsRef.current?.close()
+    pullWsRef.current = null
+    setPullProgress(null)
+    setOllamaMsg('다운로드가 취소되었습니다.')
   }
 
   const handleOllamaUnload = async () => {
@@ -788,12 +824,39 @@ export default function Admin() {
                 onChange={(e) => setOllamaPullName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleOllamaPull()}
                 placeholder="모델 이름 (예: gemma3:27b)"
-                className="flex-1 bg-bg-base border border-bg-border rounded text-xs text-slate-200 px-3 py-2 focus:outline-none focus:border-brand/60 placeholder:text-slate-600"
+                disabled={pullProgress?.active}
+                className="flex-1 bg-bg-base border border-bg-border rounded text-xs text-slate-200 px-3 py-2 focus:outline-none focus:border-brand/60 placeholder:text-slate-600 disabled:opacity-50"
               />
-              <button onClick={handleOllamaPull} disabled={!ollamaPullName.trim()} className="btn-primary text-xs px-3">
-                <Download size={12} />
-              </button>
+              {pullProgress?.active ? (
+                <button onClick={handleCancelPull} className="px-3 py-2 rounded bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors">
+                  <XCircle size={12} />
+                </button>
+              ) : (
+                <button onClick={handleOllamaPull} disabled={!ollamaPullName.trim()} className="btn-primary text-xs px-3">
+                  <Download size={12} />
+                </button>
+              )}
             </div>
+
+            {/* Pull 진행률 바 */}
+            {pullProgress && (
+              <div className="mb-3 space-y-1.5">
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-slate-400 truncate max-w-[200px]">{pullProgress.status}</span>
+                  <span className={pullProgress.pct >= 100 ? 'text-emerald-400 font-semibold' : 'text-slate-400'}>
+                    {pullProgress.pct.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      pullProgress.pct >= 100 ? 'bg-emerald-500' : 'bg-brand'
+                    } ${pullProgress.active && pullProgress.pct < 5 ? 'animate-pulse' : ''}`}
+                    style={{ width: `${Math.max(pullProgress.pct, 1)}%` }}
+                  />
+                </div>
+              </div>
+            )}
             {/* RTX 5070 Ti 추천 모델 */}
             <div>
               <p className="text-[10px] text-slate-500 mb-2">RTX 5070 Ti (16GB) 추천 모델</p>
