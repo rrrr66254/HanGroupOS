@@ -154,6 +154,34 @@
 
 ## 실행 방법
 
+### 방법 0: han CLI (원라인 설치, 권장)
+
+터미널 한 줄로 설치하고 `han` 명령어로 관리합니다.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rrrr66254/HanGroupOS/master/install.sh | bash
+```
+
+설치 완료 후 사용 가능한 명령어:
+
+```bash
+han start           # 서버 시작 (포그라운드)
+han start --daemon  # 백그라운드 시작
+han stop            # 서버 종료
+han restart         # 재시작
+han status          # 실행 상태 확인
+han logs            # 실시간 로그 보기
+han logs backend    # 백엔드 로그만
+han update          # 최신 버전 업데이트
+han reset           # DB 초기화
+han config          # 현재 설정 보기 (.env)
+han open            # 브라우저 열기
+han --version       # 버전 확인
+han help            # 전체 도움말
+```
+
+---
+
 ### 방법 1: WSL2 (Windows 권장)
 
 > Windows에서 Linux 환경을 사용하는 가장 안정적인 방법입니다.
@@ -379,12 +407,17 @@ http://localhost:8000/docs
 ## 문제 해결
 
 **포트 충돌 시**
-```bash
-# 8000번 포트 사용 프로세스 확인 (Windows)
-netstat -ano | findstr :8000
 
-# 5173번 포트 사용 프로세스 확인
-netstat -ano | findstr :5173
+> `start.sh`는 실행 전에 포트 충돌을 자동 감지하고 해결 방법을 안내합니다.
+
+```bash
+# Linux/macOS — 포트 점유 프로세스 확인 및 종료
+lsof -i :8000          # 백엔드 포트
+fuser -k 8000/tcp      # 강제 종료
+
+# Windows PowerShell
+Get-NetTCPConnection -LocalPort 8000 -State Listen
+Stop-Process -Id <PID> -Force
 ```
 
 **Python 패키지 설치 오류 시**
