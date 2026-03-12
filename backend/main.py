@@ -1,8 +1,20 @@
 import asyncio
+import logging
+import os
+from logging.handlers import RotatingFileHandler
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import init_db, SessionLocal
+
+# ── 파일 로깅 설정 ────────────────────────────────────────────────────────────
+_LOG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "han.log")
+_log_handler = RotatingFileHandler(_LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
+_log_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+logging.getLogger().addHandler(_log_handler)
+logging.getLogger("uvicorn.access").addHandler(_log_handler)
+logging.getLogger("uvicorn.error").addHandler(_log_handler)
+logging.getLogger().setLevel(logging.INFO)
 from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks
 
 

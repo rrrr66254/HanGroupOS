@@ -86,10 +86,20 @@ cmd_help() {
   echo -e "  ${GREEN}status${NC}             실행 상태 + 버전 + 설정 요약"
   echo ""
   echo -e "${BOLD}로그 & 진단${NC}"
-  echo -e "  ${GREEN}logs${NC}               전체 로그 실시간 보기"
-  echo -e "  ${GREEN}logs backend${NC}       백엔드 로그만"
-  echo -e "  ${GREEN}logs frontend${NC}      프론트엔드 로그만"
-  echo -e "  ${GREEN}init_check${NC}         환경 사전 점검 (Python/Node/포트/설정)"
+  echo -e "  ${GREEN}logs${NC}                      전체 로그 (마지막 50줄)"
+  echo -e "  ${GREEN}logs --since 1h${NC}           최근 1시간 로그 (30m, 2h 등)"
+  echo -e "  ${GREEN}logs --lines 100${NC}          마지막 100줄"
+  echo -e "  ${GREEN}logs --grep ERROR${NC}         키워드 필터"
+  echo -e "  ${GREEN}logs --follow${NC}             실시간 팔로우 (tail -f)"
+  echo -e "  ${GREEN}logs backend${NC}              백엔드 로그만"
+  echo -e "  ${GREEN}logs frontend${NC}             프론트엔드 로그만"
+  echo -e "  ${GREEN}init_check${NC}                환경 점검 (Python/Node/포트/설정)"
+  echo -e "  ${GREEN}init_check --fix${NC}          환경 점검 + 자동 수정 (venv/pip/npm/.env)"
+  echo ""
+  echo -e "${BOLD}설정${NC}"
+  echo -e "  ${GREEN}config${NC}                    .env 전체 보기 (API 키 마스킹)"
+  echo -e "  ${GREEN}config set <KEY> <VALUE>${NC}  .env 키 직접 수정"
+  echo -e "  ${GREEN}config get <KEY>${NC}          .env 키 조회"
   echo ""
   echo -e "${BOLD}업데이트 & 유지보수${NC}"
   echo -e "  ${GREEN}update${NC}             GitHub 업데이트 확인 후 적용"
@@ -97,8 +107,7 @@ cmd_help() {
   echo -e "  ${GREEN}backup${NC}             DB 백업"
   echo -e "  ${GREEN}restore${NC}            DB 백업 복원"
   echo ""
-  echo -e "${BOLD}설정 & 기타${NC}"
-  echo -e "  ${GREEN}config${NC}             현재 .env 설정 보기 (API 키 마스킹)"
+  echo -e "${BOLD}기타${NC}"
   echo -e "  ${GREEN}open${NC}               브라우저에서 앱 열기"
   echo -e "  ${GREEN}--version${NC}          버전 정보"
   echo -e "  ${GREEN}help${NC}               이 도움말"
@@ -120,6 +129,8 @@ cmd_version() {
 
 # ── han init_check ────────────────────────────────────────────────────────────
 cmd_init_check() {
+  local FIX=false
+  [[ "${1:-}" == "--fix" ]] && FIX=true
   local FAIL=0
 
   echo ""
@@ -324,6 +335,51 @@ cmd_init_check() {
     echo -e "  ${YELLOW}△ node_modules 없음${NC}  →  'han start' 시 자동 설치됩니다"
   fi
 
+  # ─ --fix: venv 생성, pip install, npm install, .env 생성 ────────────────
+  if $FIX && [[ $FAIL -gt 0 || ! -d "$HAN_DIR/backend/venv" || ! -d "$HAN_DIR/frontend/node_modules" || ! -f "$HAN_DIR/backend/.env" ]]; then
+    echo ""
+    echo -e "${BOLD}[ 자동 수정 중... ]${NC}"
+    echo ""
+    FAIL=0
+
+    # venv 생성
+    if [ ! -d "$HAN_DIR/backend/venv" ] && command -v python3 &>/dev/null; then
+      echo -e "  ${CYAN}▸ Python 가상환경 생성 중...${NC}"
+      python3 -m venv "$HAN_DIR/backend/venv" && echo -e "  ${GREEN}✓ venv 생성 완료${NC}" || { echo -e "  ${RED}✗ venv 생성 실패${NC}"; FAIL=1; }
+    fi
+
+    # pip install
+    local VENV_PIP="$HAN_DIR/backend/venv/bin/pip"
+    if [ -f "$VENV_PIP" ] && [ -f "$HAN_DIR/backend/requirements.txt" ]; then
+      if ! "$HAN_DIR/backend/venv/bin/python" -c "import fastapi" 2>/dev/null; then
+        echo -e "  ${CYAN}▸ pip install -r requirements.txt ...${NC}"
+        "$VENV_PIP" install -q -r "$HAN_DIR/backend/requirements.txt" && echo -e "  ${GREEN}✓ Python 패키지 설치 완료${NC}" || { echo -e "  ${RED}✗ pip install 실패${NC}"; FAIL=1; }
+      fi
+    fi
+
+    # npm install
+    if [ ! -d "$HAN_DIR/frontend/node_modules" ] && command -v npm &>/dev/null; then
+      echo -e "  ${CYAN}▸ npm install 실행 중...${NC}"
+      (cd "$HAN_DIR/frontend" && npm install --silent) && echo -e "  ${GREEN}✓ npm install 완료${NC}" || { echo -e "  ${RED}✗ npm install 실패${NC}"; FAIL=1; }
+    fi
+
+    # .env 생성
+    if [ ! -f "$HAN_DIR/backend/.env" ]; then
+      echo -e "  ${CYAN}▸ .env 기본 파일 생성 중...${NC}"
+      cat > "$HAN_DIR/backend/.env" <<EOF
+SECRET_KEY=han-group-os-secret-key-change-in-production
+DATABASE_URL=sqlite:///./han_group.db
+DEFAULT_PROVIDER=mock
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+GEMINI_API_KEY=
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5
+EOF
+      echo -e "  ${GREEN}✓ .env 생성 완료${NC}"
+    fi
+  fi
+
   # ─ 결과 ──────────────────────────────────────────────────────────────────
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -332,7 +388,7 @@ cmd_init_check() {
     echo -e "  ${GREEN}   'han start' 로 서버를 시작하세요.${NC}"
   else
     echo -e "  ${RED}✗ 위 항목을 해결한 후 다시 실행하세요.${NC}"
-    echo "    han init_check"
+    $FIX || echo "    han init_check --fix  로 자동 수정 가능"
   fi
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
@@ -522,36 +578,87 @@ cmd_status() {
 
 # ── han logs ──────────────────────────────────────────────────────────────────
 cmd_logs() {
-  local TARGET="${1:-all}"
+  local LINES=50
+  local SINCE=""
+  local GREP_PATTERN=""
+  local FOLLOW=false
+  local TARGET="all"
+
+  # 인자 파싱 (--옵션 vs backend/frontend 위치 인자)
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --lines)    LINES="${2:-50}"; shift 2 ;;
+      --since)    SINCE="${2:-}";   shift 2 ;;
+      --grep)     GREP_PATTERN="${2:-}"; shift 2 ;;
+      --follow|-f) FOLLOW=true; shift ;;
+      backend|frontend) TARGET="$1"; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  # 로그 파일 목록 결정
+  local FILES=()
   case "$TARGET" in
-    backend)
-      if [ -f "$HAN_LOG_DIR/backend.log" ]; then
-        echo -e "${CYAN}[백엔드 로그] Ctrl+C로 종료${NC}"
-        tail -f "$HAN_LOG_DIR/backend.log"
-      else
-        echo -e "${YELLOW}백엔드 로그 없음. 'han start --daemon'으로 실행하면 기록됩니다.${NC}"
-      fi
-      ;;
-    frontend)
-      if [ -f "$HAN_LOG_DIR/frontend.log" ]; then
-        echo -e "${CYAN}[프론트엔드 로그] Ctrl+C로 종료${NC}"
-        tail -f "$HAN_LOG_DIR/frontend.log"
-      else
-        echo -e "${YELLOW}프론트엔드 로그 없음. 'han start --daemon'으로 실행하면 기록됩니다.${NC}"
-      fi
-      ;;
+    backend)  [ -f "$HAN_LOG_DIR/backend.log"  ] && FILES+=("$HAN_LOG_DIR/backend.log")  ;;
+    frontend) [ -f "$HAN_LOG_DIR/frontend.log" ] && FILES+=("$HAN_LOG_DIR/frontend.log") ;;
     *)
-      local FILES=()
-      [ -f "$HAN_LOG_DIR/backend.log" ]  && FILES+=("$HAN_LOG_DIR/backend.log")
+      [ -f "$HAN_LOG_DIR/backend.log"  ] && FILES+=("$HAN_LOG_DIR/backend.log")
       [ -f "$HAN_LOG_DIR/frontend.log" ] && FILES+=("$HAN_LOG_DIR/frontend.log")
-      if [ ${#FILES[@]} -eq 0 ]; then
-        echo -e "${YELLOW}로그 없음. 'han start --daemon'으로 실행하면 기록됩니다.${NC}"
-      else
-        echo -e "${CYAN}[전체 로그] Ctrl+C로 종료${NC}"
-        tail -f "${FILES[@]}"
-      fi
+      # han.log (백엔드 RotatingFileHandler 로그)
+      [ -f "$HAN_DIR/han.log" ] && FILES+=("$HAN_DIR/han.log")
       ;;
   esac
+
+  if [ ${#FILES[@]} -eq 0 ]; then
+    echo -e "${YELLOW}로그 없음. 'han start --daemon' 또는 'han start'으로 실행하면 기록됩니다.${NC}"
+    return 0
+  fi
+
+  # --follow 모드
+  if $FOLLOW; then
+    echo -e "${CYAN}[로그 실시간] Ctrl+C로 종료${NC}"
+    if [ -n "$GREP_PATTERN" ]; then
+      tail -f "${FILES[@]}" | grep --color=auto -i "$GREP_PATTERN"
+    else
+      tail -f "${FILES[@]}"
+    fi
+    return
+  fi
+
+  # --since 모드: N시간/분 전 이후 로그 필터
+  if [ -n "$SINCE" ]; then
+    local MINUTES=0
+    if [[ "$SINCE" =~ ^([0-9]+)h$ ]]; then
+      MINUTES=$(( ${BASH_REMATCH[1]} * 60 ))
+    elif [[ "$SINCE" =~ ^([0-9]+)m$ ]]; then
+      MINUTES="${BASH_REMATCH[1]}"
+    elif [[ "$SINCE" =~ ^([0-9]+)$ ]]; then
+      MINUTES="$SINCE"
+    else
+      echo -e "${RED}✗ 잘못된 --since 형식: $SINCE (예: 1h, 30m)${NC}"; exit 1
+    fi
+    local CUTOFF
+    CUTOFF=$(date -d "-${MINUTES} minutes" '+%Y-%m-%d %H:%M:%S' 2>/dev/null \
+             || date -v "-${MINUTES}M" '+%Y-%m-%d %H:%M:%S' 2>/dev/null \
+             || date '+%Y-%m-%d %H:%M:%S')
+    echo -e "${CYAN}[로그 — 최근 ${SINCE}] ${FILES[*]}${NC}"
+    local COMBINED
+    COMBINED=$(cat "${FILES[@]}" 2>/dev/null | awk -v cut="$CUTOFF" '$0 >= cut')
+    if [ -n "$GREP_PATTERN" ]; then
+      echo "$COMBINED" | grep --color=auto -i "$GREP_PATTERN" || echo -e "${YELLOW}패턴 '${GREP_PATTERN}' 없음${NC}"
+    else
+      echo "$COMBINED"
+    fi
+    return
+  fi
+
+  # 기본: 마지막 N줄
+  echo -e "${CYAN}[로그 — 마지막 ${LINES}줄] ${FILES[*]}${NC}"
+  if [ -n "$GREP_PATTERN" ]; then
+    cat "${FILES[@]}" | tail -n "$LINES" | grep --color=auto -i "$GREP_PATTERN" || echo -e "${YELLOW}패턴 '${GREP_PATTERN}' 없음${NC}"
+  else
+    cat "${FILES[@]}" | tail -n "$LINES"
+  fi
 }
 
 # ── han update ────────────────────────────────────────────────────────────────
@@ -825,28 +932,82 @@ cmd_restore() {
 # ── han config ────────────────────────────────────────────────────────────────
 cmd_config() {
   local ENV_FILE="$HAN_DIR/backend/.env"
-  if [ -f "$ENV_FILE" ]; then
-    echo ""
-    echo -e "${BOLD}현재 설정 ($ENV_FILE)${NC}"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    while IFS= read -r line; do
-      if [[ "$line" =~ _API_KEY= ]] && [[ ! "$line" =~ =$ ]]; then
-        local key="${line%%=*}"
-        local val="${line##*=}"
-        local masked="${val:0:8}****${val: -4}"
-        echo "  $key=$masked"
+  local SUBCMD="${1:-list}"
+  shift || true
+
+  case "$SUBCMD" in
+    set)
+      local KEY="${1:-}"; local VALUE="${2:-}"
+      if [ -z "$KEY" ]; then echo "사용법: han config set <KEY> <VALUE>"; exit 1; fi
+      if [ ! -f "$ENV_FILE" ]; then echo -e "${RED}✗ .env 없음 — han init_check --fix 먼저 실행${NC}"; exit 1; fi
+      if grep -q "^${KEY}=" "$ENV_FILE" 2>/dev/null; then
+        if sed --version 2>/dev/null | grep -q GNU; then
+          sed -i "s|^${KEY}=.*|${KEY}=${VALUE}|" "$ENV_FILE"
+        else
+          sed -i '' "s|^${KEY}=.*|${KEY}=${VALUE}|" "$ENV_FILE"
+        fi
+        echo -e "  ${GREEN}✓ ${KEY} 업데이트됨${NC}"
       else
-        echo "  $line"
+        echo "${KEY}=${VALUE}" >> "$ENV_FILE"
+        echo -e "  ${GREEN}✓ ${KEY} 추가됨${NC}"
       fi
-    done < "$ENV_FILE"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "  수정: nano $ENV_FILE"
-    echo "  수정 후 'han restart' 로 재시작하세요."
-    echo ""
-  else
-    echo -e "${YELLOW}⚠ .env 없음. 'han start' 로 먼저 실행하세요.${NC}"
-  fi
+      if [[ "$KEY" == *"API_KEY"* ]] && [ -n "$VALUE" ]; then
+        echo -e "  ${DIM}값: ${VALUE:0:8}...${VALUE: -4}${NC}"
+      else
+        echo -e "  ${DIM}값: ${VALUE}${NC}"
+      fi
+      echo ""
+      echo "  변경 적용: han restart"
+      ;;
+
+    get)
+      local KEY="${1:-}"
+      [ -z "$KEY" ] && { echo "사용법: han config get <KEY>"; exit 1; }
+      if [ ! -f "$ENV_FILE" ]; then echo -e "${RED}✗ .env 없음${NC}"; exit 1; fi
+      local LINE
+      LINE=$(grep "^${KEY}=" "$ENV_FILE" 2>/dev/null || true)
+      if [ -n "$LINE" ]; then
+        local VAL="${LINE#*=}"
+        if [[ "$KEY" == *"API_KEY"* ]] && [ -n "$VAL" ]; then
+          echo "${KEY}=${VAL:0:8}...${VAL: -4}"
+        else
+          echo "$LINE"
+        fi
+      else
+        echo -e "${YELLOW}⚠ ${KEY} 키 없음${NC}"
+      fi
+      ;;
+
+    list|"")
+      if [ -f "$ENV_FILE" ]; then
+        echo ""
+        echo -e "${BOLD}현재 설정 ($ENV_FILE)${NC}"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        while IFS= read -r line; do
+          if [[ "$line" =~ _API_KEY= ]] && [[ ! "$line" =~ =$ ]]; then
+            local key="${line%%=*}"
+            local val="${line##*=}"
+            local masked="${val:0:8}****${val: -4}"
+            echo "  $key=$masked"
+          else
+            echo "  $line"
+          fi
+        done < "$ENV_FILE"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "  han config set <KEY> <VALUE>  — 값 직접 수정"
+        echo "  수정 후 'han restart' 로 재시작하세요."
+        echo ""
+      else
+        echo -e "${YELLOW}⚠ .env 없음. 'han start' 로 먼저 실행하세요.${NC}"
+      fi
+      ;;
+
+    *)
+      echo "사용법: han config [set|get|list]"
+      exit 1
+      ;;
+  esac
 }
 
 # ── han open ──────────────────────────────────────────────────────────────────
@@ -868,12 +1029,12 @@ case "$COMMAND" in
   restart)              cmd_restart ;;
   status)               cmd_status ;;
   logs)                 cmd_logs "$@" ;;
-  init_check|doctor)    cmd_init_check ;;
+  init_check|doctor)    cmd_init_check "$@" ;;
   update)               cmd_update ;;
   reset)                cmd_reset ;;
   backup)               cmd_backup ;;
   restore)              cmd_restore ;;
-  config)               cmd_config ;;
+  config)               cmd_config "$@" ;;
   open)                 cmd_open ;;
   --version|-v)         cmd_version ;;
   help|--help|-h)       cmd_help ;;
