@@ -19,6 +19,8 @@ interface GpuStatus {
   gpu_locked?: boolean
   queue_length?: number
   queued_jobs?: number[]
+  pull_queue_length?: number
+  active_pulls?: string[]
   ollama_loaded_model?: string
   free_vram_gb?: number
 }
@@ -151,20 +153,15 @@ export default function VideoStudio() {
     return () => clearInterval(iv)
   }, [jobs])
 
-  // GPU 상태 폴링 — local-gpu 모델 선택 시 또는 GPU 잡 진행 중일 때 3초마다 갱신
+  // GPU 상태 폴링 — local-gpu 선택 또는 활성 잡이 있을 때 3초, 없을 때 10초 갱신
   useEffect(() => {
-    const hasLocalJob = jobs.some(
-      (j) => j.provider === 'local-gpu' && (j.status === 'pending' || j.status === 'running')
-    )
+    const hasActiveJob = jobs.some((j) => j.status === 'pending' || j.status === 'running')
     const isLocalModel = selectedModelInfo?.provider === 'local-gpu'
-    if (!isLocalModel && !hasLocalJob) {
-      if (gpuPollRef.current) { clearInterval(gpuPollRef.current); gpuPollRef.current = null }
-      return
-    }
     const fetchGpu = () =>
       videoApi.gpuStatus().then((r) => setGpuStatus(r.data)).catch(() => {})
     fetchGpu()
-    gpuPollRef.current = setInterval(fetchGpu, 3000)
+    const interval = (isLocalModel || hasActiveJob) ? 3000 : 10000
+    gpuPollRef.current = setInterval(fetchGpu, interval)
     return () => { if (gpuPollRef.current) clearInterval(gpuPollRef.current) }
   }, [selectedModelInfo?.provider, jobs.map(j => `${j.id}:${j.status}`).join(',')])
 
@@ -353,8 +350,14 @@ export default function VideoStudio() {
               </div>
             )}
 
-            {/* ── GPU 상태 위젯 ── local-gpu 선택 시 또는 GPU 잡 진행 중일 때 표시 */}
-            {gpuStatus && (selectedModelInfo?.provider === 'local-gpu' || gpuStatus.gpu_locked) && (
+            {/* ── GPU 상태 위젯 ── GPU 사용 중이거나 큐 대기/pull 중일 때 표시 */}
+            {gpuStatus && (
+              selectedModelInfo?.provider === 'local-gpu' ||
+              gpuStatus.gpu_locked ||
+              (gpuStatus.queue_length ?? 0) > 0 ||
+              (gpuStatus.pull_queue_length ?? 0) > 0 ||
+              (gpuStatus.active_pulls?.length ?? 0) > 0
+            ) && (
               <div className={`rounded border p-2.5 space-y-1.5 text-[10px] ${
                 gpuStatus.vram_warning
                   ? 'bg-red-500/10 border-red-500/30'
@@ -425,7 +428,17 @@ export default function VideoStudio() {
                 {(gpuStatus.queue_length ?? 0) > 0 && (
                   <div className="text-yellow-400 flex items-center gap-1">
                     <Clock size={9} />
-                    {gpuStatus.queue_length}개 대기 중 (순서대로 처리)
+                    영상 {gpuStatus.queue_length}개 대기 중 (순서대로 처리)
+                  </div>
+                )}
+
+                {/* Ollama pull 큐 */}
+                {((gpuStatus.pull_queue_length ?? 0) > 0 || (gpuStatus.active_pulls?.length ?? 0) > 0) && (
+                  <div className="text-blue-400 flex items-center gap-1">
+                    <Download size={9} />
+                    {(gpuStatus.active_pulls?.length ?? 0) > 0
+                      ? `모델 다운로드 중: ${gpuStatus.active_pulls?.join(', ')}`
+                      : `모델 다운로드 대기 중 ${gpuStatus.pull_queue_length}개`}
                   </div>
                 )}
 

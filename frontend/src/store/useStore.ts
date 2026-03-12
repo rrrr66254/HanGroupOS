@@ -21,6 +21,13 @@ export const useAuthStore = create<AuthState>()(
   )
 )
 
+export interface AppToast {
+  id: string
+  type: 'success' | 'error' | 'info'
+  title: string
+  body?: string
+}
+
 interface AppState {
   selectedCompany: Company | null
   sidebarOpen: boolean
@@ -29,6 +36,7 @@ interface AppState {
   pendingTerminals: number
   badgeTick: number
   theme: 'dark' | 'light'
+  toasts: AppToast[]
   setSelectedCompany: (company: Company | null) => void
   toggleSidebar: () => void
   setNewEventCount: (n: number) => void
@@ -37,6 +45,8 @@ interface AppState {
   setPendingTerminals: (n: number) => void
   triggerBadgeRefresh: () => void
   toggleTheme: () => void
+  addToast: (t: Omit<AppToast, 'id'>) => void
+  removeToast: (id: string) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -47,6 +57,7 @@ export const useAppStore = create<AppState>((set) => ({
   pendingTerminals: 0,
   badgeTick: 0,
   theme: (localStorage.getItem('han-theme') as 'dark' | 'light') ?? 'dark',
+  toasts: [],
   setSelectedCompany: (company) => set({ selectedCompany: company }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setNewEventCount: (n) => set({ newEventCount: n }),
@@ -59,4 +70,8 @@ export const useAppStore = create<AppState>((set) => ({
     localStorage.setItem('han-theme', next)
     return { theme: next }
   }),
+  addToast: (t) => set((s) => ({
+    toasts: [...s.toasts, { ...t, id: `${Date.now()}-${Math.random()}` }],
+  })),
+  removeToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
 }))

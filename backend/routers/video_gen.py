@@ -27,6 +27,7 @@ _PULL_QUEUE_MUTEX = threading.Lock()      # _PULL_QUEUE_LIST 보호용
 _PULL_PROGRESS: Dict[str, dict] = {}     # model → 최신 progress dict (WS 재연결 시 즉시 전송)
 _PULL_SUBSCRIBERS: Dict[str, list] = {}  # model → [asyncio.Queue, ...] (WS 브로드캐스트)
 _PULL_EVENT_LOOP = None                  # pull 워커 스레드에서 asyncio 전송용
+_PULL_CANCEL_FLAGS: Dict[str, bool] = {} # model → True이면 취소 요청됨
 
 
 def _broadcast_pull(model: str, data: dict) -> None:
@@ -46,6 +47,9 @@ def _pull_worker(model: str) -> None:
     """백그라운드 스레드: _GPU_LOCK을 획득한 후 Ollama pull 실행."""
     import httpx as _httpx, json as _json
 
+    # 취소 플래그 초기화
+    _PULL_CANCEL_FLAGS[model] = False
+
     # 큐에 추가 & 대기 상태 브로드캐스트
     with _PULL_QUEUE_MUTEX:
         _PULL_QUEUE_LIST.append(model)
@@ -60,12 +64,29 @@ def _pull_worker(model: str) -> None:
         })
 
     # 앞선 작업(영상 생성 or 다른 pull)이 끝날 때까지 블로킹
-    _GPU_LOCK.acquire()
+    # GPU 잠금 획득 대기 중에도 취소 요청을 처리하기 위해 타임아웃 폴링 방식 사용
+    while True:
+        if _PULL_CANCEL_FLAGS.get(model, False):
+            with _PULL_QUEUE_MUTEX:
+                if model in _PULL_QUEUE_LIST:
+                    _PULL_QUEUE_LIST.remove(model)
+            _broadcast_pull(model, {"type": "cancelled", "status": "다운로드가 취소되었습니다.", "pct": 0})
+            _PULL_CANCEL_FLAGS.pop(model, None)
+            return
+        acquired = _GPU_LOCK.acquire(timeout=1.0)
+        if acquired:
+            break
+
     with _PULL_QUEUE_MUTEX:
         if model in _PULL_QUEUE_LIST:
             _PULL_QUEUE_LIST.remove(model)
 
     try:
+        # GPU 잠금 획득 후에도 취소 확인
+        if _PULL_CANCEL_FLAGS.get(model, False):
+            _broadcast_pull(model, {"type": "cancelled", "status": "다운로드가 취소되었습니다.", "pct": 0})
+            return
+
         _broadcast_pull(model, {"type": "progress", "status": "다운로드 준비 중...", "pct": 0})
         with _httpx.stream(
             "POST",
@@ -77,6 +98,10 @@ def _pull_worker(model: str) -> None:
                 _broadcast_pull(model, {"type": "error", "status": f"Ollama 오류: {resp.status_code}"})
                 return
             for line in resp.iter_lines():
+                # 취소 요청 확인 — 즉시 스트림 중단
+                if _PULL_CANCEL_FLAGS.get(model, False):
+                    _broadcast_pull(model, {"type": "cancelled", "status": "다운로드가 취소되었습니다.", "pct": 0})
+                    return
                 if not line.strip():
                     continue
                 try:
@@ -102,6 +127,7 @@ def _pull_worker(model: str) -> None:
     except Exception as e:
         _broadcast_pull(model, {"type": "error", "status": str(e)[:200]})
     finally:
+        _PULL_CANCEL_FLAGS.pop(model, None)
         _GPU_LOCK.release()  # 다음 작업 허용
 
 
@@ -1200,6 +1226,21 @@ def get_pull_status(current_user: User = Depends(get_current_user)):
     }
 
 
+@router.delete("/ollama/models/pull/{model_name:path}")
+def cancel_ollama_pull(model_name: str, current_user: User = Depends(get_current_user)):
+    """진행 중인 Ollama pull 취소.
+    - _PULL_CANCEL_FLAGS[model]을 True로 설정하면 워커 스레드가 다음 체크 시 중단
+    - GPU 잠금 대기 중이거나 다운로드 중 모두 취소 가능
+    """
+    progress = _PULL_PROGRESS.get(model_name, {})
+    ptype = progress.get("type")
+    # 이미 완료/오류/취소 상태이면 404
+    if ptype in ("done", "error", "cancelled") and model_name not in _PULL_QUEUE_LIST:
+        raise HTTPException(404, "진행 중인 다운로드가 없습니다.")
+    _PULL_CANCEL_FLAGS[model_name] = True
+    return {"ok": True, "cancelled": model_name}
+
+
 @router.websocket("/ws/ollama-pull")
 async def ws_ollama_pull(websocket: WebSocket, model: str = Query(""), token: str = Query("")):
     """Ollama pull 진행률 WebSocket 구독.
@@ -1448,10 +1489,19 @@ def gpu_status():
     except Exception:
         pass
 
+    # 활성 pull 작업 수 (대기 중 + 실행 중)
+    active_pulls = [
+        m for m, p in _PULL_PROGRESS.items()
+        if p.get("type") not in ("done", "error", "cancelled")
+    ]
+    pull_queue_length = len(_PULL_QUEUE_LIST)
+
     return {
         "gpu_locked": gpu_locked,
         "queue_length": queue_len,
         "queued_jobs": list(_GPU_JOB_QUEUE),
+        "pull_queue_length": pull_queue_length,
+        "active_pulls": active_pulls,
         "free_vram_gb": round(free_vram, 1),
         "vram_pct": vram_pct,
         "vram_warning": vram_warning,

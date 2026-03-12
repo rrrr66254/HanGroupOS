@@ -2,6 +2,8 @@ import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Header from './Header'
 import NotificationPoller from './NotificationPoller'
+import PullWatcher from './PullWatcher'
+import Toast from './Toast'
 import { useAppStore } from '../store/useStore'
 
 export default function Layout() {
@@ -10,6 +12,8 @@ export default function Layout() {
   return (
     <div className="flex h-screen overflow-hidden bg-bg-base">
       <NotificationPoller />
+      <PullWatcher />
+      <Toast />
       <Sidebar />
       <div
         className="flex flex-col flex-1 min-w-0 transition-all duration-200"

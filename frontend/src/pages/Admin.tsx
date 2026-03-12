@@ -135,6 +135,9 @@ export default function Admin() {
           setPullProgress({ pct: 100, status: '다운로드 완료!', active: false })
           setOllamaMsg(`✓ "${name}" 다운로드 완료`)
           loadOllama()
+        } else if (d.type === 'cancelled') {
+          setPullProgress(null)
+          setOllamaMsg('다운로드가 취소되었습니다.')
         } else if (d.type === 'error') {
           setPullProgress(null)
           setOllamaMsg(`✗ ${d.status}`)
@@ -162,12 +165,23 @@ export default function Admin() {
     _connectPullWs(name)
   }
 
-  const handleCancelPull = () => {
+  const handleCancelPull = async () => {
+    const model = pullModel
+    // WebSocket 먼저 닫기 (UI 즉시 반응)
     pullWsRef.current?.close()
     pullWsRef.current = null
     setPullProgress(null)
     setPullModel('')
-    setOllamaMsg('다운로드가 취소되었습니다.')
+    setOllamaMsg('다운로드 취소 중...')
+    // 백엔드에 취소 요청 전송 — 실제 Ollama 스트림 중단
+    if (model) {
+      try {
+        await videoApi.ollamaCancelPull(model)
+        setOllamaMsg('다운로드가 취소되었습니다.')
+      } catch {
+        setOllamaMsg('다운로드가 취소되었습니다.')
+      }
+    }
   }
 
   const handleOllamaUnload = async () => {
