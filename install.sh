@@ -14,7 +14,7 @@ set -e
 HAN_REPO="https://github.com/rrrr66254/HanGroupOS.git"
 HAN_VERSION="30"
 INSTALL_DIR="$HOME/HanGroupOS"
-BIN_CANDIDATES=("$HOME/.local/bin" "$HOME/bin")
+BIN_DIR="$HOME/.local/bin"
 
 # ── 색상 ──────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -67,29 +67,15 @@ else
   echo -e "  ${GREEN}✓ 다운로드 완료${NC}"
 fi
 
-# ── han CLI 설치할 경로 결정 (쓰기 가능한 사용자 경로 우선) ─────────────────
-BIN_DIR=""
-for candidate in "${BIN_CANDIDATES[@]}"; do
-  if [ -w "$candidate" ] 2>/dev/null || ( mkdir -p "$candidate" 2>/dev/null && [ -w "$candidate" ] ); then
-    BIN_DIR="$candidate"
-    break
-  fi
-done
+# ── han CLI 설치 ($HOME/.local/bin 고정) ─────────────────────────────────────
+mkdir -p "$BIN_DIR"
 
-# 여전히 없으면 ~/.local/bin 생성
-if [ -z "$BIN_DIR" ]; then
-  BIN_DIR="$HOME/.local/bin"
-  mkdir -p "$BIN_DIR"
-fi
-
-# ── han 스크립트 설치 ─────────────────────────────────────────────────────────
 HAN_CLI_SRC="$INSTALL_DIR/han"
 HAN_CLI_DST="$BIN_DIR/han"
 
 chmod +x "$HAN_CLI_SRC"
 chmod +x "$INSTALL_DIR/start.sh"
 
-# han CLI에 설치 경로 주입
 cp "$HAN_CLI_SRC" "$HAN_CLI_DST"
 chmod +x "$HAN_CLI_DST"
 
@@ -99,43 +85,32 @@ echo "HAN_DIR=\"$INSTALL_DIR\"" > "$HOME/.han/config"
 
 echo -e "  ${GREEN}✓ han CLI 설치됨: $HAN_CLI_DST${NC}"
 
-# ── PATH 설정 안내 ────────────────────────────────────────────────────────────
-PATH_UPDATE_NEEDED=false
+# ── PATH 자동 등록 (프롬프트 없이 즉시 처리) ──────────────────────────────────
+SHELL_RC=""
+if [[ "$SHELL" == *"zsh"* ]]; then
+  SHELL_RC="$HOME/.zshrc"
+elif [[ "$SHELL" == *"bash"* ]]; then
+  SHELL_RC="$HOME/.bashrc"
+else
+  # 기본값: .bashrc
+  SHELL_RC="$HOME/.bashrc"
+fi
+
+PATH_LINE="export PATH=\"\$HOME/.local/bin:\$PATH\""
+
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-  PATH_UPDATE_NEEDED=true
-  echo ""
-  echo -e "${YELLOW}⚠ $BIN_DIR 이 PATH에 없습니다. 아래 명령을 실행해 추가하세요:${NC}"
-  echo ""
-
-  SHELL_RC=""
-  if [[ "$SHELL" == *"zsh"* ]]; then
-    SHELL_RC="$HOME/.zshrc"
-  elif [[ "$SHELL" == *"bash"* ]]; then
-    SHELL_RC="$HOME/.bashrc"
+  # 아직 추가되지 않은 경우에만 rc 파일에 추가
+  if ! grep -qF 'HOME/.local/bin' "$SHELL_RC" 2>/dev/null; then
+    echo "" >> "$SHELL_RC"
+    echo "# HAN Group OS CLI" >> "$SHELL_RC"
+    echo "$PATH_LINE" >> "$SHELL_RC"
+    echo -e "  ${GREEN}✓ PATH 등록됨: $SHELL_RC${NC}"
   fi
-
-  if [ -n "$SHELL_RC" ]; then
-    echo -e "  ${CYAN}# 아래 줄을 $SHELL_RC 에 추가하세요:${NC}"
-    echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> $SHELL_RC"
-    echo "  source $SHELL_RC"
-
-    # 자동 추가 여부 물어보기
-    if [ -t 0 ]; then
-      echo ""
-      read -r -p "  지금 자동으로 추가할까요? (Y/n) > " AUTO_ADD
-      AUTO_ADD="${AUTO_ADD:-Y}"
-      if [[ "$AUTO_ADD" =~ ^[Yy]$ ]]; then
-        echo "" >> "$SHELL_RC"
-        echo "# HAN Group OS CLI" >> "$SHELL_RC"
-        echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$SHELL_RC"
-        export PATH="$HOME/.local/bin:$PATH"
-        echo -e "  ${GREEN}✓ PATH 업데이트됨${NC}"
-        PATH_UPDATE_NEEDED=false
-      fi
-    fi
-  else
-    echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
-  fi
+  # 현재 세션에도 즉시 적용
+  export PATH="$BIN_DIR:$PATH"
+  echo -e "  ${GREEN}✓ PATH 현재 세션에 적용됨${NC}"
+else
+  echo -e "  ${GREEN}✓ PATH 이미 설정됨${NC}"
 fi
 
 # ── 완료 메시지 ───────────────────────────────────────────────────────────────
@@ -148,31 +123,40 @@ echo "  han CLI:   $HAN_CLI_DST"
 echo ""
 echo -e "${BOLD}  사용 방법:${NC}"
 echo ""
-if [ "$PATH_UPDATE_NEEDED" = true ]; then
-  echo -e "  ${YELLOW}※ 아직 PATH 설정이 필요합니다. 위 안내를 참고하세요.${NC}"
-  echo "  그 전까지는 아래 방법으로 실행:"
-  echo "    $INSTALL_DIR/han start"
-  echo "    $INSTALL_DIR/han --version"
-else
-  echo "    han start           # 서버 시작"
-  echo "    han start --daemon  # 백그라운드 시작"
-  echo "    han status          # 실행 상태 확인"
-  echo "    han stop            # 서버 종료"
-  echo "    han logs            # 로그 보기"
-  echo "    han update          # 업데이트"
-  echo "    han reset           # DB 초기화"
-  echo "    han --version       # 버전 확인"
-  echo "    han help            # 전체 도움말"
-fi
+echo "    han start           # 서버 시작"
+echo "    han start --daemon  # 백그라운드 시작"
+echo "    han status          # 실행 상태 확인"
+echo "    han stop            # 서버 종료"
+echo "    han logs            # 로그 보기"
+echo "    han update          # 업데이트"
+echo "    han reset           # DB 초기화"
+echo "    han --version       # 버전 확인"
+echo "    han help            # 전체 도움말"
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════${NC}"
 echo ""
 
-# ── 바로 시작 여부 ────────────────────────────────────────────────────────────
-if [ -t 0 ] && [ "$PATH_UPDATE_NEEDED" = false ]; then
-  read -r -p "  지금 바로 서버를 시작하시겠습니까? (Y/n) > " START_NOW
+# ── 환경 자동 점검 및 수정 ────────────────────────────────────────────────────
+echo -e "${BOLD}🔍 환경 점검 중 (han init_check --fix)...${NC}"
+echo ""
+if "$HAN_CLI_DST" init_check --fix; then
+  echo ""
+  echo -e "  ${GREEN}✓ 환경 점검 완료${NC}"
+else
+  echo ""
+  echo -e "  ${YELLOW}⚠ 일부 항목을 수동으로 확인해 주세요${NC}"
+fi
+
+# ── 서버 즉시 시작 여부 (--daemon) ───────────────────────────────────────────
+echo ""
+if [ -t 0 ]; then
+  read -r -p "  지금 바로 서버를 백그라운드로 시작하시겠습니까? (Y/n) > " START_NOW
   START_NOW="${START_NOW:-Y}"
   if [[ "$START_NOW" =~ ^[Yy]$ ]]; then
-    exec "$INSTALL_DIR/start.sh"
+    echo ""
+    "$HAN_CLI_DST" start --daemon
+  else
+    echo ""
+    echo -e "  나중에 시작하려면: ${CYAN}han start --daemon${NC}"
   fi
 fi
