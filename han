@@ -392,20 +392,41 @@ cmd_init_check() {
         || { _fail "npm install 실패  →  cd $HAN_DIR/frontend && npm install"; }
     fi
 
-    # .env 생성
-    if [ ! -f "$HAN_DIR/backend/.env" ]; then
-      echo -e "  ${CYAN}▸ .env 기본 파일 생성 중...${NC}"
-      cat > "$HAN_DIR/backend/.env" <<EOF
-SECRET_KEY=han-group-os-secret-key-change-in-production
-DATABASE_URL=sqlite:///./han_group.db
-DEFAULT_PROVIDER=mock
-ANTHROPIC_API_KEY=
-OPENAI_API_KEY=
-GEMINI_API_KEY=
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5
-EOF
+    # .env 생성 또는 신규 키 병합 (기존 값 절대 덮어쓰지 않음)
+    echo -e "  ${CYAN}▸ .env 확인 중...${NC}"
+    local ENV_DEFAULTS_FIX=(
+      "SECRET_KEY=han-group-os-secret-key-change-in-production"
+      "DATABASE_URL=sqlite:///./han_group.db"
+      "DEFAULT_PROVIDER=mock"
+      "ANTHROPIC_API_KEY="
+      "OPENAI_API_KEY="
+      "GEMINI_API_KEY="
+      "OLLAMA_BASE_URL=http://localhost:11434"
+      "OLLAMA_MODEL=qwen2.5"
+    )
+    local ENV_FILE="$HAN_DIR/backend/.env"
+    local env_added=0
+
+    if [ ! -f "$ENV_FILE" ]; then
+      touch "$ENV_FILE"
+      for entry in "${ENV_DEFAULTS_FIX[@]}"; do
+        echo "$entry" >> "$ENV_FILE"
+      done
       _ok ".env 생성 완료 (han config set으로 API 키를 설정하세요)"
+    else
+      for entry in "${ENV_DEFAULTS_FIX[@]}"; do
+        local K="${entry%%=*}"
+        if ! grep -q "^${K}=" "$ENV_FILE" 2>/dev/null; then
+          echo "$entry" >> "$ENV_FILE"
+          env_added=$((env_added+1))
+          echo -e "  ${CYAN}    + 새 키 추가: ${K}${NC}"
+        fi
+      done
+      if [ "$env_added" -eq 0 ]; then
+        _ok ".env 최신 상태 (기존 설정 보존)"
+      else
+        _ok ".env 에 ${env_added}개 새 키 추가됨 (기존 값 보존)"
+      fi
     fi
     echo ""
   fi
