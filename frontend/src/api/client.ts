@@ -334,6 +334,8 @@ export const videoApi = {
   job: (id: number) => api.get(`/video/jobs/${id}`),
   deleteJob: (id: number) => api.delete(`/video/jobs/${id}`),
   batchDelete: (ids: number[]) => api.post('/video/jobs/batch-delete', { ids }),
+  retryJob: (id: number) => api.post(`/video/jobs/${id}/retry`),
+  modelStatus: (modelId: string) => api.get('/video/models/status', { params: { model_id: modelId } }),
   fileUrl: (id: number) => `/api/video/file/${id}`,
 }
 

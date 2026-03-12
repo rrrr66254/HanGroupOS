@@ -545,7 +545,8 @@ cmd_start() {
 
     cd "$HAN_DIR/frontend"
     [ ! -d "node_modules" ] && npm install --silent
-    nohup npm run dev \
+    # setsid: npm run dev를 새 세션(프로세스 그룹)으로 실행 → han stop 시 자식까지 한 번에 종료
+    setsid nohup npm run dev \
       > "$HAN_LOG_DIR/frontend.log" 2>&1 &
     echo $! > "$HAN_PID_FRONTEND"
     echo -e "  ${GREEN}✓ 프론트엔드 시작${NC} (PID: $(cat "$HAN_PID_FRONTEND"))"
@@ -567,24 +568,59 @@ cmd_start() {
 }
 
 # ── han stop ──────────────────────────────────────────────────────────────────
+# 포트를 점유 중인 모든 프로세스를 강제 종료하는 내부 헬퍼
+_kill_port() {
+  local PORT="$1"
+  # fuser 우선, 없으면 ss+awk로 PID 추출 후 kill
+  if command -v fuser &>/dev/null; then
+    fuser -k "${PORT}/tcp" &>/dev/null || true
+  else
+    local PIDS
+    PIDS=$(ss -tlnp "sport = :${PORT}" 2>/dev/null \
+      | grep -oP 'pid=\K[0-9]+' | sort -u)
+    for P in $PIDS; do
+      kill -9 "$P" 2>/dev/null || true
+    done
+  fi
+}
+
 cmd_stop() {
   local STOPPED=false
 
   if is_running "$HAN_PID_BACKEND"; then
-    kill "$(cat "$HAN_PID_BACKEND")" 2>/dev/null \
-      && echo -e "  ${GREEN}✓ 백엔드 종료됨${NC}" \
-      || echo -e "  ${RED}✗ 백엔드 종료 실패${NC}"
+    # 프로세스 그룹 전체 종료 시도 후 PID 개별 kill
+    local BPID; BPID=$(cat "$HAN_PID_BACKEND")
+    kill -- "-$BPID" 2>/dev/null || kill "$BPID" 2>/dev/null || true
+    echo -e "  ${GREEN}✓ 백엔드 종료됨${NC}"
     rm -f "$HAN_PID_BACKEND"
     STOPPED=true
   fi
 
   if is_running "$HAN_PID_FRONTEND"; then
-    kill "$(cat "$HAN_PID_FRONTEND")" 2>/dev/null \
-      && echo -e "  ${GREEN}✓ 프론트엔드 종료됨${NC}" \
-      || echo -e "  ${RED}✗ 프론트엔드 종료 실패${NC}"
+    local FPID; FPID=$(cat "$HAN_PID_FRONTEND")
+    kill -- "-$FPID" 2>/dev/null || kill "$FPID" 2>/dev/null || true
+    echo -e "  ${GREEN}✓ 프론트엔드 종료됨${NC}"
     rm -f "$HAN_PID_FRONTEND"
     STOPPED=true
   fi
+
+  # PID 파일 기반 종료 후에도 잔존 프로세스 제거
+  # uvicorn(8000) / vite·node(5173) 포트 점유 프로세스 강제 종료
+  sleep 0.5
+  if port_in_use 8000; then
+    _kill_port 8000
+    echo -e "  ${YELLOW}⚠ 포트 8000 잔존 프로세스 강제 종료${NC}"
+    STOPPED=true
+  fi
+  if port_in_use 5173; then
+    _kill_port 5173
+    echo -e "  ${YELLOW}⚠ 포트 5173 잔존 프로세스 강제 종료${NC}"
+    STOPPED=true
+  fi
+
+  # vite / uvicorn 이름으로 남은 프로세스 추가 정리
+  pkill -f "vite" 2>/dev/null || true
+  pkill -f "uvicorn main:app" 2>/dev/null || true
 
   if [ "$STOPPED" = false ]; then
     echo -e "${YELLOW}⚠ 백그라운드에서 실행 중인 서버가 없습니다.${NC}"
@@ -987,29 +1023,72 @@ PYEOF
 
 # ── han reset ─────────────────────────────────────────────────────────────────
 cmd_reset() {
-  echo -e "${YELLOW}⚠ 경고: 모든 데이터(DB)가 삭제됩니다.${NC}"
-  read -r -p "  계속하시겠습니까? (y/N) > " CONFIRM
-  if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-    echo "  취소됩니다."
-    exit 0
+  local FORCE=false
+  local NO_START=false
+  for arg in "$@"; do
+    case "$arg" in
+      --force|-f) FORCE=true ;;
+      --no-start)  NO_START=true ;;
+    esac
+  done
+
+  echo -e "${YELLOW}⚠ 경고: DB · 영상 파일 · 로그 등 모든 데이터가 삭제됩니다.${NC}"
+  if [ "$FORCE" = false ]; then
+    read -r -p "  계속하시겠습니까? (y/N) > " CONFIRM
+    if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+      echo "  취소됩니다."
+      return 0
+    fi
+  else
+    echo -e "  ${CYAN}--force 옵션: 확인 생략${NC}"
   fi
 
   cmd_stop 2>/dev/null || true
+  sleep 0.5
 
+  local ts
+  ts=$(date +%Y%m%d_%H%M%S)
+  mkdir -p "$HAN_BACKUP_DIR"
+
+  # ① DB 삭제
   local DB_PATH="$HAN_DIR/backend/han_group.db"
   if [ -f "$DB_PATH" ]; then
-    # 리셋 전 자동 백업
-    local ts
-    ts=$(date +%Y%m%d_%H%M%S)
     cp "$DB_PATH" "$HAN_BACKUP_DIR/han_group_before_reset_${ts}.db"
-    echo -e "  ${GREEN}✓ DB 백업됨${NC} (before_reset_${ts}.db)"
+    echo -e "  ${GREEN}✓ DB 백업됨${NC} → before_reset_${ts}.db"
     rm "$DB_PATH"
     echo -e "  ${GREEN}✓ 데이터베이스 삭제됨${NC}"
   else
-    echo -e "  ${YELLOW}⚠ DB 파일이 없습니다 (이미 초기화 상태)${NC}"
+    echo -e "  ${YELLOW}⚠ DB 파일 없음 (이미 초기화 상태)${NC}"
   fi
 
+  # ② 생성 영상 파일 삭제 (~/.han-video-store)
+  local VIDEO_DIR="$HOME/han-video-store"
+  if [ -d "$VIDEO_DIR" ] && [ -n "$(ls -A "$VIDEO_DIR" 2>/dev/null)" ]; then
+    local VID_COUNT
+    VID_COUNT=$(find "$VIDEO_DIR" -type f | wc -l)
+    rm -rf "${VIDEO_DIR:?}"/*
+    echo -e "  ${GREEN}✓ 영상 파일 ${VID_COUNT}개 삭제됨${NC} ($VIDEO_DIR)"
+  else
+    echo -e "  ${YELLOW}⚠ 영상 파일 없음${NC}"
+  fi
+
+  # ③ 로그 파일 초기화
+  for LOG in "$HAN_LOG_DIR/backend.log" "$HAN_LOG_DIR/frontend.log"; do
+    if [ -f "$LOG" ]; then
+      : > "$LOG"
+    fi
+  done
+  echo -e "  ${GREEN}✓ 로그 파일 초기화됨${NC}"
+
   echo ""
+  echo -e "  ${GREEN}✅ 완전 초기화 완료${NC} — 최초 실행 상태입니다."
+  echo ""
+
+  if [ "$NO_START" = true ]; then
+    echo "  서버를 시작하려면: han start"
+    return 0
+  fi
+
   read -r -p "  지금 바로 시작하시겠습니까? (Y/n) > " START_NOW
   START_NOW="${START_NOW:-Y}"
   if [[ "$START_NOW" =~ ^[Yy]$ ]]; then

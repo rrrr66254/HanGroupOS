@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Film, Trash2, RefreshCw, AlertCircle, CheckCircle,
   Loader2, Play, Download, Filter, Search, ExternalLink,
-  Building2, BarChart2, Clock, TrendingUp, TrendingDown,
+  Building2, BarChart2, Clock, TrendingUp, TrendingDown, RotateCcw, LayoutList, Layers,
 } from 'lucide-react'
 import { videoApi, companiesApi } from '../api/client'
 import { useNavigate } from 'react-router-dom'
 
 interface VideoJob {
   id: number
+  company_id: number | null
   prompt: string
   model_id: string
   provider: string
@@ -68,8 +69,10 @@ export default function VideoJobs() {
   const [search, setSearch] = useState('')
   const [previewJob, setPreviewJob] = useState<VideoJob | null>(null)
   const [deleting, setDeleting] = useState<number | null>(null)
+  const [retrying, setRetrying] = useState<number | null>(null)
   const [batchDeleting, setBatchDeleting] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [groupByCompany, setGroupByCompany] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const navigate = useNavigate()
 
@@ -119,6 +122,17 @@ export default function VideoJobs() {
       await Promise.all([loadJobs(), loadStats()])
     } finally {
       setDeleting(null)
+    }
+  }
+
+  const handleRetry = async (job: VideoJob) => {
+    setRetrying(job.id)
+    try {
+      const r = await videoApi.retryJob(job.id)
+      setPreviewJob(r.data)
+      await Promise.all([loadJobs(), loadStats()])
+    } finally {
+      setRetrying(null)
     }
   }
 
@@ -174,6 +188,28 @@ export default function VideoJobs() {
 
   const formatDate = (iso: string) => new Date(iso).toLocaleString('ko-KR')
 
+  // 회사별 그룹 (company_id → jobs)
+  const groupedByCompany: { label: string; companyId: number | null; jobs: VideoJob[] }[] = []
+  if (groupByCompany) {
+    const map = new Map<string, { label: string; companyId: number | null; jobs: VideoJob[] }>()
+    for (const j of filtered) {
+      const key = j.company_id != null ? String(j.company_id) : '__none__'
+      if (!map.has(key)) {
+        const companyName = j.company_id != null
+          ? (companies.find((c) => c.id === j.company_id)?.name ?? `회사 #${j.company_id}`)
+          : '미지정'
+        map.set(key, { label: companyName, companyId: j.company_id, jobs: [] })
+      }
+      map.get(key)!.jobs.push(j)
+    }
+    groupedByCompany.push(...map.values())
+    groupedByCompany.sort((a, b) => {
+      if (a.companyId == null) return 1
+      if (b.companyId == null) return -1
+      return a.label.localeCompare(b.label)
+    })
+  }
+
   return (
     <div className="flex h-full">
       {/* Main list */}
@@ -226,6 +262,18 @@ export default function VideoJobs() {
                 }
               </button>
             )}
+            <button
+              onClick={() => setGroupByCompany((v) => !v)}
+              title={groupByCompany ? '목록 보기' : '회사별 보기'}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-colors ${
+                groupByCompany
+                  ? 'text-brand-light bg-brand/10 border border-brand/20'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-bg-elevated'
+              }`}
+            >
+              {groupByCompany ? <LayoutList size={12} /> : <Layers size={12} />}
+              {groupByCompany ? '목록' : '회사별'}
+            </button>
             <button
               onClick={loadJobs}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-slate-400 hover:text-slate-200 hover:bg-bg-elevated transition-colors"
@@ -348,7 +396,7 @@ export default function VideoJobs() {
           ))}
         </div>
 
-        {/* Job table */}
+        {/* Job table / grouped view */}
         <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center py-16">
@@ -359,7 +407,45 @@ export default function VideoJobs() {
               <Film size={32} strokeWidth={1} />
               <p className="text-sm">조건에 맞는 영상 잡이 없습니다</p>
             </div>
+          ) : groupByCompany ? (
+            /* ── 회사별 그룹 보기 ── */
+            <div className="divide-y divide-bg-border">
+              {groupedByCompany.map((group) => (
+                <div key={group.companyId ?? '__none__'}>
+                  <div className="flex items-center gap-2 px-4 py-2 bg-bg-elevated/40 sticky top-0 z-10 border-b border-bg-border">
+                    <Building2 size={11} className="text-brand-light" />
+                    <span className="text-[11px] font-semibold text-brand-light">{group.label}</span>
+                    <span className="text-[10px] text-slate-600 ml-1">({group.jobs.length}건)</span>
+                    <span className="ml-auto text-[10px] text-slate-600">
+                      완료 {group.jobs.filter((j) => j.status === 'done').length} /
+                      실패 {group.jobs.filter((j) => j.status === 'failed').length}
+                    </span>
+                  </div>
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {group.jobs.map((job) => (
+                        <JobRow
+                          key={job.id}
+                          job={job}
+                          selected={selectedIds.has(job.id)}
+                          active={previewJob?.id === job.id}
+                          deleting={deleting === job.id}
+                          retrying={retrying === job.id}
+                          onSelect={() => toggleSelect(job.id)}
+                          onClick={() => setPreviewJob(previewJob?.id === job.id ? null : job)}
+                          onRetry={() => handleRetry(job)}
+                          onDelete={() => handleDelete(job)}
+                          onStudio={() => navigate('/video-studio')}
+                          formatDate={formatDate}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
           ) : (
+            /* ── 기본 목록 테이블 ── */
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-bg-border text-left">
@@ -377,89 +463,26 @@ export default function VideoJobs() {
                   <th className="px-3 py-2.5 text-[10px] text-slate-500 font-medium w-20">상태</th>
                   <th className="px-3 py-2.5 text-[10px] text-slate-500 font-medium w-36">생성 시간</th>
                   <th className="px-3 py-2.5 text-[10px] text-slate-500 font-medium w-36">완료 시간</th>
-                  <th className="px-3 py-2.5 text-[10px] text-slate-500 font-medium w-28 text-right">액션</th>
+                  <th className="px-3 py-2.5 text-[10px] text-slate-500 font-medium w-32 text-right">액션</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((job) => (
-                  <tr
+                  <JobRow
                     key={job.id}
+                    job={job}
+                    selected={selectedIds.has(job.id)}
+                    active={previewJob?.id === job.id}
+                    deleting={deleting === job.id}
+                    retrying={retrying === job.id}
+                    showCheckbox
+                    onSelect={() => toggleSelect(job.id)}
                     onClick={() => setPreviewJob(previewJob?.id === job.id ? null : job)}
-                    className={`border-b border-bg-border cursor-pointer transition-colors ${
-                      previewJob?.id === job.id ? 'bg-bg-elevated' : 'hover:bg-bg-elevated/50'
-                    } ${selectedIds.has(job.id) ? 'bg-brand/5' : ''}`}
-                  >
-                    <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(job.id)}
-                        onChange={() => toggleSelect(job.id)}
-                        className="accent-brand"
-                      />
-                    </td>
-                    <td className="px-3 py-3 text-slate-500">{job.id}</td>
-                    <td className="px-3 py-3 text-slate-200 max-w-0">
-                      <p className="truncate">{job.prompt}</p>
-                      {job.status === 'failed' && job.error_msg && (
-                        <p className="text-[10px] text-red-400 truncate mt-0.5">{job.error_msg}</p>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-slate-400">
-                      {job.model_id.split('/').pop()}
-                    </td>
-                    <td className="px-3 py-3">
-                      <span className={`flex items-center gap-1 ${STATUS_COLOR[job.status]}`}>
-                        {(job.status === 'pending' || job.status === 'running') && (
-                          <Loader2 size={10} className="animate-spin" />
-                        )}
-                        {job.status === 'done' && <CheckCircle size={10} />}
-                        {job.status === 'failed' && <AlertCircle size={10} />}
-                        {STATUS_LABEL[job.status]}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-slate-500">{formatDate(job.created_at)}</td>
-                    <td className="px-3 py-3 text-slate-500">
-                      {job.finished_at ? formatDate(job.finished_at) : '—'}
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                        {job.status === 'done' && job.video_url && (
-                          <>
-                            <button
-                              onClick={() => setPreviewJob(job)}
-                              className="p-1.5 rounded text-slate-500 hover:text-green-400 hover:bg-green-500/10 transition-colors"
-                              title="미리보기"
-                            >
-                              <Play size={12} />
-                            </button>
-                            <a
-                              href={job.video_url}
-                              download={`video_${job.id}.mp4`}
-                              className="p-1.5 rounded text-slate-500 hover:text-brand-light hover:bg-brand/10 transition-colors"
-                              title="다운로드"
-                            >
-                              <Download size={12} />
-                            </a>
-                          </>
-                        )}
-                        <button
-                          onClick={() => navigate('/video-studio')}
-                          className="p-1.5 rounded text-slate-500 hover:text-slate-300 hover:bg-bg-elevated transition-colors"
-                          title="스튜디오에서 보기"
-                        >
-                          <ExternalLink size={12} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(job)}
-                          disabled={deleting === job.id}
-                          className="p-1.5 rounded text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
-                          title="삭제"
-                        >
-                          {deleting === job.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                    onRetry={() => handleRetry(job)}
+                    onDelete={() => handleDelete(job)}
+                    onStudio={() => navigate('/video-studio')}
+                    formatDate={formatDate}
+                  />
                 ))}
               </tbody>
             </table>
@@ -541,11 +564,25 @@ export default function VideoJobs() {
               </div>
             )}
 
-            {/* Error */}
-            {previewJob.status === 'failed' && previewJob.error_msg && (
-              <div className="bg-red-500/10 border border-red-500/20 rounded p-3">
-                <p className="text-[10px] text-red-400 font-medium mb-1">오류 메시지</p>
-                <p className="text-xs text-red-300">{previewJob.error_msg}</p>
+            {/* Error + Retry */}
+            {previewJob.status === 'failed' && (
+              <div className="space-y-2">
+                {previewJob.error_msg && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded p-3">
+                    <p className="text-[10px] text-red-400 font-medium mb-1">오류 메시지</p>
+                    <p className="text-xs text-red-300">{previewJob.error_msg}</p>
+                  </div>
+                )}
+                <button
+                  onClick={() => handleRetry(previewJob)}
+                  disabled={retrying === previewJob.id}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded text-xs font-medium text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 transition-colors disabled:opacity-40"
+                >
+                  {retrying === previewJob.id
+                    ? <><Loader2 size={12} className="animate-spin" /> 재시도 중...</>
+                    : <><RotateCcw size={12} /> 1클릭 재시도</>
+                  }
+                </button>
               </div>
             )}
 
@@ -563,5 +600,119 @@ export default function VideoJobs() {
         </div>
       )}
     </div>
+  )
+}
+
+// ── JobRow 공통 컴포넌트 ───────────────────────────────────────────────────────
+interface JobRowProps {
+  job: VideoJob
+  selected: boolean
+  active: boolean
+  deleting: boolean
+  retrying: boolean
+  showCheckbox?: boolean
+  onSelect: () => void
+  onClick: () => void
+  onRetry: () => void
+  onDelete: () => void
+  onStudio: () => void
+  formatDate: (iso: string) => string
+}
+
+function JobRow({
+  job, selected, active, deleting, retrying, showCheckbox,
+  onSelect, onClick, onRetry, onDelete, onStudio, formatDate,
+}: JobRowProps) {
+  const rowClass = `border-b border-bg-border cursor-pointer transition-colors ${
+    active ? 'bg-bg-elevated' : 'hover:bg-bg-elevated/50'
+  } ${selected ? 'bg-brand/5' : ''}`
+
+  const cells = (
+    <>
+      {showCheckbox && (
+        <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+          <input type="checkbox" checked={selected} onChange={onSelect} className="accent-brand" />
+        </td>
+      )}
+      <td className="px-3 py-3 text-slate-500 w-10">{job.id}</td>
+      <td className="px-3 py-3 text-slate-200 max-w-0">
+        <p className="truncate">{job.prompt}</p>
+        {job.status === 'failed' && job.error_msg && (
+          <p className="text-[10px] text-red-400 truncate mt-0.5">{job.error_msg}</p>
+        )}
+      </td>
+      <td className="px-3 py-3 text-slate-400 w-28">
+        {job.model_id.split('/').pop()}
+      </td>
+      <td className="px-3 py-3 w-20">
+        <span className={`flex items-center gap-1 ${STATUS_COLOR[job.status]}`}>
+          {(job.status === 'pending' || job.status === 'running') && (
+            <Loader2 size={10} className="animate-spin" />
+          )}
+          {job.status === 'done' && <CheckCircle size={10} />}
+          {job.status === 'failed' && <AlertCircle size={10} />}
+          {STATUS_LABEL[job.status]}
+        </span>
+      </td>
+      <td className="px-3 py-3 text-slate-500 w-36">{formatDate(job.created_at)}</td>
+      <td className="px-3 py-3 text-slate-500 w-36">
+        {job.finished_at ? formatDate(job.finished_at) : '—'}
+      </td>
+      <td className="px-3 py-3 w-32">
+        <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+          {job.status === 'done' && job.video_url && (
+            <>
+              <button
+                onClick={onClick}
+                className="p-1.5 rounded text-slate-500 hover:text-green-400 hover:bg-green-500/10 transition-colors"
+                title="미리보기"
+              >
+                <Play size={12} />
+              </button>
+              <a
+                href={job.video_url}
+                download={`video_${job.id}.mp4`}
+                className="p-1.5 rounded text-slate-500 hover:text-brand-light hover:bg-brand/10 transition-colors"
+                title="다운로드"
+              >
+                <Download size={12} />
+              </a>
+            </>
+          )}
+          {job.status === 'failed' && (
+            <button
+              onClick={onRetry}
+              disabled={retrying}
+              className="p-1.5 rounded text-slate-500 hover:text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-40"
+              title="재시도"
+            >
+              {retrying ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+            </button>
+          )}
+          <button
+            onClick={onStudio}
+            className="p-1.5 rounded text-slate-500 hover:text-slate-300 hover:bg-bg-elevated transition-colors"
+            title="스튜디오에서 보기"
+          >
+            <ExternalLink size={12} />
+          </button>
+          <button
+            onClick={onDelete}
+            disabled={deleting}
+            className="p-1.5 rounded text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+            title="삭제"
+          >
+            {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+          </button>
+        </div>
+      </td>
+    </>
+  )
+
+  // 회사별 그룹 보기에선 <tr> 없이 div 행 사용 불가 — 항상 tr 렌더
+  return (
+    <tr className={rowClass} onClick={onClick}>
+      {cells}
+    </tr>
   )
 }

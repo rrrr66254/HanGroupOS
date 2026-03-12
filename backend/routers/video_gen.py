@@ -123,20 +123,22 @@ SUPPORTED_MODELS = [
         "provider": "fal-ai",
         "recommended": False,
     },
-    # ── HuggingFace Inference API (무료 티어 가능, HF 토큰 필요) ────────────
+    # ── HuggingFace Inference API ────────────────────────────────────────────
+    # ⚠ HF "Inference Providers" 기능으로 외부 유료 제공자(FAL 등)에 라우팅될 수 있음
+    # provider="hf-inference" 강제 지정으로 HF 자체 서버 사용
     {
         "id": "tencent/HunyuanVideo",
-        "label": "HunyuanVideo (Tencent) — 오픈소스, HF 무료 티어",
+        "label": "HunyuanVideo (Tencent) — HF 자체 추론 (HF 토큰 필요)",
         "provider": "hf-inference",
         "recommended": False,
-        "note": "HF Inference API warm 상태 — 무료 사용 가능 (속도 제한 있음)",
+        "note": "HF 자체 inference 서버 사용 — provider='hf-inference' 강제",
     },
     {
         "id": "genmo/mochi-1-preview",
-        "label": "Mochi-1 Preview (Genmo) — 오픈소스, HF 무료 티어",
+        "label": "Mochi-1 Preview (Genmo) — HF 자체 추론 (HF 토큰 필요)",
         "provider": "hf-inference",
         "recommended": False,
-        "note": "HF Inference API warm 상태 — 자연스러운 움직임 특화",
+        "note": "HF 자체 inference 서버 사용 — provider='hf-inference' 강제",
     },
     # ── JSON2Video ───────────────────────────────────────────────────────────
     {
@@ -223,8 +225,8 @@ def _format_job(job: VideoJob, request_base: str = "") -> dict:
         "video_url": video_url,
         "error_msg": job.error_msg or "",
         "duration_sec": job.duration_sec,
-        "created_at": job.created_at.isoformat(),
-        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        "created_at": job.created_at.isoformat() + "Z",
+        "finished_at": (job.finished_at.isoformat() + "Z") if job.finished_at else None,
     }
 
 
@@ -344,7 +346,8 @@ def _run_generation(job_id: int, token: str):
         try:
             from huggingface_hub import InferenceClient
 
-            client = InferenceClient(token=token)
+            # provider="hf-inference": HF 자체 서버 강제 (FAL 등 외부 유료 제공자 라우팅 방지)
+            client = InferenceClient(token=token, provider="hf-inference")
             video_progress.notify_sync(job_id, 15, f"HF Inference API 연결 중: {job.model_id}")
 
             # 영상 생성
@@ -379,6 +382,11 @@ def _run_generation(job_id: int, token: str):
             # HF Inference API 주요 오류 안내
             if "503" in err or "loading" in err.lower():
                 err = f"모델 로딩 중 (콜드 스타트) — 잠시 후 재시도하세요. 원본: {err[:200]}"
+            elif "402" in err or "payment" in err.lower() or "credits" in err.lower():
+                err = (
+                    "HF Inference API가 이 모델을 유료 외부 제공자(FAL 등)로 라우팅했습니다 (402 Payment Required). "
+                    "JSON2Video(무료) 또는 FAL-AI(fal.ai 유료) 모델을 사용하세요."
+                )
             elif "401" in err or "authorization" in err.lower():
                 err = "HuggingFace 토큰 인증 실패 — 관리자 → 외부 API 키에서 토큰을 재등록하세요."
             elif "404" in err or "not found" in err.lower():
@@ -895,6 +903,60 @@ def delete_job(
     db.delete(job)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/jobs/{job_id}/retry")
+def retry_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """실패한 영상 잡 재시도 — 상태 초기화 후 백그라운드 재실행."""
+    job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job.status not in ("failed", "pending"):
+        raise HTTPException(400, f"재시도 불가 상태: {job.status} (실패 또는 대기 중 상태만 가능)")
+
+    job.status = "pending"
+    job.error_msg = ""
+    job.finished_at = None
+    db.commit()
+
+    started = _start_video_job(job.id, db)
+    if not started:
+        # _start_video_job 내부에서 이미 failed 처리됨
+        db.refresh(job)
+    return _format_job(job)
+
+
+@router.get("/models/status")
+def get_model_status(
+    model_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """HuggingFace 모델 inference 상태 확인 (warm / cold / loading / unavailable)."""
+    # fal-ai / json2video 모델은 HF 상태 체크 불필요
+    model_info = next((m for m in SUPPORTED_MODELS if m["id"] == model_id), None)
+    if not model_info or model_info.get("provider") != "hf-inference":
+        return {"model_id": model_id, "inference": None, "status": "n/a", "provider": model_info["provider"] if model_info else "unknown"}
+
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi()
+        info = api.model_info(model_id, timeout=10)
+        inference = getattr(info, "inference", None)
+        # inference 값: "warm" | "cold" | "loading" | None
+        if inference == "warm":
+            status = "warm"
+        elif inference in ("cold", "loading"):
+            status = inference
+        else:
+            status = "unavailable"
+        return {"model_id": model_id, "inference": inference, "status": status}
+    except Exception as e:
+        return {"model_id": model_id, "inference": None, "status": "error", "error": str(e)[:200]}
 
 
 @router.get("/file/{job_id}")

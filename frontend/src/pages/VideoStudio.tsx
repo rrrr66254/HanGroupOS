@@ -66,6 +66,7 @@ export default function VideoStudio() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const [wsProgress, setWsProgress] = useState<{ progress: number; message: string } | null>(null)
+  const [hfStatuses, setHfStatuses] = useState<Record<string, string>>({})
   const token = useAuthStore((s) => s.token)
 
   // 회사 ID → 이름 맵
@@ -73,7 +74,8 @@ export default function VideoStudio() {
   companies.forEach((c) => { companyMap[c.id] = c.name })
 
   const formatElapsed = (createdAt: string) => {
-    const elapsed = Math.floor((now - new Date(createdAt).getTime()) / 1000)
+    // createdAt is UTC (ends with Z) — compute elapsed from now
+    const elapsed = Math.max(0, Math.floor((now - new Date(createdAt).getTime()) / 1000))
     const m = Math.floor(elapsed / 60)
     const s = elapsed % 60
     return m > 0 ? `${m}분 ${s}초` : `${s}초`
@@ -95,6 +97,13 @@ export default function VideoStudio() {
       setModels(r.data)
       const rec = r.data.find((m: VideoModel) => m.recommended)
       if (rec) setSelectedModel(rec.id)
+      // HF 모델 상태 비동기 체크
+      const hfList: VideoModel[] = r.data.filter((m: VideoModel) => m.provider === 'hf-inference')
+      hfList.forEach((m: VideoModel) => {
+        videoApi.modelStatus(m.id)
+          .then((res) => setHfStatuses((prev) => ({ ...prev, [m.id]: res.data.status })))
+          .catch(() => {})
+      })
     })
     companiesApi.list().then((r) => setCompanies(r.data))
     loadJobs()
@@ -217,9 +226,11 @@ export default function VideoStudio() {
               )}
               {hfModels.length > 0 && (
                 <optgroup label="HuggingFace Inference">
-                  {hfModels.map((m) => (
-                    <option key={m.id} value={m.id}>{m.label}</option>
-                  ))}
+                  {hfModels.map((m) => {
+                    const st = hfStatuses[m.id]
+                    const badge = st === 'warm' ? ' ✅' : st === 'cold' ? ' ❄️' : st === 'loading' ? ' ⏳' : st === 'unavailable' ? ' ✗' : ''
+                    return <option key={m.id} value={m.id}>{badge}{m.label}</option>
+                  })}
                 </optgroup>
               )}
               {j2vModels.length > 0 && (
@@ -230,6 +241,23 @@ export default function VideoStudio() {
                 </optgroup>
               )}
             </select>
+
+            {/* HF 모델 상태 배지 */}
+            {selectedModelInfo?.provider === 'hf-inference' && (
+              (() => {
+                const st = hfStatuses[selectedModel]
+                if (!st) return <div className="flex items-center gap-1.5 text-[10px] text-slate-500"><Loader2 size={10} className="animate-spin" /> 모델 상태 확인 중...</div>
+                const cfg: Record<string, { cls: string; label: string }> = {
+                  warm: { cls: 'text-green-400 bg-green-500/10 border-green-500/20', label: '✅ Warm — 즉시 추론 가능' },
+                  cold: { cls: 'text-blue-400 bg-blue-500/10 border-blue-500/20', label: '❄️ Cold — 첫 요청 시 로딩 시간 있음' },
+                  loading: { cls: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20', label: '⏳ Loading — 현재 로딩 중' },
+                  unavailable: { cls: 'text-red-400 bg-red-500/10 border-red-500/20', label: '✗ Unavailable — HF Inference 미지원' },
+                  n_a: { cls: 'text-slate-500 bg-bg-base border-bg-border', label: '— 상태 정보 없음' },
+                }
+                const c = cfg[st] ?? cfg['n_a']
+                return <div className={`text-[10px] border rounded px-2 py-1 ${c.cls}`}>{c.label}</div>
+              })()
+            )}
 
             {error && (
               <div className="flex items-start gap-2 text-[11px] text-red-400 bg-red-500/10 rounded p-2">
