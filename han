@@ -1955,9 +1955,37 @@ PYEOF
 # ── han open ──────────────────────────────────────────────────────────────────
 cmd_open() {
   local URL="http://localhost:5173"
-  if command -v xdg-open &>/dev/null; then xdg-open "$URL"
-  elif command -v open &>/dev/null; then open "$URL"
-  else echo "브라우저에서 직접 접속하세요: $URL"
+
+  # WSL 환경 감지: /proc/version에 Microsoft 또는 WSL 문자열
+  local IS_WSL=false
+  if grep -qi "microsoft\|wsl" /proc/version 2>/dev/null; then
+    IS_WSL=true
+  fi
+
+  if [ "$IS_WSL" = true ]; then
+    # WSL: Windows 기본 브라우저로 열기
+    if command -v powershell.exe &>/dev/null; then
+      powershell.exe -NoProfile -Command "Start-Process '$URL'" &>/dev/null &
+      echo -e "  ${GREEN}✓ Windows 브라우저로 열기 요청됨${NC}: $URL"
+    elif command -v cmd.exe &>/dev/null; then
+      cmd.exe /c start "$URL" &>/dev/null &
+      echo -e "  ${GREEN}✓ Windows 브라우저로 열기 요청됨${NC}: $URL"
+    else
+      echo -e "  ${YELLOW}WSL 환경입니다. 브라우저에서 직접 접속하세요:${NC}"
+      echo -e "  ${BOLD}$URL${NC}"
+    fi
+  elif command -v open &>/dev/null; then
+    # macOS
+    open "$URL"
+    echo -e "  ${GREEN}✓ 브라우저 열림${NC}: $URL"
+  elif command -v xdg-open &>/dev/null && [ -n "$DISPLAY$WAYLAND_DISPLAY" ]; then
+    # Linux (데스크탑 환경 있을 때만)
+    xdg-open "$URL" &>/dev/null &
+    echo -e "  ${GREEN}✓ 브라우저 열림${NC}: $URL"
+  else
+    # 헤드리스 / 서버 환경
+    echo -e "  ${YELLOW}브라우저를 자동으로 열 수 없습니다.${NC}"
+    echo -e "  접속 주소: ${BOLD}$URL${NC}"
   fi
 }
 
