@@ -145,7 +145,25 @@ def _check_ollama():
         print(f"⚠️  Ollama 미연결 ({base_url}) — `ollama serve` 로 실행하세요.")
         return
 
-    # Step 2: Send a test prompt to verify the model actually responds
+    # Step 2: 설정된 모델이 실제 설치 목록에 있는지 먼저 확인
+    if not model:
+        print("⚠️  OLLAMA_MODEL 미설정 — .env 또는 han config set OLLAMA_MODEL=<모델명>")
+        return
+
+    model_base = model.split(":")[0]  # "qwen2.5:14b" → "qwen2.5"
+    exact_match = model in models
+    similar = [m for m in models if m.startswith(model_base)] if not exact_match else []
+
+    if not exact_match:
+        if similar:
+            print(f"⚠️  {model} 미설치 — 유사 모델: {', '.join(similar)}")
+            print(f"    수정: han config set OLLAMA_MODEL={similar[0]}")
+            print(f"    또는: ollama pull {model}")
+        else:
+            print(f"⚠️  {model} 미설치 — ollama pull {model}  또는  han config set OLLAMA_MODEL=<모델명>")
+        return
+
+    # Step 3: 설치된 모델로 실제 응답 테스트
     print(f"  → {model} 모델 응답 테스트 중...")
     try:
         r2 = httpx.post(
@@ -164,6 +182,11 @@ def _check_ollama():
             print(f"✓ {model} 모델 정상 응답 확인 — \"{reply[:40]}\"")
         else:
             print(f"⚠️  {model} 모델이 빈 응답을 반환했습니다. 모델 상태를 확인하세요.")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            print(f"⚠️  {model} 모델 없음 (404) — ollama pull {model}")
+        else:
+            print(f"⚠️  {model} 모델 테스트 실패 (HTTP {e.response.status_code}): {e}")
     except httpx.TimeoutException:
         print(f"⚠️  {model} 모델 응답 시간 초과 (60초) — 모델 로딩이 오래 걸리거나 문제가 있습니다.")
     except Exception as e:

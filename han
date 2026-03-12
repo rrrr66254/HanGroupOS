@@ -93,6 +93,7 @@ cmd_help() {
   echo -e "  ${GREEN}logs --follow${NC}             실시간 팔로우 (tail -f)"
   echo -e "  ${GREEN}logs backend${NC}              백엔드 로그만"
   echo -e "  ${GREEN}logs frontend${NC}             프론트엔드 로그만"
+  echo -e "  ${GREEN}logs --gpu${NC}                GPU 설치 로그 (han setup-gpu 진행 이력)"
   echo -e "  ${GREEN}init_check${NC}                환경 점검 (Python/Node/포트/설정)"
   echo -e "  ${GREEN}init_check --fix${NC}          환경 점검 + 자동 수정 (venv/pip/npm/.env)"
   echo -e "  ${GREEN}diff-env${NC}                  .env 와 기본 템플릿 비교 (누락/미설정/커스텀 키)"
@@ -889,10 +890,30 @@ cmd_logs() {
       --since)    SINCE="${2:-}";   shift 2 ;;
       --grep)     GREP_PATTERN="${2:-}"; shift 2 ;;
       --follow|-f) FOLLOW=true; shift ;;
+      --gpu)      TARGET="gpu"; shift ;;
       backend|frontend) TARGET="$1"; shift ;;
       *) shift ;;
     esac
   done
+
+  # --gpu: setup-gpu 로그 전용 출력
+  if [ "$TARGET" = "gpu" ]; then
+    local LOG_FILE="$HAN_RUN_DIR/gpu-setup.log"
+    if [ ! -f "$LOG_FILE" ]; then
+      echo -e "${YELLOW}GPU 설치 로그 없음. 'han setup-gpu' 실행 후 생성됩니다.${NC}"
+      return 0
+    fi
+    echo -e "${CYAN}[GPU 설치 로그] $LOG_FILE${NC}"
+    echo ""
+    if $FOLLOW; then
+      tail -f "$LOG_FILE"
+    elif [ -n "$GREP_PATTERN" ]; then
+      grep --color=auto -i "$GREP_PATTERN" "$LOG_FILE" || echo -e "${YELLOW}패턴 '$GREP_PATTERN' 없음${NC}"
+    else
+      tail -n "$LINES" "$LOG_FILE"
+    fi
+    return 0
+  fi
 
   # 로그 파일 목록 결정
   local FILES=()
@@ -1206,7 +1227,20 @@ PYEOF
   echo -e "  ${DIM}커밋: $new_commit${NC}"
   echo ""
 
-  if [ -t 0 ]; then
+  # ─ 백엔드 자동 재시작 ────────────────────────────────────────────────────
+  local backend_was_running=false
+  if is_running "$HAN_PID_BACKEND" || port_in_use 8000; then
+    backend_was_running=true
+  fi
+
+  if $backend_was_running; then
+    echo -e "  ${CYAN}▸ 백엔드 실행 중 감지 — 자동 재시작합니다...${NC}"
+    cmd_stop
+    sleep 1
+    cmd_start "--daemon"
+    echo ""
+    echo -e "  ${GREEN}✓ 서버 재시작 완료 (업데이트 적용됨)${NC}"
+  elif [ -t 0 ]; then
     read -r -p "  지금 바로 서버를 시작하시겠습니까? (Y/n) > " START_NOW
     START_NOW="${START_NOW:-Y}"
     if [[ "$START_NOW" =~ ^[Yy]$ ]]; then
@@ -2184,25 +2218,55 @@ cmd_open() {
 }
 
 # ── han setup-gpu ─────────────────────────────────────────────────────────────
+# 진행 상태 파일: ~/.han/gpu-setup-state  (완료된 단계 번호 저장)
+# 로그 파일    : ~/.han/gpu-setup.log
+GPU_SETUP_STATE="$HAN_RUN_DIR/gpu-setup-state"
+GPU_SETUP_LOG="$HAN_RUN_DIR/gpu-setup.log"
+
+_gpu_step_done()  { grep -qx "STEP$1" "$GPU_SETUP_STATE" 2>/dev/null; }
+_gpu_mark_done()  { echo "STEP$1" >> "$GPU_SETUP_STATE"; sort -u "$GPU_SETUP_STATE" -o "$GPU_SETUP_STATE"; }
+_gpu_log()        { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$GPU_SETUP_LOG"; }
+
 cmd_setup_gpu() {
+  local RESUME=false
+  for arg in "$@"; do
+    [[ "$arg" == "--resume" ]] && RESUME=true
+  done
+
+  # 로그 파일 초기화 (--resume 아닌 경우) 또는 이어쓰기
+  if ! $RESUME; then
+    > "$GPU_SETUP_LOG"
+    > "$GPU_SETUP_STATE"
+  fi
+
   echo ""
   echo -e "${BOLD}로컬 GPU 영상 생성 환경 구성${NC}"
   echo -e "${DIM}RTX 5070 Ti Laptop (Blackwell / CUDA 12.4+) 기준${NC}"
+  $RESUME && echo -e "  ${CYAN}--resume 모드: 완료된 단계 건너뜀${NC}"
+  echo -e "  ${DIM}로그: $GPU_SETUP_LOG${NC}"
   echo ""
 
   # ── 1. NVIDIA GPU 감지 ───────────────────────────────────────────────────
-  echo -e "${CYAN}[1/5] NVIDIA GPU 감지${NC}"
-  if ! command -v nvidia-smi &>/dev/null; then
-    echo -e "  ${RED}✗ nvidia-smi를 찾을 수 없습니다.${NC}"
-    echo "    NVIDIA 드라이버를 먼저 설치하세요:"
-    echo "    https://www.nvidia.com/Download/index.aspx"
-    exit 1
+  if _gpu_step_done 1; then
+    echo -e "${DIM}[1/6] NVIDIA GPU 감지 — ✓ 이미 완료 (건너뜀)${NC}"
+  else
+    echo -e "${CYAN}[1/6] NVIDIA GPU 감지${NC}"
+    _gpu_log "[1/6] NVIDIA GPU 감지 시작"
+    if ! command -v nvidia-smi &>/dev/null; then
+      echo -e "  ${RED}✗ nvidia-smi를 찾을 수 없습니다.${NC}"
+      echo "    NVIDIA 드라이버를 먼저 설치하세요:"
+      echo "    https://www.nvidia.com/Download/index.aspx"
+      _gpu_log "FAIL: nvidia-smi 없음"
+      exit 1
+    fi
+    _gpu_mark_done 1
   fi
   local GPU_NAME; GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
   local VRAM_MB; VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
   local VRAM_GB=$(( (VRAM_MB + 512) / 1024 ))
   local DRIVER_VER; DRIVER_VER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)
   echo -e "  ${GREEN}✓ GPU: $GPU_NAME  |  VRAM: ${VRAM_GB}GB  |  드라이버: $DRIVER_VER${NC}"
+  _gpu_log "GPU: $GPU_NAME | VRAM: ${VRAM_GB}GB | Driver: $DRIVER_VER"
 
   if [ "$VRAM_GB" -lt 6 ]; then
     echo -e "  ${RED}✗ VRAM이 6GB 미만입니다. 로컬 영상 생성은 최소 6GB가 필요합니다.${NC}"
@@ -2210,71 +2274,104 @@ cmd_setup_gpu() {
   fi
 
   # ── 2. CUDA 버전 확인 ────────────────────────────────────────────────────
-  echo -e "${CYAN}[2/5] CUDA 버전 확인${NC}"
-  local CUDA_VER; CUDA_VER=$(nvidia-smi | grep -oP 'CUDA Version: \K[\d.]+' 2>/dev/null || echo "미확인")
-  echo -e "  CUDA: $CUDA_VER"
-  local CUDA_MAJOR; CUDA_MAJOR=$(echo "$CUDA_VER" | cut -d. -f1)
-  if [ "${CUDA_MAJOR:-0}" -lt 12 ]; then
-    echo -e "  ${YELLOW}⚠ CUDA 12.4+ 권장. RTX 5070 Ti는 CUDA 12.4 이상이 필요합니다.${NC}"
-    echo "    최신 드라이버: https://www.nvidia.com/Download/index.aspx"
+  if _gpu_step_done 2; then
+    echo -e "${DIM}[2/6] CUDA 버전 확인 — ✓ 이미 완료 (건너뜀)${NC}"
   else
-    echo -e "  ${GREEN}✓ CUDA $CUDA_VER 확인됨${NC}"
+    echo -e "${CYAN}[2/6] CUDA 버전 확인${NC}"
+    local CUDA_VER; CUDA_VER=$(nvidia-smi | grep -oP 'CUDA Version: \K[\d.]+' 2>/dev/null || echo "미확인")
+    echo -e "  CUDA: $CUDA_VER"
+    local CUDA_MAJOR; CUDA_MAJOR=$(echo "$CUDA_VER" | cut -d. -f1)
+    if [ "${CUDA_MAJOR:-0}" -lt 12 ]; then
+      echo -e "  ${YELLOW}⚠ CUDA 12.4+ 권장. RTX 5070 Ti는 CUDA 12.4 이상이 필요합니다.${NC}"
+      echo "    최신 드라이버: https://www.nvidia.com/Download/index.aspx"
+    else
+      echo -e "  ${GREEN}✓ CUDA $CUDA_VER 확인됨${NC}"
+    fi
+    _gpu_log "CUDA: $CUDA_VER"
+    _gpu_mark_done 2
   fi
 
   # ── 3. Python venv 활성화 ────────────────────────────────────────────────
-  echo -e "${CYAN}[3/5] Python 가상환경 확인${NC}"
-  cd "$HAN_DIR/backend"
-  if [ ! -d "venv" ]; then
-    python3 -m venv venv
-    echo -e "  ${GREEN}✓ venv 생성됨${NC}"
+  if _gpu_step_done 3; then
+    echo -e "${DIM}[3/6] Python 가상환경 — ✓ 이미 완료 (건너뜀)${NC}"
+  else
+    echo -e "${CYAN}[3/6] Python 가상환경 확인${NC}"
+    cd "$HAN_DIR/backend"
+    if [ ! -d "venv" ]; then
+      python3 -m venv venv
+      echo -e "  ${GREEN}✓ venv 생성됨${NC}"
+    fi
+    _gpu_log "[3/6] venv 준비 완료"
+    _gpu_mark_done 3
   fi
+  cd "$HAN_DIR/backend"
   source venv/bin/activate
   echo -e "  ${GREEN}✓ venv 활성화됨${NC}"
 
   # ── 4. PyTorch (CUDA) 설치 ───────────────────────────────────────────────
-  echo -e "${CYAN}[4/5] PyTorch + CUDA 설치 (Blackwell 지원 torch 2.6+)${NC}"
-  if python -c "import torch; assert torch.cuda.is_available()" &>/dev/null 2>&1; then
-    local TORCH_VER; TORCH_VER=$(python -c "import torch; print(torch.__version__)" 2>/dev/null)
-    echo -e "  ${GREEN}✓ PyTorch $TORCH_VER (CUDA 활성화됨) — 이미 설치됨${NC}"
+  if _gpu_step_done 4; then
+    local TORCH_VER; TORCH_VER=$(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "?")
+    echo -e "${DIM}[4/6] PyTorch 설치 — ✓ 이미 완료 ($TORCH_VER, 건너뜀)${NC}"
   else
-    echo -e "  ${CYAN}▸ PyTorch 2.6+ (CUDA 12.4) 다운로드 및 설치 중...${NC}"
-    echo -e "  ${DIM}  (패키지 크기: ~2.5GB, 네트워크 속도에 따라 수 분 소요)${NC}"
-    echo ""
-    pip install \
-      "torch>=2.6.0" torchvision torchaudio \
-      --index-url https://download.pytorch.org/whl/cu124
-    echo ""
+    echo -e "${CYAN}[4/6] PyTorch + CUDA 설치 (Blackwell 지원 torch 2.6+)${NC}"
     if python -c "import torch; assert torch.cuda.is_available()" &>/dev/null 2>&1; then
       local TORCH_VER; TORCH_VER=$(python -c "import torch; print(torch.__version__)" 2>/dev/null)
-      local CUDA_TORCH; CUDA_TORCH=$(python -c "import torch; print(torch.version.cuda)" 2>/dev/null)
-      echo -e "  ${GREEN}✓ PyTorch $TORCH_VER (CUDA $CUDA_TORCH) 설치 완료${NC}"
+      echo -e "  ${GREEN}✓ PyTorch $TORCH_VER (CUDA 활성화됨) — 이미 설치됨${NC}"
     else
-      echo -e "  ${RED}✗ PyTorch CUDA 활성화 실패. 드라이버/CUDA 버전을 확인하세요.${NC}"
-      exit 1
+      echo -e "  ${CYAN}▸ PyTorch 2.6+ (CUDA 12.4) 다운로드 및 설치 중...${NC}"
+      echo -e "  ${DIM}  (패키지 크기: ~2.5GB, 네트워크 속도에 따라 수 분 소요)${NC}"
+      echo ""
+      _gpu_log "[4/6] torch 다운로드 시작 ($(date))"
+      pip install \
+        "torch>=2.6.0" torchvision torchaudio \
+        --index-url https://download.pytorch.org/whl/cu124 2>&1 | tee -a "$GPU_SETUP_LOG"
+      echo ""
+      if python -c "import torch; assert torch.cuda.is_available()" &>/dev/null 2>&1; then
+        local TORCH_VER; TORCH_VER=$(python -c "import torch; print(torch.__version__)" 2>/dev/null)
+        local CUDA_TORCH; CUDA_TORCH=$(python -c "import torch; print(torch.version.cuda)" 2>/dev/null)
+        echo -e "  ${GREEN}✓ PyTorch $TORCH_VER (CUDA $CUDA_TORCH) 설치 완료${NC}"
+        _gpu_log "[4/6] torch $TORCH_VER CUDA $CUDA_TORCH 설치 완료"
+      else
+        echo -e "  ${RED}✗ PyTorch CUDA 활성화 실패. 드라이버/CUDA 버전을 확인하세요.${NC}"
+        echo -e "  ${DIM}  로그: $GPU_SETUP_LOG${NC}"
+        echo -e "  ${DIM}  재시도: han setup-gpu --resume${NC}"
+        _gpu_log "FAIL: torch CUDA 활성화 실패"
+        exit 1
+      fi
     fi
+    _gpu_mark_done 4
   fi
 
   # ── 5. diffusers + 의존성 설치 ───────────────────────────────────────────
-  echo -e "${CYAN}[5/6] diffusers + 영상 생성 패키지 설치${NC}"
-  local GPU_REQ="$HAN_DIR/backend/requirements-gpu.txt"
-  if [ -f "$GPU_REQ" ]; then
-    echo -e "  ${CYAN}▸ requirements-gpu.txt 기반 설치 중...${NC}"
-    echo ""
-    pip install -r "$GPU_REQ"
+  if _gpu_step_done 5; then
+    echo -e "${DIM}[5/6] diffusers 설치 — ✓ 이미 완료 (건너뜀)${NC}"
   else
-    echo -e "  ${CYAN}▸ diffusers 패키지 설치 중...${NC}"
+    echo -e "${CYAN}[5/6] diffusers + 영상 생성 패키지 설치${NC}"
+    local GPU_REQ="$HAN_DIR/backend/requirements-gpu.txt"
+    if [ -f "$GPU_REQ" ]; then
+      echo -e "  ${CYAN}▸ requirements-gpu.txt 기반 설치 중...${NC}"
+      echo ""
+      _gpu_log "[5/6] diffusers 설치 시작 (requirements-gpu.txt)"
+      pip install -r "$GPU_REQ" 2>&1 | tee -a "$GPU_SETUP_LOG"
+    else
+      echo -e "  ${CYAN}▸ diffusers 패키지 설치 중...${NC}"
+      echo ""
+      _gpu_log "[5/6] diffusers 직접 설치 시작"
+      pip install \
+        "diffusers>=0.33.0" \
+        transformers accelerate \
+        "imageio[ffmpeg]" imageio-ffmpeg \
+        sentencepiece protobuf 2>&1 | tee -a "$GPU_SETUP_LOG"
+    fi
     echo ""
-    pip install \
-      "diffusers>=0.33.0" \
-      transformers accelerate \
-      "imageio[ffmpeg]" imageio-ffmpeg \
-      sentencepiece protobuf
+    echo -e "  ${GREEN}✓ diffusers 설치 완료${NC}"
+    _gpu_log "[5/6] diffusers 설치 완료"
+    _gpu_mark_done 5
   fi
-  echo ""
-  echo -e "  ${GREEN}✓ diffusers 설치 완료${NC}"
 
   # ── 6. Ollama 설치 + VRAM 최적 LLM 모델 선택 ────────────────────────────
   echo -e "${CYAN}[6/6] Ollama + 로컬 LLM 자동 설정 (VRAM ${VRAM_GB}GB 기준)${NC}"
+  _gpu_log "[6/6] Ollama 설정 시작"
 
   # VRAM에 따른 최적 모델 선택
   if [ "$VRAM_GB" -ge 16 ]; then
@@ -2345,6 +2442,8 @@ cmd_setup_gpu() {
       "$RECOMMENDED_LLM" > "$ENV_FILE"
   fi
   echo -e "  ${GREEN}✓ 설정 저장: DEFAULT_PROVIDER=ollama / OLLAMA_MODEL=$RECOMMENDED_LLM${NC}"
+  _gpu_log "[6/6] Ollama 설정 완료: $RECOMMENDED_LLM"
+  _gpu_mark_done 6
 
   # ── GPU 정보 요약 + 사용 가능 모델 안내 ─────────────────────────────────
   echo ""
@@ -2375,6 +2474,10 @@ cmd_setup_gpu() {
   echo -e "  ${DIM}  LTX-Video  : ~6GB  |  Wan-1.3B : ~3GB  |  CogVideoX-2B : ~8GB${NC}"
   echo -e "  ${DIM}영상 스튜디오에서 'Local GPU' 모델을 선택하세요.${NC}"
   echo ""
+  echo -e "  ${DIM}설치 로그: $GPU_SETUP_LOG${NC}"
+  echo -e "  ${DIM}로그 확인: han logs --gpu${NC}"
+  _gpu_log "=== setup-gpu 완료 $(date) ==="
+  echo ""
 }
 
 # ── 명령 라우팅 ───────────────────────────────────────────────────────────────
@@ -2398,7 +2501,7 @@ case "$COMMAND" in
   path-fix)             cmd_path_fix "$@" ;;
   self-update)          cmd_self_update ;;
   open)                 cmd_open ;;
-  setup-gpu)            cmd_setup_gpu ;;
+  setup-gpu)            cmd_setup_gpu "$@" ;;
   --version|-v)         cmd_version ;;
   help|--help|-h)       cmd_help ;;
   *)
