@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe, FlaskConical, Loader2, Webhook, Copy, HardDrive, Download, Star, Zap, XCircle } from 'lucide-react'
+import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe, FlaskConical, Loader2, Webhook, Copy, HardDrive, Download, Star, Zap, XCircle, Terminal } from 'lucide-react'
 import { modelsApi, externalKeyApi, webhooksApi, videoApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
 import type { ModelCatalog, ProviderConfig } from '../types'
@@ -48,7 +48,7 @@ export default function Admin() {
   const [catalog, setCatalog] = useState<ModelCatalog[]>([])
   const [providers, setProviders] = useState<ProviderConfig[]>([])
   const [health, setHealth] = useState<Record<string, { status: string; model: string }>>({})
-  const [tab, setTab] = useState<'providers' | 'catalog' | 'external-keys' | 'webhooks' | 'ollama' | 'system'>('providers')
+  const [tab, setTab] = useState<'providers' | 'catalog' | 'external-keys' | 'webhooks' | 'ollama' | 'gpu-log' | 'system'>('providers')
 
   const [newProvider, setNewProvider] = useState({
     provider: 'anthropic', api_key: '', model_override: '', base_url: '',
@@ -77,9 +77,14 @@ export default function Admin() {
   const [ollamaMsg, setOllamaMsg] = useState('')
   const [deletingModel, setDeletingModel] = useState<string | null>(null)
   const [settingDefault, setSettingDefault] = useState<string | null>(null)
-  // Pull WebSocket 상태
-  const [pullProgress, setPullProgress] = useState<{ pct: number; status: string; active: boolean } | null>(null)
+  // Pull WebSocket 상태 (model별 관리 + 페이지 재진입 복원)
+  const [pullProgress, setPullProgress] = useState<{ pct: number; status: string; active: boolean; queued?: boolean } | null>(null)
+  const [pullModel, setPullModel] = useState<string>('')  // 현재 pull 중인 모델명
   const pullWsRef = useRef<WebSocket | null>(null)
+  // GPU 설치 로그 탭
+  const [gpuLog, setGpuLog] = useState<string>('')
+  const gpuLogWsRef = useRef<WebSocket | null>(null)
+  const gpuLogEndRef = useRef<HTMLDivElement | null>(null)
 
   const loadOllama = () => {
     setOllamaLoading(true)
@@ -116,22 +121,16 @@ export default function Admin() {
     }
   }
 
-  const handleOllamaPull = () => {
-    const name = ollamaPullName.trim()
-    if (!name) return
+  // WebSocket 구독 함수 (handleOllamaPull + 재연결 공통)
+  const _connectPullWs = (name: string) => {
     if (pullWsRef.current) { pullWsRef.current.close(); pullWsRef.current = null }
-
-    setPullProgress({ pct: 0, status: '연결 중...', active: true })
-    setOllamaPullName('')
-    setOllamaMsg('')
-
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${proto}//${window.location.host}/api/video/ws/ollama-pull?model=${encodeURIComponent(name)}&token=${token}`)
     pullWsRef.current = ws
-
     ws.onmessage = (e) => {
       try {
         const d = JSON.parse(e.data)
+        if (d.type === 'ping') return
         if (d.type === 'done') {
           setPullProgress({ pct: 100, status: '다운로드 완료!', active: false })
           setOllamaMsg(`✓ "${name}" 다운로드 완료`)
@@ -139,22 +138,35 @@ export default function Admin() {
         } else if (d.type === 'error') {
           setPullProgress(null)
           setOllamaMsg(`✗ ${d.status}`)
+        } else if (d.type === 'queued') {
+          setPullProgress({ pct: 0, status: d.status ?? '대기 중...', active: true, queued: true })
         } else {
           setPullProgress({ pct: d.pct ?? 0, status: d.status ?? '다운로드 중...', active: true })
         }
       } catch { /* ignore */ }
     }
-    ws.onerror = () => {
-      setPullProgress(null)
-      setOllamaMsg('✗ WebSocket 연결 실패')
-    }
+    ws.onerror = () => { setPullProgress(null); setOllamaMsg('✗ WebSocket 연결 실패') }
     ws.onclose = () => { pullWsRef.current = null }
+  }
+
+  const handleOllamaPull = async () => {
+    const name = ollamaPullName.trim()
+    if (!name) return
+    setOllamaPullName('')
+    setOllamaMsg('')
+    setPullProgress({ pct: 0, status: '요청 중...', active: true })
+    setPullModel(name)
+    try {
+      await videoApi.ollamaPull(name)
+    } catch { /* 이미 진행 중이어도 WS는 연결 */ }
+    _connectPullWs(name)
   }
 
   const handleCancelPull = () => {
     pullWsRef.current?.close()
     pullWsRef.current = null
     setPullProgress(null)
+    setPullModel('')
     setOllamaMsg('다운로드가 취소되었습니다.')
   }
 
@@ -193,8 +205,49 @@ export default function Admin() {
 
   const loadExtKeys = () => externalKeyApi.list().then((r) => setExtKeys(r.data))
 
-  useEffect(() => { loadAll(); loadExtKeys(); loadWebhookTokens() }, [])
+  // 마운트 시 진행 중인 pull 상태 복원
+  useEffect(() => {
+    loadAll(); loadExtKeys(); loadWebhookTokens()
+    videoApi.ollamaPullStatus().then((r) => {
+      const pulls: Record<string, { type: string; pct: number; status: string }> = r.data.pulls ?? {}
+      const active = Object.entries(pulls).find(([, v]) => v.type !== 'done' && v.type !== 'error')
+      if (active) {
+        const [name, state] = active
+        setPullModel(name)
+        setPullProgress({ pct: state.pct ?? 0, status: state.status ?? '다운로드 중...', active: true, queued: state.type === 'queued' })
+        _connectPullWs(name)
+      }
+    }).catch(() => {})
+  }, [])
+
   useEffect(() => { if (tab === 'ollama') loadOllama() }, [tab])
+
+  // GPU 설치 로그 탭 WebSocket
+  useEffect(() => {
+    if (tab !== 'gpu-log') {
+      gpuLogWsRef.current?.close()
+      gpuLogWsRef.current = null
+      return
+    }
+    setGpuLog('')
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(`${proto}//${window.location.host}/api/video/ws/gpu-setup-log?token=${token}`)
+    gpuLogWsRef.current = ws
+    ws.onmessage = (e) => {
+      try {
+        const d = JSON.parse(e.data)
+        if (d.type === 'history') { setGpuLog(d.content ?? '') }
+        else if (d.type === 'append') { setGpuLog((prev) => prev + d.content) }
+      } catch { /* ignore */ }
+    }
+    ws.onclose = () => { gpuLogWsRef.current = null }
+    return () => { ws.close() }
+  }, [tab])
+
+  // GPU 로그 자동 스크롤
+  useEffect(() => {
+    gpuLogEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [gpuLog])
 
   const saveProvider = async () => {
     await modelsApi.saveProvider(newProvider)
@@ -249,6 +302,7 @@ export default function Admin() {
           { id: 'external-keys', label: '외부 API 키' },
           { id: 'webhooks', label: '웹훅 토큰' },
           { id: 'ollama', label: 'Ollama 모델' },
+          { id: 'gpu-log', label: 'GPU 설치 로그' },
           { id: 'system', label: '시스템 정보' },
         ].map((t) => (
           <button
@@ -841,8 +895,15 @@ export default function Admin() {
             {/* Pull 진행률 바 */}
             {pullProgress && (
               <div className="mb-3 space-y-1.5">
+                {pullModel && (
+                  <div className="text-[10px] text-slate-500 font-mono truncate">
+                    {pullProgress.active ? '⬇' : '✓'} {pullModel}
+                  </div>
+                )}
                 <div className="flex justify-between text-[10px]">
-                  <span className="text-slate-400 truncate max-w-[200px]">{pullProgress.status}</span>
+                  <span className={`truncate max-w-[220px] ${pullProgress.queued ? 'text-yellow-400' : 'text-slate-400'}`}>
+                    {pullProgress.queued && '⏳ '}{pullProgress.status}
+                  </span>
                   <span className={pullProgress.pct >= 100 ? 'text-emerald-400 font-semibold' : 'text-slate-400'}>
                     {pullProgress.pct.toFixed(1)}%
                   </span>
@@ -850,7 +911,8 @@ export default function Admin() {
                 <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-300 ${
-                      pullProgress.pct >= 100 ? 'bg-emerald-500' : 'bg-brand'
+                      pullProgress.pct >= 100 ? 'bg-emerald-500' :
+                      pullProgress.queued ? 'bg-yellow-500' : 'bg-brand'
                     } ${pullProgress.active && pullProgress.pct < 5 ? 'animate-pulse' : ''}`}
                     style={{ width: `${Math.max(pullProgress.pct, 1)}%` }}
                   />
@@ -883,6 +945,45 @@ export default function Admin() {
                     </button>
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GPU 설치 로그 탭 */}
+      {tab === 'gpu-log' && (
+        <div className="space-y-4">
+          <div className="card p-4">
+            <h3 className="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-2">
+              <Terminal size={13} /> GPU 설치 로그 (han setup-gpu)
+            </h3>
+            <p className="text-[10px] text-slate-500 mb-3">
+              <code className="bg-bg-elevated px-1.5 py-0.5 rounded text-slate-300">han setup-gpu</code>를 실행하면 여기서 실시간으로 진행 상황을 확인할 수 있습니다.
+              페이지를 닫아도 설치는 계속 진행되며, 돌아오면 로그가 이어서 표시됩니다.
+            </p>
+            <div className="relative">
+              <pre className="bg-bg-base border border-bg-border rounded-lg p-3 text-[10px] font-mono text-slate-300 overflow-auto max-h-[480px] whitespace-pre-wrap leading-relaxed">
+                {gpuLog || <span className="text-slate-600">로그 없음 — 터미널에서 han setup-gpu 를 실행하세요.</span>}
+                <div ref={gpuLogEndRef} />
+              </pre>
+              {gpuLogWsRef.current && (
+                <div className="absolute top-2 right-2 flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/30 rounded px-2 py-0.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-[9px] text-emerald-400">실시간</span>
+                </div>
+              )}
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => setGpuLog('')}
+                className="text-[10px] px-2 py-1 rounded border border-slate-700 hover:border-slate-600 text-slate-500 hover:text-slate-300 transition-colors"
+              >
+                화면 지우기
+              </button>
+              <div className="text-[10px] text-slate-600 flex items-center">
+                재시작: <code className="ml-1 bg-bg-elevated px-1.5 py-0.5 rounded text-slate-400">han setup-gpu --resume</code>
+                &nbsp;|&nbsp;초기화: <code className="ml-1 bg-bg-elevated px-1.5 py-0.5 rounded text-slate-400">han setup-gpu --clean</code>
               </div>
             </div>
           </div>

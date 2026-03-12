@@ -12,12 +12,97 @@ from datetime import datetime
 from pathlib import Path
 import os
 
-# ── GPU 전용 직렬 잠금 ─────────────────────────────────────────────────────────
-# LLM(Ollama)과 영상 생성(diffusers)이 동시에 VRAM을 점유하는 것을 방지.
-# local-gpu 영상 생성은 이 Lock을 획득한 후에만 실행됩니다.
-_GPU_LOCK = threading.Lock()
-_GPU_JOB_QUEUE: list = []   # 대기 중인 job_id 목록 (UI 표시용)
-_GPU_LOCK_MUTEX = threading.Lock()  # _GPU_JOB_QUEUE 보호용
+# ── 공유 리소스 잠금 ──────────────────────────────────────────────────────────
+# 영상 생성(diffusers)과 Ollama pull이 동시에 실행되지 않도록 직렬화합니다.
+# - 영상 생성: _GPU_LOCK 획득 후 실행
+# - Ollama pull: _GPU_LOCK 획득 후 다운로드 (동시 VRAM/대역폭 충돌 방지)
+_GPU_LOCK = threading.Lock()          # 공유 리소스 잠금 (video gen + pull 직렬화)
+_GPU_JOB_QUEUE: list = []            # 대기 중인 video job_id 목록 (UI 표시용)
+_GPU_LOCK_MUTEX = threading.Lock()   # _GPU_JOB_QUEUE 보호용
+
+# ── Ollama Pull 큐 + 진행 상태 ────────────────────────────────────────────────
+# 페이지 이동 후 재접속해도 진행률 복원 가능하도록 서버 상태 유지
+_PULL_QUEUE_LIST: List[str] = []          # 다운로드 대기 중인 모델 이름 목록
+_PULL_QUEUE_MUTEX = threading.Lock()      # _PULL_QUEUE_LIST 보호용
+_PULL_PROGRESS: Dict[str, dict] = {}     # model → 최신 progress dict (WS 재연결 시 즉시 전송)
+_PULL_SUBSCRIBERS: Dict[str, list] = {}  # model → [asyncio.Queue, ...] (WS 브로드캐스트)
+_PULL_EVENT_LOOP = None                  # pull 워커 스레드에서 asyncio 전송용
+
+
+def _broadcast_pull(model: str, data: dict) -> None:
+    """Pull 진행 상태를 _PULL_PROGRESS에 저장하고 모든 WS 구독자에게 전송."""
+    _PULL_PROGRESS[model] = data
+    loop = _PULL_EVENT_LOOP
+    if not loop or loop.is_closed():
+        return
+    for q in list(_PULL_SUBSCRIBERS.get(model, [])):
+        try:
+            asyncio.run_coroutine_threadsafe(q.put(data), loop)
+        except Exception:
+            pass
+
+
+def _pull_worker(model: str) -> None:
+    """백그라운드 스레드: _GPU_LOCK을 획득한 후 Ollama pull 실행."""
+    import httpx as _httpx, json as _json
+
+    # 큐에 추가 & 대기 상태 브로드캐스트
+    with _PULL_QUEUE_MUTEX:
+        _PULL_QUEUE_LIST.append(model)
+
+    queue_pos = _PULL_QUEUE_LIST.index(model)
+    if queue_pos > 0:
+        _broadcast_pull(model, {
+            "type": "queued",
+            "status": f"대기 중... (앞에 {queue_pos}개 작업 진행 중)",
+            "pct": 0,
+            "queue_pos": queue_pos,
+        })
+
+    # 앞선 작업(영상 생성 or 다른 pull)이 끝날 때까지 블로킹
+    _GPU_LOCK.acquire()
+    with _PULL_QUEUE_MUTEX:
+        if model in _PULL_QUEUE_LIST:
+            _PULL_QUEUE_LIST.remove(model)
+
+    try:
+        _broadcast_pull(model, {"type": "progress", "status": "다운로드 준비 중...", "pct": 0})
+        with _httpx.stream(
+            "POST",
+            "http://localhost:11434/api/pull",
+            json={"name": model, "stream": True},
+            timeout=None,
+        ) as resp:
+            if resp.status_code != 200:
+                _broadcast_pull(model, {"type": "error", "status": f"Ollama 오류: {resp.status_code}"})
+                return
+            for line in resp.iter_lines():
+                if not line.strip():
+                    continue
+                try:
+                    data = _json.loads(line)
+                except Exception:
+                    continue
+                status_str = data.get("status", "")
+                completed = data.get("completed", 0)
+                total = data.get("total", 0)
+                pct = round(completed / total * 100, 1) if total > 0 else 0
+                msg: dict = {
+                    "type": "progress",
+                    "status": status_str,
+                    "pct": pct,
+                    "completed": completed,
+                    "total": total,
+                }
+                if status_str == "success":
+                    msg["type"] = "done"
+                    _broadcast_pull(model, msg)
+                    return
+                _broadcast_pull(model, msg)
+    except Exception as e:
+        _broadcast_pull(model, {"type": "error", "status": str(e)[:200]})
+    finally:
+        _GPU_LOCK.release()  # 다음 작업 허용
 
 
 def _ollama_unload(base_url: str = "http://localhost:11434") -> None:
@@ -1079,19 +1164,50 @@ def ollama_delete_model(model_name: str, current_user: User = Depends(get_curren
 
 @router.post("/ollama/models/pull")
 def ollama_pull_model(body: dict, current_user: User = Depends(get_current_user)):
-    """Ollama 모델 다운로드 — WebSocket /ws/ollama-pull 로 진행률 스트리밍."""
+    """Ollama 모델 다운로드 요청.
+    - GPU 작업(영상 생성)이 실행 중이면 큐에 추가하고 대기
+    - 이미 같은 모델 pull 중이면 현재 상태 반환 (중복 방지)
+    - WebSocket /ws/ollama-pull?model=<name> 으로 진행률 구독
+    """
     model_name = body.get("name", "").strip()
     if not model_name:
         raise HTTPException(400, "모델 이름 필수")
-    return {"ok": True, "pulling": model_name, "ws": "/api/video/ws/ollama-pull"}
+
+    # 이미 pull 중이면 재시작 없이 현재 상태 반환
+    existing = _PULL_PROGRESS.get(model_name, {})
+    if existing.get("type") not in (None, "done", "error"):
+        return {
+            "ok": True,
+            "pulling": model_name,
+            "ws": "/api/video/ws/ollama-pull",
+            "status": "already_running",
+            "pct": existing.get("pct", 0),
+        }
+
+    # 이전 완료 상태 초기화 후 워커 스레드 시작
+    _PULL_PROGRESS.pop(model_name, None)
+    t = threading.Thread(target=_pull_worker, args=(model_name,), daemon=True)
+    t.start()
+    return {"ok": True, "pulling": model_name, "ws": "/api/video/ws/ollama-pull", "status": "started"}
+
+
+@router.get("/ollama/pull-status")
+def get_pull_status(current_user: User = Depends(get_current_user)):
+    """현재 진행 중 / 완료된 모든 pull 상태 반환 (페이지 재진입 시 복원용)."""
+    return {
+        "pulls": _PULL_PROGRESS,
+        "queue": _PULL_QUEUE_LIST[:],
+    }
 
 
 @router.websocket("/ws/ollama-pull")
 async def ws_ollama_pull(websocket: WebSocket, model: str = Query(""), token: str = Query("")):
-    """Ollama pull 진행률 실시간 스트리밍 WebSocket.
-    쿼리: ?model=gemma3:27b&token=<JWT>
-    메시지 형식: {type: "progress"|"done"|"error", status, pct, speed_mbs}
+    """Ollama pull 진행률 WebSocket 구독.
+    - pull은 POST /ollama/models/pull 로 시작, 이 WS는 진행률만 수신
+    - 페이지 재진입 시 재연결하면 현재 상태를 즉시 수신 (진행률 복원)
+    - 여러 클라이언트가 동시에 구독 가능
     """
+    global _PULL_EVENT_LOOP
     payload = decode_token(token) if token else None
     if not payload:
         await websocket.close(code=4001)
@@ -1100,52 +1216,41 @@ async def ws_ollama_pull(websocket: WebSocket, model: str = Query(""), token: st
         await websocket.close(code=4003)
         return
 
+    # 이벤트 루프 캡처 (pull 워커 스레드에서 브로드캐스트 시 사용)
+    _PULL_EVENT_LOOP = asyncio.get_running_loop()
     await websocket.accept()
+
+    q: asyncio.Queue = asyncio.Queue()
+    _PULL_SUBSCRIBERS.setdefault(model, []).append(q)
+
     try:
-        import httpx, json as _json
+        # 재연결 시: 현재 상태 즉시 전송
+        current = _PULL_PROGRESS.get(model)
+        if current:
+            await websocket.send_json(current)
+            if current.get("type") in ("done", "error"):
+                return  # 이미 완료 — 구독 불필요
 
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream(
-                "POST",
-                "http://localhost:11434/api/pull",
-                json={"name": model, "stream": True},
-            ) as response:
-                if response.status_code != 200:
-                    await websocket.send_json({"type": "error", "status": f"Ollama 오류: {response.status_code}"})
-                    return
-
-                async for line in response.aiter_lines():
-                    if not line.strip():
-                        continue
-                    try:
-                        data = _json.loads(line)
-                    except Exception:
-                        continue
-
-                    status = data.get("status", "")
-                    completed = data.get("completed", 0)
-                    total = data.get("total", 0)
-                    pct = round(completed / total * 100, 1) if total > 0 else 0
-                    # 속도 계산 (bytes/s → MB/s)
-                    speed = 0.0
-                    if data.get("digest"):
-                        speed = round(completed / max(total, 1) * 100, 1)
-
-                    msg = {"type": "progress", "status": status, "pct": pct,
-                           "completed": completed, "total": total}
-                    if status == "success":
-                        msg["type"] = "done"
-                        await websocket.send_json(msg)
-                        break
-                    await websocket.send_json(msg)
-
+        # 실시간 업데이트 수신 루프
+        while True:
+            try:
+                data = await asyncio.wait_for(q.get(), timeout=30.0)
+                await websocket.send_json(data)
+                if data.get("type") in ("done", "error"):
+                    break
+            except asyncio.TimeoutError:
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break
     except WebSocketDisconnect:
         pass
-    except Exception as e:
-        try:
-            await websocket.send_json({"type": "error", "status": str(e)[:200]})
-        except Exception:
-            pass
+    except Exception:
+        pass
+    finally:
+        subs = _PULL_SUBSCRIBERS.get(model, [])
+        if q in subs:
+            subs.remove(q)
 
 
 @router.post("/ollama/default")
@@ -1218,6 +1323,50 @@ def ai_fallback_log(limit: int = 20):
     """최근 AI Provider 폴백 이벤트 로그 (인메모리)."""
     from services.ai_provider import _FALLBACK_LOG
     return list(reversed(_FALLBACK_LOG[-limit:]))
+
+
+@router.websocket("/ws/gpu-setup-log")
+async def ws_gpu_setup_log(websocket: WebSocket, token: str = Query("")):
+    """han setup-gpu 로그 파일 실시간 스트리밍 WebSocket.
+    - 기존 로그를 먼저 전송, 이후 추가되는 줄을 0.5초 폴링으로 스트리밍
+    - 메시지 형식: {type: "history"|"append"|"ping", content: string}
+    """
+    payload = decode_token(token) if token else None
+    if not payload:
+        await websocket.close(code=4001)
+        return
+
+    log_path = Path.home() / ".han" / "gpu-setup.log"
+    await websocket.accept()
+
+    try:
+        # 기존 로그 전송
+        if log_path.exists():
+            content = log_path.read_text(errors="replace")
+            if content:
+                await websocket.send_json({"type": "history", "content": content})
+        last_size = log_path.stat().st_size if log_path.exists() else 0
+
+        # 새 줄 폴링
+        while True:
+            await asyncio.sleep(0.5)
+            if log_path.exists():
+                size = log_path.stat().st_size
+                if size > last_size:
+                    with open(log_path, "rb") as f:
+                        f.seek(last_size)
+                        new_bytes = f.read()
+                    new_text = new_bytes.decode("utf-8", errors="replace")
+                    last_size = size
+                    await websocket.send_json({"type": "append", "content": new_text})
+                else:
+                    await websocket.send_json({"type": "ping"})
+            else:
+                await websocket.send_json({"type": "ping"})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
 
 
 def _record_gpu_history():

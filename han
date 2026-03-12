@@ -121,6 +121,9 @@ cmd_help() {
   echo -e "  ${GREEN}path-fix --status${NC}           현재 PATH 진단"
   echo -e "  ${GREEN}self-update${NC}                 han CLI 바이너리만 최신으로 교체 (빠름)"
   echo -e "  ${GREEN}setup-gpu${NC}                   RTX 로컬 GPU 환경 자동 구성 (LLM + 영상생성)"
+  echo -e "  ${GREEN}setup-gpu --resume${NC}          중단된 설치를 완료된 단계부터 재개"
+  echo -e "  ${GREEN}setup-gpu --clean${NC}           단계 상태 초기화 후 처음부터 재설치"
+  echo -e "  ${GREEN}config set OLLAMA_MODEL --interactive${NC}  설치된 모델 목록에서 선택"
   echo ""
   echo -e "${BOLD}기타${NC}"
   echo -e "  ${GREEN}open${NC}               브라우저에서 앱 열기"
@@ -1594,8 +1597,58 @@ cmd_config() {
   case "$SUBCMD" in
     set)
       local KEY="${1:-}"; local VALUE="${2:-}"
-      if [ -z "$KEY" ]; then echo "사용법: han config set <KEY> <VALUE>"; exit 1; fi
+      if [ -z "$KEY" ]; then echo "사용법: han config set <KEY> <VALUE>  또는  han config set OLLAMA_MODEL --interactive"; exit 1; fi
       if [ ! -f "$ENV_FILE" ]; then echo -e "${RED}✗ .env 없음 — han init_check --fix 먼저 실행${NC}"; exit 1; fi
+
+      # ── OLLAMA_MODEL --interactive: ollama list로 모델 선택 ─────────────────
+      if [ "$KEY" = "OLLAMA_MODEL" ] && [ "${VALUE:-}" = "--interactive" ]; then
+        if ! command -v ollama &>/dev/null; then
+          echo -e "${RED}✗ ollama 미설치 — han setup-gpu 먼저 실행하세요.${NC}"; exit 1
+        fi
+        if ! curl -sf http://localhost:11434/api/tags &>/dev/null; then
+          echo -e "${YELLOW}⚠ Ollama 서버 미실행 — 시작 중...${NC}"
+          nohup ollama serve &>/dev/null & sleep 2
+        fi
+        echo ""
+        echo -e "${BOLD}설치된 Ollama 모델${NC}"
+        echo ""
+        # 모델 목록 수집
+        local MODELS_RAW; MODELS_RAW=$(ollama list 2>/dev/null | tail -n +2)
+        if [ -z "$MODELS_RAW" ]; then
+          echo -e "  ${YELLOW}설치된 모델 없음 — ollama pull <모델명> 으로 먼저 설치하세요.${NC}"
+          exit 1
+        fi
+        local MODELS=()
+        while IFS= read -r line; do
+          local mname; mname=$(echo "$line" | awk '{print $1}')
+          [ -n "$mname" ] && MODELS+=("$mname")
+        done <<< "$MODELS_RAW"
+        # 번호 출력
+        for i in "${!MODELS[@]}"; do
+          echo -e "  ${CYAN}$((i+1))${NC}. ${MODELS[$i]}"
+        done
+        echo ""
+        local CURRENT_MODEL; CURRENT_MODEL=$(grep "^OLLAMA_MODEL=" "$ENV_FILE" 2>/dev/null | cut -d= -f2)
+        echo -e "  현재 설정: ${BOLD}${CURRENT_MODEL:-미설정}${NC}"
+        echo ""
+        read -r -p "  번호 또는 모델명을 입력하세요 (엔터=취소): " SELECTED
+        [ -z "$SELECTED" ] && echo "취소됨." && return 0
+        # 번호면 모델명으로 변환
+        if [[ "$SELECTED" =~ ^[0-9]+$ ]]; then
+          local IDX=$(( SELECTED - 1 ))
+          if [ "$IDX" -ge 0 ] && [ "$IDX" -lt "${#MODELS[@]}" ]; then
+            VALUE="${MODELS[$IDX]}"
+          else
+            echo -e "${RED}✗ 잘못된 번호: $SELECTED${NC}"; exit 1
+          fi
+        else
+          VALUE="$SELECTED"
+        fi
+        echo ""
+        echo -e "  선택: ${GREEN}$VALUE${NC}"
+      fi
+      # ────────────────────────────────────────────────────────────────────────
+
       if grep -q "^${KEY}=" "$ENV_FILE" 2>/dev/null; then
         if sed --version 2>/dev/null | grep -q GNU; then
           sed -i "s|^${KEY}=.*|${KEY}=${VALUE}|" "$ENV_FILE"
@@ -2229,12 +2282,27 @@ _gpu_log()        { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$GPU_SETUP_LOG"; }
 
 cmd_setup_gpu() {
   local RESUME=false
+  local CLEAN=false
   for arg in "$@"; do
     [[ "$arg" == "--resume" ]] && RESUME=true
+    [[ "$arg" == "--clean"  ]] && CLEAN=true
   done
 
-  # 로그 파일 초기화 (--resume 아닌 경우) 또는 이어쓰기
-  if ! $RESUME; then
+  # --clean: 단계 상태 + 로그 초기화 후 처음부터 재설치
+  if $CLEAN; then
+    echo ""
+    echo -e "${BOLD}han setup-gpu --clean${NC}"
+    echo -e "  ${YELLOW}▸ 설치 상태 초기화 중...${NC}"
+    rm -f "$GPU_SETUP_STATE"
+    > "$GPU_SETUP_LOG"
+    echo -e "  ${GREEN}✓ 초기화 완료 (완료된 단계 기록 삭제)${NC}"
+    echo -e "  ${DIM}처음부터 다시 설치합니다.${NC}"
+    echo ""
+    RESUME=false
+  fi
+
+  # 로그 파일 초기화 (--resume / --clean 아닌 경우) 또는 이어쓰기
+  if ! $RESUME && ! $CLEAN; then
     > "$GPU_SETUP_LOG"
     > "$GPU_SETUP_STATE"
   fi

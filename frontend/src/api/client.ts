@@ -346,6 +346,7 @@ export const videoApi = {
   ollamaModels: () => api.get('/video/ollama/models'),
   ollamaDelete: (name: string) => api.delete(`/video/ollama/models/${encodeURIComponent(name)}`),
   ollamaPull: (name: string) => api.post('/video/ollama/models/pull', { name }),
+  ollamaPullStatus: () => api.get('/video/ollama/pull-status'),
   ollamaSetDefault: (name: string) => api.post('/video/ollama/default', { name }),
   ollamaUnload: () => api.post('/video/ollama/unload', {}),
   gpuHistory: (hours?: number) => api.get('/video/gpu-history', { params: { hours: hours ?? 24 } }),
