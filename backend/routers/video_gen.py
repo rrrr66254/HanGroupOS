@@ -37,6 +37,24 @@ def _ollama_unload(base_url: str = "http://localhost:11434") -> None:
         pass  # Ollama 미실행 시 무시
 
 
+def _ollama_warmup(base_url: str = "http://localhost:11434") -> None:
+    """영상 생성 완료 후 Ollama 모델을 VRAM에 미리 로드 (keep_alive=300s).
+    백그라운드 스레드에서 호출 — 다음 LLM 요청 응답 지연 최소화."""
+    try:
+        import httpx
+        from core.config import settings
+        model = getattr(settings, "OLLAMA_MODEL", "")
+        if not model:
+            return
+        httpx.post(
+            f"{base_url}/api/generate",
+            json={"model": model, "keep_alive": 300, "prompt": ""},
+            timeout=30.0,
+        )
+    except Exception:
+        pass
+
+
 def _get_free_vram_gb() -> float:
     """nvidia-smi로 현재 GPU 여유 VRAM(GB) 반환. 실패 시 0 반환."""
     try:
@@ -615,6 +633,9 @@ def _run_local_gpu_generation(job_id: int):
             job.finished_at = datetime.utcnow()
             video_progress.done_sync(job_id, "done")
 
+            # Ollama 워밍업 — 백그라운드로 모델 VRAM 재로드 (다음 LLM 응답 지연 방지)
+            threading.Thread(target=_ollama_warmup, daemon=True).start()
+
         except ImportError as e:
             job.status = "failed"
             job.error_msg = (
@@ -1035,11 +1056,33 @@ def gpu_status():
     except Exception:
         pass
 
+    # VRAM 경고: 총 VRAM 대비 사용량 90% 초과 시
+    vram_pct = 0
+    vram_warning = False
+    if gpu_info.get("total_mb", 0) > 0:
+        vram_pct = round(gpu_info["used_mb"] / gpu_info["total_mb"] * 100, 1)
+        vram_warning = vram_pct >= 90.0
+
+    # Ollama 로드 상태 확인
+    ollama_loaded_model = ""
+    try:
+        import httpx as _httpx
+        r = _httpx.get("http://localhost:11434/api/ps", timeout=2.0)
+        if r.status_code == 200:
+            models_list = r.json().get("models", [])
+            if models_list:
+                ollama_loaded_model = models_list[0].get("name", "")
+    except Exception:
+        pass
+
     return {
         "gpu_locked": gpu_locked,
         "queue_length": queue_len,
         "queued_jobs": list(_GPU_JOB_QUEUE),
         "free_vram_gb": round(free_vram, 1),
+        "vram_pct": vram_pct,
+        "vram_warning": vram_warning,
+        "ollama_loaded_model": ollama_loaded_model,
         **gpu_info,
     }
 

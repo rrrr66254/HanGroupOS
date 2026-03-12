@@ -735,8 +735,8 @@ cmd_status() {
       # 사용률에 따른 색상
       local vram_pct=$(( vram_used * 100 / (vram_total + 1) ))
       local vram_color="${GREEN}"
-      [ "$vram_pct" -gt 60 ] && vram_color="${YELLOW}"
-      [ "$vram_pct" -gt 85 ] && vram_color="${RED}"
+      [ "$vram_pct" -gt 65 ] && vram_color="${YELLOW}"
+      [ "$vram_pct" -gt 90 ] && vram_color="${RED}"
       # Ollama 실행 여부
       local ollama_status=""
       if curl -sf http://localhost:11434/api/tags &>/dev/null; then
@@ -753,6 +753,9 @@ cmd_status() {
       fi
       echo -e "  ├ GPU    : $gpu_name"
       echo -e "  ├ VRAM   : ${vram_color}${vram_used_gb_frac}GB / ${vram_total_gb}GB 사용 (여유 ${vram_free_gb_frac}GB, ${vram_pct}%)${NC}"
+      if [ "$vram_pct" -gt 90 ]; then
+        echo -e "  │         ${RED}⚠ VRAM 90% 초과 — 영상 생성 실패 가능. GPU 사용 중인 앱을 종료하세요.${NC}"
+      fi
       echo -e "  ├ 온도   : ${gpu_temp}°C   GPU 사용률: ${gpu_util}%"
       echo -e "  └ Ollama : $(echo -e $ollama_status)"
     else

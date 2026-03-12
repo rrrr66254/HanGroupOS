@@ -342,6 +342,7 @@ export const videoApi = {
     return api.post('/video/upload-image', form, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
   fileUrl: (id: number) => `/api/video/file/${id}`,
+  gpuStatus: () => api.get('/video/gpu-status'),
 }
 
 // ── Audit Log ──────────────────────────────────────────────────────────────────

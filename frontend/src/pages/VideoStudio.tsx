@@ -2,9 +2,26 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Film, Play, Plus, Trash2, RefreshCw, AlertCircle, CheckCircle,
   Clock, Loader2, Users, Building2, Download, Upload, X, ImageIcon,
+  Cpu, Zap, AlertTriangle,
 } from 'lucide-react'
 import { videoApi, companiesApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
+
+interface GpuStatus {
+  name?: string
+  total_mb?: number
+  used_mb?: number
+  free_mb?: number
+  temp_c?: number
+  util_pct?: number
+  vram_pct?: number
+  vram_warning?: boolean
+  gpu_locked?: boolean
+  queue_length?: number
+  queued_jobs?: number[]
+  ollama_loaded_model?: string
+  free_vram_gb?: number
+}
 
 interface VideoModel {
   id: string
@@ -70,6 +87,8 @@ export default function VideoStudio() {
   const [bgImageUploading, setBgImageUploading] = useState(false)
   const [bgImageDragOver, setBgImageDragOver] = useState(false)
   const bgImageInputRef = useRef<HTMLInputElement>(null)
+  const [gpuStatus, setGpuStatus] = useState<GpuStatus | null>(null)
+  const gpuPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const token = useAuthStore((s) => s.token)
 
   // 회사 ID → 이름 맵
@@ -131,6 +150,23 @@ export default function VideoStudio() {
     const iv = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(iv)
   }, [jobs])
+
+  // GPU 상태 폴링 — local-gpu 모델 선택 시 또는 GPU 잡 진행 중일 때 3초마다 갱신
+  useEffect(() => {
+    const hasLocalJob = jobs.some(
+      (j) => j.provider === 'local-gpu' && (j.status === 'pending' || j.status === 'running')
+    )
+    const isLocalModel = selectedModelInfo?.provider === 'local-gpu'
+    if (!isLocalModel && !hasLocalJob) {
+      if (gpuPollRef.current) { clearInterval(gpuPollRef.current); gpuPollRef.current = null }
+      return
+    }
+    const fetchGpu = () =>
+      videoApi.gpuStatus().then((r) => setGpuStatus(r.data)).catch(() => {})
+    fetchGpu()
+    gpuPollRef.current = setInterval(fetchGpu, 3000)
+    return () => { if (gpuPollRef.current) clearInterval(gpuPollRef.current) }
+  }, [selectedModelInfo?.provider, jobs.map(j => `${j.id}:${j.status}`).join(',')])
 
   // WebSocket 연결: 선택된 잡이 실행 중일 때 실시간 진행률 수신
   useEffect(() => {
@@ -314,6 +350,92 @@ export default function VideoStudio() {
             ) : (
               <div className="bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[10px] text-amber-400">
                 관리자 → <strong>외부 API 키</strong> 탭 → <strong>huggingface</strong> 서비스로 HF 토큰 등록
+              </div>
+            )}
+
+            {/* ── GPU 상태 위젯 ── local-gpu 선택 시 또는 GPU 잡 진행 중일 때 표시 */}
+            {gpuStatus && (selectedModelInfo?.provider === 'local-gpu' || gpuStatus.gpu_locked) && (
+              <div className={`rounded border p-2.5 space-y-1.5 text-[10px] ${
+                gpuStatus.vram_warning
+                  ? 'bg-red-500/10 border-red-500/30'
+                  : 'bg-slate-800/60 border-slate-700/50'
+              }`}>
+                {/* 헤더 */}
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1 font-semibold text-slate-300">
+                    <Cpu size={10} />
+                    {gpuStatus.name?.replace('NVIDIA GeForce ', '') ?? 'GPU'}
+                  </span>
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                    gpuStatus.gpu_locked
+                      ? 'bg-blue-500/20 text-blue-300'
+                      : 'bg-emerald-500/20 text-emerald-300'
+                  }`}>
+                    {gpuStatus.gpu_locked ? '영상 생성 중' : '대기'}
+                  </span>
+                </div>
+
+                {/* VRAM 바 */}
+                {gpuStatus.total_mb && gpuStatus.total_mb > 0 && (
+                  <div>
+                    <div className="flex justify-between text-slate-400 mb-0.5">
+                      <span>VRAM</span>
+                      <span className={gpuStatus.vram_warning ? 'text-red-400 font-semibold' : ''}>
+                        {((gpuStatus.used_mb ?? 0) / 1024).toFixed(1)}
+                        <span className="text-slate-500"> / {Math.round((gpuStatus.total_mb ?? 0) / 1024)}GB</span>
+                        <span className={`ml-1 ${gpuStatus.vram_warning ? 'text-red-400' : 'text-slate-500'}`}>
+                          ({gpuStatus.vram_pct}%)
+                        </span>
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-700 ${
+                          (gpuStatus.vram_pct ?? 0) >= 90
+                            ? 'bg-red-500'
+                            : (gpuStatus.vram_pct ?? 0) >= 65
+                            ? 'bg-yellow-500'
+                            : 'bg-emerald-500'
+                        }`}
+                        style={{ width: `${Math.min(gpuStatus.vram_pct ?? 0, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* 온도 / 사용률 */}
+                <div className="flex gap-3 text-slate-400">
+                  {gpuStatus.temp_c !== undefined && (
+                    <span className="flex items-center gap-0.5">
+                      <Zap size={8} />
+                      {gpuStatus.temp_c}°C
+                    </span>
+                  )}
+                  {gpuStatus.util_pct !== undefined && (
+                    <span>GPU {gpuStatus.util_pct}%</span>
+                  )}
+                  {gpuStatus.ollama_loaded_model && (
+                    <span className="text-slate-500 truncate">
+                      Ollama: {gpuStatus.ollama_loaded_model.split(':')[0]}
+                    </span>
+                  )}
+                </div>
+
+                {/* 큐 대기 */}
+                {(gpuStatus.queue_length ?? 0) > 0 && (
+                  <div className="text-yellow-400 flex items-center gap-1">
+                    <Clock size={9} />
+                    {gpuStatus.queue_length}개 대기 중 (순서대로 처리)
+                  </div>
+                )}
+
+                {/* VRAM 경고 배너 */}
+                {gpuStatus.vram_warning && (
+                  <div className="flex items-center gap-1 text-red-400 font-semibold">
+                    <AlertTriangle size={10} />
+                    VRAM 부족 경고 — 다른 GPU 프로세스를 종료하세요
+                  </div>
+                )}
               </div>
             )}
 
