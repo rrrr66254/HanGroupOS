@@ -85,6 +85,16 @@ echo "HAN_DIR=\"$INSTALL_DIR\"" > "$HOME/.han/config"
 
 echo -e "  ${GREEN}✓ han CLI 설치됨: $HAN_CLI_DST${NC}"
 
+# ── 설치 검증 ─────────────────────────────────────────────────────────────────
+if "$HAN_CLI_DST" --version &>/dev/null; then
+  VER_OUT=$("$HAN_CLI_DST" --version 2>/dev/null | head -1)
+  echo -e "  ${GREEN}✓ CLI 실행 검증 완료: $VER_OUT${NC}"
+else
+  echo -e "  ${RED}✗ CLI 실행 실패 — 아래 명령으로 수동 실행 후 확인하세요:${NC}"
+  echo "    $HAN_CLI_DST --version"
+  exit 1
+fi
+
 # ── PATH 자동 등록 (프롬프트 없이 즉시 처리) ──────────────────────────────────
 SHELL_RC=""
 if [[ "$SHELL" == *"zsh"* ]]; then

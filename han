@@ -111,6 +111,12 @@ cmd_help() {
   echo -e "  ${GREEN}backup --auto status${NC}            자동 백업 현재 상태"
   echo -e "  ${GREEN}restore${NC}                         DB 백업 복원"
   echo ""
+  echo -e "${BOLD}PATH & 자가 업데이트${NC}"
+  echo -e "  ${GREEN}path-fix${NC}                    PATH 상태 확인 + eval 용 export 출력"
+  echo -e "  ${GREEN}path-fix --apply${NC}            ~/.bashrc 에 PATH 영구 등록"
+  echo -e "  ${GREEN}path-fix --status${NC}           현재 PATH 진단"
+  echo -e "  ${GREEN}self-update${NC}                 han CLI 바이너리만 최신으로 교체 (빠름)"
+  echo ""
   echo -e "${BOLD}기타${NC}"
   echo -e "  ${GREEN}open${NC}               브라우저에서 앱 열기"
   echo -e "  ${GREEN}--version${NC}          버전 정보"
@@ -1232,6 +1238,167 @@ cmd_config() {
   esac
 }
 
+# ── han path-fix ──────────────────────────────────────────────────────────────
+# 사용법:
+#   eval $(han path-fix)          현재 터미널 즉시 적용
+#   han path-fix --apply          ~/.bashrc / ~/.zshrc 에 영구 등록
+#   han path-fix --status         현재 PATH 상태 확인
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_path_fix() {
+  local MODE="eval"   # eval | apply | status
+  case "${1:-}" in
+    --apply)  MODE="apply"  ;;
+    --status) MODE="status" ;;
+    "")       MODE="eval"   ;;
+  esac
+
+  local BIN_DIR="$HOME/.local/bin"
+  local IN_PATH=false
+  [[ ":$PATH:" == *":$BIN_DIR:"* ]] && IN_PATH=true
+
+  # rc 파일 판별
+  local RC
+  if [[ "$SHELL" == *"zsh"* ]]; then RC="$HOME/.zshrc"
+  else RC="$HOME/.bashrc"; fi
+
+  case "$MODE" in
+    # ── eval 모드: export 명령을 stdout으로 출력 (eval 용) ───────────────────
+    eval)
+      if $IN_PATH; then
+        # eval 시 아무것도 안 해도 되지만 메시지는 stderr로
+        echo -e "  ${GREEN}✓ PATH 이미 설정됨${NC}" >&2
+      else
+        # ← 이 한 줄만 stdout (eval에서 실행됨)
+        echo "export PATH=\"$BIN_DIR:\$PATH\""
+        echo -e "  ${GREEN}✓ PATH 적용됨 ($BIN_DIR)${NC}" >&2
+        echo -e "  ${DIM}영구 등록하려면: han path-fix --apply${NC}" >&2
+      fi
+      ;;
+
+    # ── apply 모드: rc 파일에 영구 등록 ──────────────────────────────────────
+    apply)
+      echo ""
+      local ALREADY_IN_RC=false
+      grep -qF 'HOME/.local/bin' "$RC" 2>/dev/null && ALREADY_IN_RC=true
+
+      if $ALREADY_IN_RC; then
+        echo -e "  ${GREEN}✓ 이미 $RC 에 PATH가 등록되어 있습니다.${NC}"
+      else
+        echo "" >> "$RC"
+        echo "# HAN Group OS CLI" >> "$RC"
+        echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$RC"
+        echo -e "  ${GREEN}✓ PATH 영구 등록됨${NC} → $RC"
+      fi
+
+      if ! $IN_PATH; then
+        export PATH="$BIN_DIR:$PATH"
+        echo -e "  ${GREEN}✓ 현재 세션에도 즉시 적용됨${NC}"
+      fi
+
+      echo ""
+      echo -e "  ${DIM}새 터미널에서도 자동 적용됩니다.${NC}"
+      echo -e "  ${DIM}현재 터미널 즉시 적용: source $RC${NC}"
+      echo ""
+      ;;
+
+    # ── status 모드: 현재 PATH 상태 진단 ─────────────────────────────────────
+    status)
+      echo ""
+      echo -e "${BOLD}han path-fix 상태${NC}"
+      echo ""
+      if $IN_PATH; then
+        echo -e "  ${GREEN}✓ $BIN_DIR 이 PATH에 포함됨${NC}"
+      else
+        echo -e "  ${RED}✗ $BIN_DIR 이 PATH에 없음${NC}"
+        echo ""
+        echo "  해결 방법:"
+        echo "    eval \$(han path-fix)       # 현재 터미널만 즉시 적용"
+        echo "    han path-fix --apply       # ~/.bashrc 에 영구 등록"
+      fi
+
+      echo ""
+      local HAN_BIN
+      HAN_BIN=$(command -v han 2>/dev/null || echo "")
+      if [ -n "$HAN_BIN" ]; then
+        echo -e "  ${GREEN}✓ han 명령 위치: $HAN_BIN${NC}"
+      else
+        echo -e "  ${RED}✗ han 명령을 찾을 수 없음${NC}"
+      fi
+
+      local IN_RC=false
+      grep -qF 'HOME/.local/bin' "$RC" 2>/dev/null && IN_RC=true
+      if $IN_RC; then
+        echo -e "  ${GREEN}✓ $RC 에 PATH 등록됨 (새 터미널 자동 적용)${NC}"
+      else
+        echo -e "  ${YELLOW}△ $RC 에 PATH 미등록${NC}"
+        echo "    han path-fix --apply 로 등록하세요"
+      fi
+      echo ""
+      ;;
+  esac
+}
+
+# ── han self-update ────────────────────────────────────────────────────────────
+# han CLI 바이너리만 GitHub에서 직접 교체 (git pull 없이)
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_self_update() {
+  local RAW_URL="https://raw.githubusercontent.com/rrrr66254/HanGroupOS/master/han"
+
+  echo ""
+  echo -e "${BOLD}han self-update — CLI 바이너리 단독 업데이트${NC}"
+  echo ""
+
+  # 현재 CLI 경로 확인
+  local CLI_PATH
+  CLI_PATH=$(command -v han 2>/dev/null || echo "$HOME/.local/bin/han")
+  echo -e "  경로    : $CLI_PATH"
+  echo -e "  현재 버전: v${HAN_VERSION}"
+  echo ""
+
+  # 임시 파일로 다운로드
+  echo -e "  ${CYAN}▸ GitHub 최신 버전 다운로드 중...${NC}"
+  local TMP_FILE
+  TMP_FILE=$(mktemp /tmp/han_self_update_XXXXXX)
+
+  if ! curl -fsSL "$RAW_URL" -o "$TMP_FILE" 2>/dev/null; then
+    rm -f "$TMP_FILE"
+    echo -e "  ${RED}✗ 다운로드 실패 — 네트워크 또는 저장소 주소를 확인하세요.${NC}"
+    echo "    URL: $RAW_URL"
+    exit 1
+  fi
+
+  # 새 버전 번호 추출
+  local NEW_VER
+  NEW_VER=$(grep '^HAN_VERSION=' "$TMP_FILE" 2>/dev/null | cut -d'"' -f2 || echo "알 수 없음")
+
+  if [ "$NEW_VER" = "$HAN_VERSION" ]; then
+    echo -e "  ${GREEN}✓ 이미 최신 버전입니다 (v${HAN_VERSION}).${NC}"
+    rm -f "$TMP_FILE"
+    echo ""
+    return 0
+  fi
+
+  # 교체
+  chmod +x "$TMP_FILE"
+  cp "$TMP_FILE" "$CLI_PATH"
+  chmod +x "$CLI_PATH"
+  rm -f "$TMP_FILE"
+
+  echo -e "  ${GREEN}✓ 업데이트 완료${NC}  v${HAN_VERSION} → v${NEW_VER}"
+  echo "  경로: $CLI_PATH"
+
+  # HAN_DIR/han 도 동기화
+  if [ -f "$HAN_DIR/han" ] && [ "$CLI_PATH" != "$HAN_DIR/han" ]; then
+    cp "$CLI_PATH" "$HAN_DIR/han"
+    chmod +x "$HAN_DIR/han"
+    echo -e "  ${GREEN}✓ $HAN_DIR/han 동기화됨${NC}"
+  fi
+
+  echo ""
+  echo -e "  ${DIM}전체 업데이트(pip/npm 포함): han update${NC}"
+  echo ""
+}
+
 # ── han open ──────────────────────────────────────────────────────────────────
 cmd_open() {
   local URL="http://localhost:5173"
@@ -1257,6 +1424,8 @@ case "$COMMAND" in
   backup)               cmd_backup "$@" ;;
   restore)              cmd_restore ;;
   config)               cmd_config "$@" ;;
+  path-fix)             cmd_path_fix "$@" ;;
+  self-update)          cmd_self_update ;;
   open)                 cmd_open ;;
   --version|-v)         cmd_version ;;
   help|--help|-h)       cmd_help ;;
