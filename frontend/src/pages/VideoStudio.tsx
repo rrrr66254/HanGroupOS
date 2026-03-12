@@ -228,7 +228,7 @@ export default function VideoStudio() {
                 <optgroup label="HuggingFace Inference">
                   {hfModels.map((m) => {
                     const st = hfStatuses[m.id]
-                    const badge = st === 'warm' ? ' ✅' : st === 'cold' ? ' ❄️' : st === 'loading' ? ' ⏳' : st === 'unavailable' ? ' ✗' : ''
+                    const badge = st === 'warm' ? '[warm] ' : st === 'cold' ? '[cold] ' : st === 'loading' ? '[loading] ' : st === 'unavailable' ? '[N/A] ' : ''
                     return <option key={m.id} value={m.id}>{badge}{m.label}</option>
                   })}
                 </optgroup>
@@ -248,11 +248,11 @@ export default function VideoStudio() {
                 const st = hfStatuses[selectedModel]
                 if (!st) return <div className="flex items-center gap-1.5 text-[10px] text-slate-500"><Loader2 size={10} className="animate-spin" /> 모델 상태 확인 중...</div>
                 const cfg: Record<string, { cls: string; label: string }> = {
-                  warm: { cls: 'text-green-400 bg-green-500/10 border-green-500/20', label: '✅ Warm — 즉시 추론 가능' },
-                  cold: { cls: 'text-blue-400 bg-blue-500/10 border-blue-500/20', label: '❄️ Cold — 첫 요청 시 로딩 시간 있음' },
-                  loading: { cls: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20', label: '⏳ Loading — 현재 로딩 중' },
-                  unavailable: { cls: 'text-red-400 bg-red-500/10 border-red-500/20', label: '✗ Unavailable — HF Inference 미지원' },
-                  n_a: { cls: 'text-slate-500 bg-bg-base border-bg-border', label: '— 상태 정보 없음' },
+                  warm: { cls: 'text-green-400 bg-green-500/10 border-green-500/20', label: 'Warm — 즉시 추론 가능' },
+                  cold: { cls: 'text-blue-400 bg-blue-500/10 border-blue-500/20', label: 'Cold — 첫 요청 시 로딩 시간 있음' },
+                  loading: { cls: 'text-yellow-400 bg-yellow-500/10 border-yellow-500/20', label: 'Loading — 현재 로딩 중' },
+                  unavailable: { cls: 'text-red-400 bg-red-500/10 border-red-500/20', label: 'N/A — HF Inference 미지원' },
+                  n_a: { cls: 'text-slate-500 bg-bg-base border-bg-border', label: '상태 정보 없음' },
                 }
                 const c = cfg[st] ?? cfg['n_a']
                 return <div className={`text-[10px] border rounded px-2 py-1 ${c.cls}`}>{c.label}</div>

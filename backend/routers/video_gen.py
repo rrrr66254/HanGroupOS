@@ -124,22 +124,9 @@ SUPPORTED_MODELS = [
         "recommended": False,
     },
     # ── HuggingFace Inference API ────────────────────────────────────────────
-    # ⚠ HF "Inference Providers" 기능으로 외부 유료 제공자(FAL 등)에 라우팅될 수 있음
-    # provider="hf-inference" 강제 지정으로 HF 자체 서버 사용
-    {
-        "id": "tencent/HunyuanVideo",
-        "label": "HunyuanVideo (Tencent) — HF 자체 추론 (HF 토큰 필요)",
-        "provider": "hf-inference",
-        "recommended": False,
-        "note": "HF 자체 inference 서버 사용 — provider='hf-inference' 강제",
-    },
-    {
-        "id": "genmo/mochi-1-preview",
-        "label": "Mochi-1 Preview (Genmo) — HF 자체 추론 (HF 토큰 필요)",
-        "provider": "hf-inference",
-        "recommended": False,
-        "note": "HF 자체 inference 서버 사용 — provider='hf-inference' 강제",
-    },
+    # NOTE: HF 자체 inference 서버(hf-inference)는 text-to-video 태스크를 지원하지 않음.
+    # FAL-AI, Replicate 등 외부 유료 제공자를 통해서만 동작하므로 목록에서 제외.
+    # (지원 태스크: text-to-image, conversational, text-generation 등만 가능)
     # ── JSON2Video ───────────────────────────────────────────────────────────
     {
         "id": "json2video/presentation",
