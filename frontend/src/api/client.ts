@@ -206,6 +206,13 @@ export const strategyApi = {
     api.post('/strategy/generate', { company_id: companyId, focus }),
   bulkPromote: (data: { items: Array<{ insight_id: number; item_type: string; company_id: number | null }> }) =>
     api.post('/strategy/bulk-promote', data),
+  diagnose: (itemId: number) => api.post(`/strategy/items/${itemId}/diagnose`),
+  genealogy: (itemId: number) => api.get(`/strategy/items/${itemId}/genealogy`),
+}
+
+// ── Competitor (extended) ────────────────────────────────────────────────────
+export const competitorTrendApi = {
+  trend: (weeks = 8) => api.get('/competitors/trend', { params: { weeks } }),
 }
 
 // ── Knowledge / Dashboard ─────────────────────────────────────────────────────
@@ -397,6 +404,27 @@ export const kpiLinksApi = {
   toggle: (id: number) => api.patch(`/kpi-links/${id}/toggle`),
   sync: (id: number) => api.post(`/kpi-links/${id}/sync`),
   syncAll: () => api.post('/kpi-links/sync-all'),
+  history: (linkId: number, limit = 20) =>
+    api.get(`/kpi-links/${linkId}/history`, { params: { limit } }),
+}
+
+// ── Briefing ──────────────────────────────────────────────────────────────────
+export const briefingApi = {
+  generate: () => api.post('/briefing/generate'),
+}
+
+// ── Webhooks ──────────────────────────────────────────────────────────────────
+export const webhooksApi = {
+  listTokens: () => api.get('/webhooks/tokens'),
+  createToken: (data: { name: string; source: string; trigger_source: string }) =>
+    api.post('/webhooks/tokens', data),
+  toggleToken: (id: number) => api.patch(`/webhooks/tokens/${id}/toggle`),
+  deleteToken: (id: number) => api.delete(`/webhooks/tokens/${id}`),
+}
+
+// ── Health Scores ─────────────────────────────────────────────────────────────
+export const healthApi = {
+  scores: () => api.get('/companies/health-scores'),
 }
 
 // ── Data Collection Policies ──────────────────────────────────────────────────

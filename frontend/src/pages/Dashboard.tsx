@@ -2,10 +2,22 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Building2, Users, CheckSquare, Brain, FlaskConical,
-  Map, TrendingUp, MessageSquare, ArrowRight, Zap,
+  Map, TrendingUp, MessageSquare, ArrowRight, Zap, Activity,
 } from 'lucide-react'
-import { dashboardApi, approvalsApi, companiesApi } from '../api/client'
+import { dashboardApi, approvalsApi, companiesApi, healthApi } from '../api/client'
 import type { DashboardStats, ApprovalRequest, Company } from '../types'
+
+interface HealthScore {
+  id: number
+  name: string
+  industry: string
+  score: number
+  health: 'good' | 'warning' | 'critical'
+  avg_progress: number
+  kpi_rate: number
+  recent_data: number
+  strategy_count: number
+}
 
 function StatCard({ icon: Icon, label, value, color, to }: {
   icon: React.ElementType
@@ -27,15 +39,23 @@ function StatCard({ icon: Icon, label, value, color, to }: {
   )
 }
 
+const HEALTH_CONFIG = {
+  good: { label: '양호', color: 'text-success', bg: 'bg-success/15', bar: 'bg-success' },
+  warning: { label: '주의', color: 'text-warning', bg: 'bg-warning/15', bar: 'bg-warning' },
+  critical: { label: '위험', color: 'text-red-400', bg: 'bg-red-400/15', bar: 'bg-red-400' },
+}
+
 export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [pending, setPending] = useState<ApprovalRequest[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
+  const [healthScores, setHealthScores] = useState<HealthScore[]>([])
 
   useEffect(() => {
     dashboardApi.stats().then((r) => setStats(r.data))
     approvalsApi.inbox().then((r) => setPending(r.data.slice(0, 5)))
     companiesApi.list().then((r) => setCompanies(r.data.slice(0, 6)))
+    healthApi.scores().then((r) => setHealthScores(r.data.slice(0, 6))).catch(() => {})
   }, [])
 
   return (
@@ -129,6 +149,50 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* Health Scorecard */}
+      {healthScores.length > 0 && (
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+              <Activity size={15} className="text-brand-light" />
+              계열사 건강 스코어카드
+            </h3>
+            <Link to="/companies" className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1">
+              전체보기 <ArrowRight size={12} />
+            </Link>
+          </div>
+          <div className="space-y-2">
+            {healthScores.map((h) => {
+              const cfg = HEALTH_CONFIG[h.health]
+              return (
+                <div key={h.id} className="flex items-center gap-3 bg-bg-elevated rounded-lg px-3 py-2">
+                  <div className="w-28 flex-shrink-0">
+                    <div className="text-xs font-medium text-slate-200 truncate">{h.name}</div>
+                    <div className="text-[10px] text-slate-500 truncate">{h.industry}</div>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1 mb-1">
+                      <div className="flex-1 h-1.5 bg-bg-border rounded-full overflow-hidden">
+                        <div className={`h-full ${cfg.bar} rounded-full`} style={{ width: `${h.score}%` }} />
+                      </div>
+                      <span className="text-xs font-bold text-slate-200 w-8 text-right">{h.score}</span>
+                    </div>
+                    <div className="flex gap-2 text-[10px] text-slate-500">
+                      <span>진척 {h.avg_progress}%</span>
+                      <span>KPI {h.kpi_rate}%</span>
+                      <span>데이터 {h.recent_data}건</span>
+                    </div>
+                  </div>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${cfg.bg} ${cfg.color} flex-shrink-0`}>
+                    {cfg.label}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Quick actions */}
       <div className="card p-4">

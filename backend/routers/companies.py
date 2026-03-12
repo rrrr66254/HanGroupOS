@@ -99,3 +99,65 @@ def get_company_org(
 ):
     tree = get_company_org_tree(db, company_id)
     return {"tree": tree}
+
+
+@router.get("/health-scores", summary="계열사별 건강 스코어카드")
+def health_scores(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """KPI 충족률 + 전략 진척도 + 수집 데이터 활동을 종합한 계열사별 건강 점수를 반환합니다."""
+    from datetime import timedelta, datetime as dt
+    from sqlalchemy import func
+    from models.models import StrategyItem, KpiDataLink, CollectedData
+
+    companies = db.query(Company).filter(
+        Company.is_competitor == False,
+        Company.status == "active",
+    ).all()
+
+    week_ago = dt.utcnow() - timedelta(days=7)
+    results = []
+
+    for comp in companies:
+        # ① 전략 진척도 평균
+        items = db.query(StrategyItem).filter(
+            StrategyItem.company_id == comp.id,
+            StrategyItem.status == "active",
+        ).all()
+        avg_progress = (sum(i.progress for i in items) / len(items)) if items else 0
+
+        # ② KPI 충족률 (last_value가 있는 링크 비율)
+        kpi_links = db.query(KpiDataLink).filter(
+            KpiDataLink.strategy_item_id.in_([i.id for i in items]),
+            KpiDataLink.is_active == True,
+        ).all() if items else []
+        kpi_filled = sum(1 for lnk in kpi_links if lnk.last_value is not None)
+        kpi_rate = (kpi_filled / len(kpi_links) * 100) if kpi_links else 0
+
+        # ③ 최근 7일 데이터 수집 건수
+        recent_data = db.query(func.count(CollectedData.id)).filter(
+            CollectedData.company_id == comp.id,
+            CollectedData.created_at >= week_ago,
+        ).scalar() or 0
+        data_score = min(recent_data * 10, 100)  # 10건당 100점 만점
+
+        # 종합 점수
+        score = int(avg_progress * 0.5 + kpi_rate * 0.3 + data_score * 0.2)
+        health = "good" if score >= 70 else "warning" if score >= 40 else "critical"
+
+        results.append({
+            "id": comp.id,
+            "name": comp.name,
+            "industry": comp.industry,
+            "score": score,
+            "health": health,
+            "avg_progress": round(avg_progress, 1),
+            "kpi_rate": round(kpi_rate, 1),
+            "recent_data": recent_data,
+            "strategy_count": len(items),
+            "kpi_count": len(kpi_links),
+        })
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return {"companies": results, "generated_at": dt.utcnow().isoformat()}

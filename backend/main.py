@@ -3,7 +3,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import init_db, SessionLocal
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks
 
 
 app = FastAPI(
@@ -48,6 +48,8 @@ app.include_router(notifications.router)  # 알림 시스템 (DB 영속화)
 app.include_router(docs.router)           # AI 문서 자동 생성기 (사업계획서/IR/시장분석)
 app.include_router(competitors.router)    # 경쟁사 모니터링
 app.include_router(kpi_links.router)      # KPI 데이터 연동
+app.include_router(briefing.router)       # 그룹 주간 브리핑
+app.include_router(webhooks.router)       # 외부 웹훅 수신 API
 
 
 @app.get("/health")

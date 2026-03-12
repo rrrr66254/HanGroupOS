@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe, FlaskConical, Loader2 } from 'lucide-react'
-import { modelsApi, externalKeyApi } from '../api/client'
+import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe, FlaskConical, Loader2, Webhook, Copy } from 'lucide-react'
+import { modelsApi, externalKeyApi, webhooksApi } from '../api/client'
 import type { ModelCatalog, ProviderConfig } from '../types'
 
 interface ExternalKey {
@@ -31,7 +31,7 @@ export default function Admin() {
   const [catalog, setCatalog] = useState<ModelCatalog[]>([])
   const [providers, setProviders] = useState<ProviderConfig[]>([])
   const [health, setHealth] = useState<Record<string, { status: string; model: string }>>({})
-  const [tab, setTab] = useState<'providers' | 'catalog' | 'external-keys' | 'system'>('providers')
+  const [tab, setTab] = useState<'providers' | 'catalog' | 'external-keys' | 'webhooks' | 'system'>('providers')
 
   const [newProvider, setNewProvider] = useState({
     provider: 'anthropic', api_key: '', model_override: '', base_url: '',
@@ -43,6 +43,35 @@ export default function Admin() {
   const [testResults, setTestResults] = useState<Record<number, { status: string; message: string }>>({})
   const [testingId, setTestingId] = useState<number | null>(null)
 
+  // Webhook tokens
+  interface WebhookToken { id: number; name: string; token: string; source: string; trigger_source: string; is_active: boolean; last_used_at: string | null; created_at: string }
+  const [webhookTokens, setWebhookTokens] = useState<WebhookToken[]>([])
+  const [newToken, setNewToken] = useState({ name: '', source: 'custom', trigger_source: 'hackernews' })
+  const [createdToken, setCreatedToken] = useState<string | null>(null)  // 최초 생성 시만 전체 토큰 표시
+  const [tokenLoading, setTokenLoading] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const loadWebhookTokens = () => webhooksApi.listTokens().then((r) => setWebhookTokens(r.data))
+
+  const handleCreateToken = async () => {
+    if (!newToken.name.trim()) return
+    setTokenLoading(true)
+    try {
+      const r = await webhooksApi.createToken(newToken)
+      setCreatedToken(r.data.token)  // 전체 토큰 저장
+      setNewToken({ name: '', source: 'custom', trigger_source: 'hackernews' })
+      await loadWebhookTokens()
+    } finally {
+      setTokenLoading(false)
+    }
+  }
+
+  const handleCopyToken = (token: string) => {
+    navigator.clipboard.writeText(token)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
   const loadAll = async () => {
     modelsApi.catalog().then((r) => setCatalog(r.data))
     modelsApi.providers().then((r) => setProviders(r.data))
@@ -51,7 +80,7 @@ export default function Admin() {
 
   const loadExtKeys = () => externalKeyApi.list().then((r) => setExtKeys(r.data))
 
-  useEffect(() => { loadAll(); loadExtKeys() }, [])
+  useEffect(() => { loadAll(); loadExtKeys(); loadWebhookTokens() }, [])
 
   const saveProvider = async () => {
     await modelsApi.saveProvider(newProvider)
@@ -104,6 +133,7 @@ export default function Admin() {
           { id: 'providers', label: 'AI Provider 설정' },
           { id: 'catalog', label: '모델 카탈로그' },
           { id: 'external-keys', label: '외부 API 키' },
+          { id: 'webhooks', label: '웹훅 토큰' },
           { id: 'system', label: '시스템 정보' },
         ].map((t) => (
           <button
@@ -390,6 +420,118 @@ export default function Admin() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'webhooks' && (
+        <div className="space-y-4">
+          <div className="card p-4">
+            <h3 className="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-2">
+              <Webhook size={13} className="text-brand-light" /> 외부 웹훅 토큰 관리
+            </h3>
+            <p className="text-[10px] text-slate-500 mb-4">
+              Slack, Zapier 등 외부 시스템에서{' '}
+              <code className="bg-bg-elevated px-1 rounded text-brand-light">POST /api/webhooks/collect</code>를
+              호출할 때 사용하는 인증 토큰을 관리합니다.
+              <br />헤더: <code className="bg-bg-elevated px-1 rounded text-brand-light">X-Webhook-Token: &lt;token&gt;</code>
+            </p>
+
+            {/* 토큰 생성 폼 */}
+            <div className="p-3 rounded-lg bg-bg-elevated border border-bg-border space-y-2 mb-4">
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[10px] text-slate-400">이름</label>
+                  <input
+                    className="input w-full text-xs mt-0.5"
+                    placeholder="슬랙 알림봇"
+                    value={newToken.name}
+                    onChange={(e) => setNewToken((t) => ({ ...t, name: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-400">출처</label>
+                  <select className="input w-full text-xs mt-0.5" value={newToken.source} onChange={(e) => setNewToken((t) => ({ ...t, source: e.target.value }))}>
+                    <option value="custom">Custom</option>
+                    <option value="slack">Slack</option>
+                    <option value="zapier">Zapier</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-400">트리거 수집</label>
+                  <select className="input w-full text-xs mt-0.5" value={newToken.trigger_source} onChange={(e) => setNewToken((t) => ({ ...t, trigger_source: e.target.value }))}>
+                    <option value="hackernews">HackerNews</option>
+                    <option value="worldbank">World Bank</option>
+                    <option value="reddit">Reddit</option>
+                    <option value="custom">커스텀 데이터</option>
+                  </select>
+                </div>
+              </div>
+              <button
+                onClick={handleCreateToken}
+                disabled={tokenLoading || !newToken.name.trim()}
+                className="btn-primary text-xs flex items-center gap-1"
+              >
+                {tokenLoading ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+                토큰 생성
+              </button>
+            </div>
+
+            {/* 최초 생성된 토큰 표시 */}
+            {createdToken && (
+              <div className="p-3 rounded-lg bg-success/10 border border-success/30 mb-4">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] text-success font-medium">✓ 토큰 생성 완료 — 지금 복사하세요 (이후 조회 불가)</span>
+                  <button onClick={() => setCreatedToken(null)} className="text-slate-500 hover:text-slate-300"><X size={12} /></button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-[11px] font-mono text-success bg-black/20 px-2 py-1 rounded break-all">{createdToken}</code>
+                  <button
+                    onClick={() => handleCopyToken(createdToken)}
+                    className="shrink-0 p-1.5 rounded bg-success/20 hover:bg-success/30 text-success"
+                  >
+                    {copied ? <Check size={12} /> : <Copy size={12} />}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 토큰 목록 */}
+            {webhookTokens.length === 0 ? (
+              <div className="text-center py-6 text-slate-600 text-xs">등록된 웹훅 토큰이 없습니다.</div>
+            ) : (
+              <div className="space-y-2">
+                {webhookTokens.map((t) => (
+                  <div key={t.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-bg-elevated border border-bg-border">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-xs font-medium text-slate-200">{t.name}</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-brand/10 text-brand-light">{t.source}</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-400">{t.trigger_source}</span>
+                        {!t.is_active && <span className="text-[9px] text-slate-600">(비활성)</span>}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono">
+                        {t.token} {t.last_used_at && `· 마지막 사용: ${new Date(t.last_used_at).toLocaleDateString()}`}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={async () => { await webhooksApi.toggleToken(t.id); loadWebhookTokens() }}
+                        className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${t.is_active ? 'border-success/30 text-success hover:bg-success/10' : 'border-slate-600 text-slate-500 hover:bg-slate-700'}`}
+                      >
+                        {t.is_active ? '활성' : '비활성'}
+                      </button>
+                      <button
+                        onClick={async () => { await webhooksApi.deleteToken(t.id); loadWebhookTokens() }}
+                        className="p-1 text-slate-600 hover:text-danger"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

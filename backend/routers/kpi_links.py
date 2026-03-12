@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from core.database import get_db
 from core.security import get_current_user
-from models.models import KpiDataLink, StrategyItem, CollectedData, User
+from models.models import KpiDataLink, KpiSyncHistory, StrategyItem, CollectedData, User
 
 router = APIRouter(prefix="/api/kpi-links", tags=["kpi-links"])
 
@@ -152,6 +152,8 @@ def sync_kpi_link(
 
     lnk.last_value = value
     lnk.last_updated_at = datetime.utcnow()
+    # 이력 저장
+    db.add(KpiSyncHistory(kpi_link_id=link_id, value=value))
     db.commit()
 
     return {
@@ -206,6 +208,7 @@ def sync_all_kpi_links(
                 item.kpi_current = value
             lnk.last_value = value
             lnk.last_updated_at = datetime.utcnow()
+            db.add(KpiSyncHistory(kpi_link_id=lnk.id, value=value))
             results.append({"link_id": lnk.id, "value": value, "status": "ok"})
         else:
             results.append({"link_id": lnk.id, "value": None, "status": "no_data"})
@@ -216,3 +219,23 @@ def sync_all_kpi_links(
         "failed": sum(1 for r in results if r["status"] != "ok"),
         "results": results,
     }
+
+
+@router.get("/{link_id}/history", summary="KPI 동기화 이력 조회 (스파크라인용)")
+def get_kpi_history(
+    link_id: int,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    rows = (
+        db.query(KpiSyncHistory)
+        .filter(KpiSyncHistory.kpi_link_id == link_id)
+        .order_by(KpiSyncHistory.synced_at.asc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {"value": r.value, "synced_at": r.synced_at.isoformat()}
+        for r in rows
+    ]

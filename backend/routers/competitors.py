@@ -4,7 +4,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from pydantic import BaseModel
 
 from core.database import get_db
@@ -295,3 +295,45 @@ def compare_competitor(
         "competitor_data_count": len(comp_data),
         "subsidiary_data_count": len(subs_data),
     }
+
+
+@router.get("/trend", summary="경쟁사별 주간 데이터 수집량 추이 (트렌드 차트용)")
+def competitor_trend(
+    weeks: int = 8,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """경쟁사별로 최근 N주간 CollectedData 수집 건수를 반환합니다."""
+    from sqlalchemy import func
+
+    competitors = db.query(Company).filter(Company.is_competitor == True).all()
+    now = datetime.utcnow()
+    result = []
+
+    for comp in competitors:
+        weekly = []
+        for w in range(weeks - 1, -1, -1):
+            start = now - timedelta(weeks=w + 1)
+            end = now - timedelta(weeks=w)
+            cnt = (
+                db.query(func.count(CollectedData.id))
+                .filter(
+                    CollectedData.company_id == comp.id,
+                    CollectedData.created_at >= start,
+                    CollectedData.created_at < end,
+                )
+                .scalar()
+            ) or 0
+            weekly.append({
+                "week": (now - timedelta(weeks=w)).strftime("%m/%d"),
+                "count": cnt,
+            })
+        result.append({
+            "id": comp.id,
+            "name": comp.name,
+            "industry": comp.industry,
+            "weekly": weekly,
+            "total": sum(w["count"] for w in weekly),
+        })
+
+    return {"weeks": weeks, "competitors": result}

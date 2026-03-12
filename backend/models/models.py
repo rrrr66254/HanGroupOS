@@ -605,3 +605,25 @@ class KpiDataLink(Base):
     last_updated_at = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class KpiSyncHistory(Base):
+    """KPI 동기화 이력 — 스파크라인 차트에 활용."""
+    __tablename__ = "kpi_sync_history"
+    id = Column(Integer, primary_key=True, index=True)
+    kpi_link_id = Column(Integer, ForeignKey("kpi_data_links.id"), nullable=False)
+    value = Column(Float, nullable=False)
+    synced_at = Column(DateTime, default=datetime.utcnow)
+
+
+class WebhookToken(Base):
+    """외부 시스템(Slack, Zapier 등) 수집 트리거용 웹훅 토큰."""
+    __tablename__ = "webhook_tokens"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    token = Column(String(64), unique=True, nullable=False, index=True)
+    source = Column(String(50), default="custom")   # slack | zapier | custom
+    is_active = Column(Boolean, default=True)
+    last_used_at = Column(DateTime, nullable=True)
+    trigger_source = Column(String(100), default="hackernews")  # 트리거할 수집 소스
+    created_at = Column(DateTime, default=datetime.utcnow)

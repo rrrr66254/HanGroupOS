@@ -608,3 +608,100 @@ def bulk_promote_insights(
         "items": created,
         "skipped_items": skipped,
     }
+
+
+# ── 전략 아이템 AI 진단 ─────────────────────────────────────────────────────────
+
+@router.post("/items/{item_id}/diagnose", summary="전략 아이템 AI 진단")
+def diagnose_strategy_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """선택한 전략 아이템에 대해 AI가 진척도·위험요소·개선안을 분석합니다."""
+    item = db.query(StrategyItem).filter(StrategyItem.id == item_id).first()
+    if not item:
+        raise HTTPException(404, "전략 아이템을 찾을 수 없습니다.")
+
+    company = db.query(Company).filter(Company.id == item.company_id).first() if item.company_id else None
+
+    # 관련 인사이트 수집
+    related = db.query(StrategyItem).filter(
+        StrategyItem.source_insight_id == item_id
+    ).all()
+
+    kpi_info = f"KPI 현재값: {item.kpi_current}" if item.kpi_current is not None else ""
+    related_info = f"연결된 하위 전략 {len(related)}개" if related else ""
+
+    prompt = f"""다음 전략 아이템을 분석하여 JSON으로만 응답하세요.
+
+전략 아이템:
+- 제목: {item.title}
+- 유형: {item.item_type}
+- 진척도: {item.progress}%
+- 우선순위: {item.priority}
+- 상태: {item.status}
+- 설명: {item.description or '없음'}
+- 마감일: {item.due_date or '미정'}
+{f'- 계열사: {company.name}' if company else ''}
+{kpi_info}
+{related_info}
+
+JSON 형식으로만 응답:
+{{"health": "good|warning|critical", "progress_assessment": "진척도 평가 (1문장)", "risks": ["위험요소1", "위험요소2"], "improvements": ["개선방안1", "개선방안2", "개선방안3"], "next_actions": ["다음 액션1", "다음 액션2"], "score": 0}}
+
+score는 0-100 종합 전략 건강 점수입니다."""
+
+    provider = get_provider_from_db(db, current_user.id)
+    response = provider.chat(
+        messages=[{"role": "user", "content": prompt}],
+        system="기업 전략 분석 전문가입니다. JSON만 반환합니다.",
+        max_tokens=700,
+    )
+
+    try:
+        jm = re.search(r'\{[\s\S]*\}', response)
+        diag = json.loads(jm.group()) if jm else {"error": "파싱 실패", "raw": response[:300]}
+    except Exception:
+        diag = {"error": "파싱 실패", "raw": response[:300]}
+
+    return diag
+
+
+@router.get("/items/{item_id}/genealogy", summary="격상 계보 조회")
+def get_item_genealogy(
+    item_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """인사이트 → 전략 격상 계보를 트리 형태로 반환합니다."""
+    item = db.query(StrategyItem).filter(StrategyItem.id == item_id).first()
+    if not item:
+        raise HTTPException(404, "전략 아이템을 찾을 수 없습니다.")
+
+    def build_node(si: StrategyItem) -> dict:
+        children = db.query(StrategyItem).filter(
+            StrategyItem.source_insight_id == si.id
+        ).all()
+        return {
+            "id": si.id,
+            "title": si.title,
+            "item_type": si.item_type,
+            "status": si.status,
+            "progress": si.progress,
+            "created_at": si.created_at.isoformat() if si.created_at else None,
+            "children": [build_node(c) for c in children],
+        }
+
+    # 루트 탐색 (source_insight_id 체인을 최상위까지 역추적)
+    root = item
+    visited = set()
+    while root.source_insight_id and root.source_insight_id not in visited:
+        visited.add(root.id)
+        parent = db.query(StrategyItem).filter(StrategyItem.id == root.source_insight_id).first()
+        if parent:
+            root = parent
+        else:
+            break
+
+    return build_node(root)

@@ -1,4 +1,4 @@
-# HAN Group OS v29
+# HAN Group OS v30
 **AI 기반 기업 운영 시스템 (AI Corporate Operating System)**
 
 <p align="center">
@@ -17,13 +17,80 @@
 | **픽셀 AI 오피스** | AI 캐릭터가 실시간으로 움직이는 픽셀아트 사무실, 회의 시 회의실 자동 활성화 |
 | **역할별 AI 자동 배정** | 계열사 설립 시 직급·역할에 맞는 AI 모델 자동 배정 (CEO → Claude Sonnet, 팀장 → GPT-4o-mini 등) |
 | **조직도 관리** | 회장 → 위원회 → 계열사 → 직책 계층 구조 |
-| **결재 워크플로우** | 요청 → 검토 → 승인/반려 파이프라인 |
+| **결재 워크플로우 + AI 사전 검토** | 요청 → AI 위험도 분석 → 승인/반려 파이프라인 |
 | **회의 관리** | 일정 수립, AI 참여, 회의실 픽셀 오피스 반영 |
-| **시장 분석** | 산업별 기회/위협 리포트 |
-| **전략 트래킹** | 목표·이니셔티브·마일스톤·KPI 관리 |
+| **시장 분석 + 경쟁사 트렌드** | 산업별 기회/위협 리포트, 경쟁사 주간 뉴스량 차트 |
+| **전략 트래킹 + AI 진단** | 목표·이니셔티브·마일스톤·KPI 관리, 항목별 AI 건강 진단 |
+| **KPI 이력 + 스파크라인** | KPI 동기화 이력 추적, SVG 스파크라인 시각화 |
+| **계열사 건강 스코어카드** | 진척률·KPI·데이터 종합 건강 점수 (양호/주의/위험) |
+| **그룹 주간 브리핑** | 최근 7일 데이터 기반 AI 자동 마크다운 브리핑 생성 |
+| **수집 데이터 AI 자동 태깅** | 수집 데이터 AI 분석 → 산업·감성·토픽 태그 자동 부여 |
+| **인사이트 격상 계보 뷰** | 인사이트→전략 격상 이력 트리 시각화 |
+| **외부 웹훅 수신 API** | 토큰 인증으로 외부 시스템에서 데이터 수집 트리거 |
 | **비즈니스 시뮬레이션** | What-if 시나리오 분석 |
 | **기업 메모리** | 의사결정·사실·교훈 등 기관 지식 축적 |
 | **멀티 AI 프로바이더** | Claude, GPT-4o, Gemini, **Ollama (무료 로컬)**, Mock 전환 가능 |
+
+---
+
+## v30 업데이트 내역
+
+### AI 자동화 & 데이터 인텔리전스 10종 기능 추가
+
+#### 1. KPI 이력 추적 + 스파크라인
+- KPI 값 동기화 시마다 `KpiSyncHistory` 테이블에 이력 저장
+- 전략 페이지에서 KPI 링크별 순수 SVG 스파크라인 차트 표시
+- `GET /kpi-links/{id}/history` 엔드포인트로 이력 조회
+
+#### 2. 경쟁사 트렌드 차트
+- 경쟁사별 주간 뉴스 수집량을 SVG 바 차트로 시각화
+- `GET /competitors/trend?weeks=N` 엔드포인트
+- Competitors 페이지에 "트렌드 분석" 버튼 추가
+
+#### 3. 수집 데이터 AI 자동 태깅
+- CollectedData 항목 자동 분석 → `industry:*`, `sentiment:*`, 토픽 태그 부여
+- `POST /data/auto-tag` (limit, data_type, source, force 파라미터)
+- DataAnalytics 페이지에 "AI 자동 태깅" 버튼 추가
+
+#### 4. 전략 아이템 AI 진단
+- 전략 항목 클릭 → AI 건강도 진단 (health, risks, improvements, next_actions, score 0-100)
+- `POST /strategy/items/{id}/diagnose`
+- Strategy 페이지 카드에 "AI 진단" 버튼 + 결과 패널
+
+#### 5. 계열사 건강 스코어카드
+- 계열사별 종합 건강 점수 자동 산출 (양호/주의/위험)
+- 공식: `score = avg_progress×0.5 + kpi_rate×0.3 + data_score×0.2`
+- `GET /companies/health-scores` 엔드포인트
+- Dashboard 메인 화면에 진행바 + 상태 배지 표시
+
+#### 6. 그룹 주간 브리핑 자동 생성
+- 최근 7일 데이터·전략·KPI를 종합 분석해 마크다운 브리핑 AI 생성
+- `POST /briefing/generate`
+- WeeklyReport 페이지에 "그룹 브리핑" 탭 추가
+
+#### 7. 결재 요청 AI 사전 검토
+- 결재 상세 모달에서 AI 위험도 분석 요청 가능
+- risk_level(low/medium/high/critical), 위험 요소, 권고 사항, 핵심 질문 반환
+- `POST /approvals/{id}/ai-review` + 결과 `approval.meta["ai_review"]` 저장
+
+#### 8. 전략 맵 PDF 내보내기
+- Strategy 페이지 상단 "PDF 저장" 버튼 → `window.print()` 기반 인쇄/저장
+- 인쇄용 CSS 자동 적용 (배경색 보존, 불필요 UI 숨김)
+
+#### 9. 격상 이력 배지 + 계보 뷰
+- 인사이트 → 전략 항목으로 격상 시 `source_insight_id` 연결 체인 추적
+- `GET /strategy/items/{id}/genealogy` 재귀 트리 반환
+- InsightsDashboard에 "계보 보기" 버튼 + 트리 모달
+
+#### 10. 외부 웹훅 수신 API
+- `X-Webhook-Token` 헤더 인증으로 외부 시스템에서 데이터 수집 트리거 가능
+- `POST /webhooks/collect` (hackernews/worldbank/reddit/custom)
+- `WebhookToken` 테이블: 토큰 생성·조회·활성화/비활성화·삭제
+- Admin 관리자 페이지에 "웹훅 토큰" 탭 추가
+
+#### 기타 버그 수정
+- APScheduler `No module named 'apscheduler'` 오류 수정 (`apscheduler>=3.10.0` 추가)
+- 무료 데이터 수집 UI: 수집량 표시 개선 (실제 아이템 수), "방금 수집됨" 피드백 추가
 
 ---
 
@@ -249,13 +316,13 @@ HanGroupOS/
     │   ├── database.py       # DB 초기화
     │   └── security.py       # JWT 인증
     ├── models/
-    │   └── models.py         # 25개 DB 모델
+    │   └── models.py         # 27개 DB 모델 (KpiSyncHistory, WebhookToken 추가)
     ├── schemas/
     │   └── schemas.py        # Pydantic 스키마
     ├── services/
     │   ├── ai_provider.py    # AI 프로바이더 추상화 (Ollama 포함)
     │   └── org_service.py    # 조직 생성 + AI 자동 배정 로직
-    └── routers/              # API 엔드포인트 (13개)
+    └── routers/              # API 엔드포인트 (15개+)
 ```
 
 ---
@@ -284,6 +351,16 @@ http://localhost:8000/docs
 | `GET /memory` | 기업 메모리 조회 |
 | `GET /models/catalog` | AI 모델 카탈로그 |
 | `POST /models/recommend` | 역할별 AI 모델 추천 |
+| `POST /approvals/{id}/ai-review` | 결재 AI 위험도 사전 검토 |
+| `POST /data/auto-tag` | 수집 데이터 AI 자동 태깅 |
+| `GET /kpi-links/{id}/history` | KPI 동기화 이력 조회 |
+| `GET /competitors/trend` | 경쟁사 주간 트렌드 데이터 |
+| `POST /strategy/items/{id}/diagnose` | 전략 아이템 AI 진단 |
+| `GET /strategy/items/{id}/genealogy` | 격상 계보 트리 조회 |
+| `GET /companies/health-scores` | 계열사 건강 스코어카드 |
+| `POST /briefing/generate` | 그룹 주간 브리핑 AI 생성 |
+| `POST /webhooks/collect` | 외부 웹훅 데이터 수집 트리거 |
+| `GET /webhooks/tokens` | 웹훅 토큰 목록 (관리자) |
 
 ---
 
