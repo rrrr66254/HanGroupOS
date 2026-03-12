@@ -7,3 +7,5 @@ backend/venv/
 frontend/node_modules/
 frontend/dist/
 .env
+han.log
+*.log
