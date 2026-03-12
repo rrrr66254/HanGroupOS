@@ -81,10 +81,12 @@ router = APIRouter(prefix="/api/video", tags=["video-generation"])
 VIDEO_DIR = Path(os.path.expanduser("~")) / "han-video-store"
 VIDEO_DIR.mkdir(exist_ok=True)
 
-# FAL-AI HuggingFace 모델 ID → fal-ai 앱 ID 매핑
-# fal-ai/로 시작하는 ID는 그대로 사용 (identity)
+# FAL-AI 모델 ID 매핑
+# - HuggingFace 모델 ID → fal-ai 앱 ID
+# - fal-ai/ 로 시작하는 ID는 그대로 사용
 FAL_MODEL_MAP: Dict[str, str] = {
-    "Lightricks/LTX-Video-0.9.8-13B-distilled": "fal-ai/ltx-video",
+    # LTX-Video 0.9.8-13B-distilled: 정식 text-to-video 엔드포인트
+    "Lightricks/LTX-Video-0.9.8-13B-distilled": "fal-ai/ltxv-13b-098-distilled",
     "THUDM/CogVideoX-2b": "fal-ai/cogvideox-5b",
 }
 
@@ -93,7 +95,7 @@ SUPPORTED_MODELS = [
     # ── FAL-AI (권장) ───────────────────────────────────────────────────────
     {
         "id": "Lightricks/LTX-Video-0.9.8-13B-distilled",
-        "label": "LTX-Video 0.9.8-13B (Lightricks) — 빠름, 고품질",
+        "label": "LTX-Video 0.9.8-13B Distilled (Lightricks) — 빠름, 고품질",
         "provider": "fal-ai",
         "recommended": True,
     },
