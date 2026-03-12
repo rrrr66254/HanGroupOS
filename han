@@ -631,7 +631,47 @@ cmd_stop() {
 
 # ── han restart ───────────────────────────────────────────────────────────────
 cmd_restart() {
-  echo "서버 재시작 중..."
+  echo ""
+  echo -e "${BOLD}HAN Group OS 재시작${NC}"
+  echo ""
+
+  # ─ 현재 LLM 설정 읽기 ──────────────────────────────────────────────────────
+  local ENV_FILE="$HAN_DIR/backend/.env"
+  local PROVIDER="" OLLAMA_MODEL_VAL=""
+  if [ -f "$ENV_FILE" ]; then
+    PROVIDER=$(grep "^DEFAULT_PROVIDER=" "$ENV_FILE" | cut -d= -f2)
+    OLLAMA_MODEL_VAL=$(grep "^OLLAMA_MODEL=" "$ENV_FILE" | cut -d= -f2)
+  fi
+  PROVIDER="${PROVIDER:-ollama}"
+  echo -e "  AI 프로바이더 : ${BOLD}$PROVIDER${NC}${OLLAMA_MODEL_VAL:+ / $OLLAMA_MODEL_VAL}"
+
+  # ─ Ollama 상태 확인 ─────────────────────────────────────────────────────────
+  if [ "$PROVIDER" = "ollama" ] && command -v ollama &>/dev/null; then
+    if curl -sf http://localhost:11434/api/tags &>/dev/null; then
+      echo -e "  Ollama       : ${GREEN}● 실행 중${NC}"
+      # 설정된 모델이 Ollama에 있는지 확인
+      if [ -n "$OLLAMA_MODEL_VAL" ]; then
+        local MODEL_BASE="${OLLAMA_MODEL_VAL%%:*}"
+        if ollama list 2>/dev/null | grep -q "$MODEL_BASE"; then
+          echo -e "  모델 준비    : ${GREEN}✓ $OLLAMA_MODEL_VAL${NC}"
+        else
+          echo -e "  모델 준비    : ${YELLOW}⚠ $OLLAMA_MODEL_VAL 미설치 — 'ollama pull $OLLAMA_MODEL_VAL' 실행 필요${NC}"
+        fi
+      fi
+    else
+      echo -e "  Ollama       : ${YELLOW}○ 미실행 — 백그라운드로 시작합니다...${NC}"
+      nohup ollama serve &>/dev/null &
+      sleep 2
+      if curl -sf http://localhost:11434/api/tags &>/dev/null; then
+        echo -e "  Ollama       : ${GREEN}● 시작 완료${NC}"
+      else
+        echo -e "  Ollama       : ${RED}✗ 시작 실패 — 'ollama serve' 를 직접 실행하세요${NC}"
+      fi
+    fi
+  fi
+
+  echo ""
+  echo "  백엔드/프론트엔드 재시작 중..."
   cmd_stop
   sleep 1
   cmd_start "--daemon"
@@ -668,9 +708,56 @@ cmd_status() {
   fi
 
   if [ -f "$HAN_DIR/backend/.env" ]; then
-    local provider
+    local provider ollama_model
     provider=$(grep "^DEFAULT_PROVIDER=" "$HAN_DIR/backend/.env" | cut -d= -f2)
-    echo "  AI 프로바이더 : ${provider:-미설정}"
+    ollama_model=$(grep "^OLLAMA_MODEL=" "$HAN_DIR/backend/.env" | cut -d= -f2)
+    echo "  AI 프로바이더 : ${provider:-미설정}${ollama_model:+ / $ollama_model}"
+  fi
+
+  # ─ GPU 상태 (nvidia-smi) ────────────────────────────────────────────────────
+  if command -v nvidia-smi &>/dev/null; then
+    echo ""
+    echo -e "  ${BOLD}GPU 상태${NC}"
+    local gpu_line
+    gpu_line=$(nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free,temperature.gpu,utilization.gpu \
+               --format=csv,noheader,nounits 2>/dev/null | head -1)
+    if [ -n "$gpu_line" ]; then
+      IFS=',' read -r gpu_name vram_total vram_used vram_free gpu_temp gpu_util <<< "$gpu_line"
+      gpu_name="${gpu_name// /}"
+      vram_total="${vram_total// /}"
+      vram_used="${vram_used// /}"
+      vram_free="${vram_free// /}"
+      gpu_temp="${gpu_temp// /}"
+      gpu_util="${gpu_util// /}"
+      local vram_total_gb=$(( (vram_total + 512) / 1024 ))
+      local vram_used_gb_frac; vram_used_gb_frac=$(awk "BEGIN{printf \"%.1f\", $vram_used/1024}")
+      local vram_free_gb_frac; vram_free_gb_frac=$(awk "BEGIN{printf \"%.1f\", $vram_free/1024}")
+      # 사용률에 따른 색상
+      local vram_pct=$(( vram_used * 100 / (vram_total + 1) ))
+      local vram_color="${GREEN}"
+      [ "$vram_pct" -gt 60 ] && vram_color="${YELLOW}"
+      [ "$vram_pct" -gt 85 ] && vram_color="${RED}"
+      # Ollama 실행 여부
+      local ollama_status=""
+      if curl -sf http://localhost:11434/api/tags &>/dev/null; then
+        local loaded_model
+        loaded_model=$(curl -sf http://localhost:11434/api/ps 2>/dev/null | \
+          python3 -c "import sys,json; d=json.load(sys.stdin); ms=d.get('models',[]); print(ms[0]['name'] if ms else '')" 2>/dev/null)
+        if [ -n "$loaded_model" ]; then
+          ollama_status="${GREEN}실행 중${NC} (로드: ${loaded_model})"
+        else
+          ollama_status="${GREEN}실행 중${NC} (모델 언로드됨)"
+        fi
+      else
+        ollama_status="${YELLOW}미실행${NC}"
+      fi
+      echo -e "  ├ GPU    : $gpu_name"
+      echo -e "  ├ VRAM   : ${vram_color}${vram_used_gb_frac}GB / ${vram_total_gb}GB 사용 (여유 ${vram_free_gb_frac}GB, ${vram_pct}%)${NC}"
+      echo -e "  ├ 온도   : ${gpu_temp}°C   GPU 사용률: ${gpu_util}%"
+      echo -e "  └ Ollama : $(echo -e $ollama_status)"
+    else
+      echo -e "  ${YELLOW}⚠ GPU 정보를 가져올 수 없습니다.${NC}"
+    fi
   fi
 
   # ─ DB 상태 ──────────────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@
 지원 모델: LTX-Video, CogVideoX, Text-to-Video-MS, JSON2Video 프레젠테이션
 """
 import asyncio
+import threading
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -10,6 +11,43 @@ from typing import Optional, List, Dict
 from datetime import datetime
 from pathlib import Path
 import os
+
+# ── GPU 전용 직렬 잠금 ─────────────────────────────────────────────────────────
+# LLM(Ollama)과 영상 생성(diffusers)이 동시에 VRAM을 점유하는 것을 방지.
+# local-gpu 영상 생성은 이 Lock을 획득한 후에만 실행됩니다.
+_GPU_LOCK = threading.Lock()
+_GPU_JOB_QUEUE: list = []   # 대기 중인 job_id 목록 (UI 표시용)
+_GPU_LOCK_MUTEX = threading.Lock()  # _GPU_JOB_QUEUE 보호용
+
+
+def _ollama_unload(base_url: str = "http://localhost:11434") -> None:
+    """Ollama에게 현재 모델을 VRAM에서 내리도록 요청 (keep_alive=0)."""
+    try:
+        import httpx
+        from core.config import settings
+        model = getattr(settings, "OLLAMA_MODEL", "")
+        if not model:
+            return
+        httpx.post(
+            f"{base_url}/api/generate",
+            json={"model": model, "keep_alive": 0},
+            timeout=5.0,
+        )
+    except Exception:
+        pass  # Ollama 미실행 시 무시
+
+
+def _get_free_vram_gb() -> float:
+    """nvidia-smi로 현재 GPU 여유 VRAM(GB) 반환. 실패 시 0 반환."""
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            timeout=5,
+        ).decode().strip().splitlines()[0]
+        return int(out.strip()) / 1024
+    except Exception:
+        return 0.0
 
 from core.database import get_db
 from core.security import get_current_user, decode_token
@@ -427,10 +465,32 @@ def _run_local_gpu_generation(job_id: int):
     """로컬 GPU (diffusers)로 영상 생성 — RTX 5070 Ti / CUDA."""
     from core.database import SessionLocal
 
+    # ── GPU 직렬 큐잉: 다른 GPU 작업이 끝날 때까지 대기 ─────────────────────
+    with _GPU_LOCK_MUTEX:
+        _GPU_JOB_QUEUE.append(job_id)
+
+    queue_pos = _GPU_JOB_QUEUE.index(job_id)
+    if queue_pos > 0:
+        db_q = SessionLocal()
+        try:
+            job_q = db_q.query(VideoJob).filter(VideoJob.id == job_id).first()
+            if job_q:
+                video_progress.notify_sync(job_id, 0, f"GPU 대기 중... ({queue_pos}개 작업 선행)")
+        finally:
+            db_q.close()
+
+    # 이전 GPU 작업이 완료될 때까지 블로킹
+    _GPU_LOCK.acquire()
+    with _GPU_LOCK_MUTEX:
+        if job_id in _GPU_JOB_QUEUE:
+            _GPU_JOB_QUEUE.remove(job_id)
+    # ─────────────────────────────────────────────────────────────────────────
+
     db = SessionLocal()
     try:
         job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
         if not job:
+            _GPU_LOCK.release()
             return
 
         job.status = "running"
@@ -449,9 +509,18 @@ def _run_local_gpu_generation(job_id: int):
                 )
 
             device = "cuda"
-            vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+            vram_total_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
             gpu_name = torch.cuda.get_device_name(0)
-            video_progress.notify_sync(job_id, 5, f"GPU: {gpu_name} ({vram_gb:.1f}GB VRAM)")
+            video_progress.notify_sync(job_id, 4, f"GPU: {gpu_name} ({vram_total_gb:.1f}GB) — Ollama VRAM 해제 중...")
+
+            # Ollama 모델을 VRAM에서 언로드 → diffusers 확보
+            _ollama_unload()
+            torch.cuda.empty_cache()
+            import time as _time; _time.sleep(1)  # 언로드 완료 대기
+
+            free_vram = _get_free_vram_gb()
+            vram_gb = vram_total_gb  # 모델 cfg 비교용은 총 VRAM 사용
+            video_progress.notify_sync(job_id, 5, f"GPU: {gpu_name} ({vram_total_gb:.1f}GB 총 / {free_vram:.1f}GB 여유)")
 
             # 모델별 파이프라인 설정
             model_cfg = {
@@ -563,6 +632,7 @@ def _run_local_gpu_generation(job_id: int):
         _notify_chat(db, job)
 
     finally:
+        _GPU_LOCK.release()  # 다음 GPU 작업 허용
         db.close()
 
 
@@ -932,6 +1002,45 @@ def get_video_stats(
         "failed_count": failed_count,
         "success_rate": success_rate,
         "avg_duration_sec": avg_duration_sec,
+    }
+
+
+@router.get("/gpu-status")
+def gpu_status():
+    """GPU VRAM 현황 및 큐 상태 조회."""
+    free_vram = _get_free_vram_gb()
+    gpu_locked = _GPU_LOCK.locked()
+    queue_len = len(_GPU_JOB_QUEUE)
+
+    # nvidia-smi 상세 정보
+    gpu_info = {}
+    try:
+        import subprocess
+        lines = subprocess.check_output(
+            ["nvidia-smi",
+             "--query-gpu=name,memory.total,memory.used,memory.free,temperature.gpu,utilization.gpu",
+             "--format=csv,noheader,nounits"],
+            timeout=5,
+        ).decode().strip().splitlines()
+        if lines:
+            parts = [p.strip() for p in lines[0].split(",")]
+            gpu_info = {
+                "name": parts[0] if len(parts) > 0 else "",
+                "total_mb": int(parts[1]) if len(parts) > 1 else 0,
+                "used_mb": int(parts[2]) if len(parts) > 2 else 0,
+                "free_mb": int(parts[3]) if len(parts) > 3 else 0,
+                "temp_c": int(parts[4]) if len(parts) > 4 else 0,
+                "util_pct": int(parts[5]) if len(parts) > 5 else 0,
+            }
+    except Exception:
+        pass
+
+    return {
+        "gpu_locked": gpu_locked,
+        "queue_length": queue_len,
+        "queued_jobs": list(_GPU_JOB_QUEUE),
+        "free_vram_gb": round(free_vram, 1),
+        **gpu_info,
     }
 
 
