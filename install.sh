@@ -14,7 +14,7 @@ set -e
 HAN_REPO="https://github.com/rrrr66254/HanGroupOS.git"
 HAN_VERSION="30"
 INSTALL_DIR="$HOME/HanGroupOS"
-BIN_CANDIDATES=("$HOME/.local/bin" "$HOME/bin" "/usr/local/bin")
+BIN_CANDIDATES=("$HOME/.local/bin" "$HOME/bin")
 
 # ── 색상 ──────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -67,16 +67,16 @@ else
   echo -e "  ${GREEN}✓ 다운로드 완료${NC}"
 fi
 
-# ── han CLI 설치할 경로 결정 ──────────────────────────────────────────────────
+# ── han CLI 설치할 경로 결정 (쓰기 가능한 사용자 경로 우선) ─────────────────
 BIN_DIR=""
 for candidate in "${BIN_CANDIDATES[@]}"; do
-  if [ -d "$candidate" ] && [[ ":$PATH:" == *":$candidate:"* ]]; then
+  if [ -w "$candidate" ] 2>/dev/null || ( mkdir -p "$candidate" 2>/dev/null && [ -w "$candidate" ] ); then
     BIN_DIR="$candidate"
     break
   fi
 done
 
-# PATH에 없는 경우 ~/.local/bin 생성 후 사용
+# 여전히 없으면 ~/.local/bin 생성
 if [ -z "$BIN_DIR" ]; then
   BIN_DIR="$HOME/.local/bin"
   mkdir -p "$BIN_DIR"
