@@ -336,6 +336,11 @@ export const videoApi = {
   batchDelete: (ids: number[]) => api.post('/video/jobs/batch-delete', { ids }),
   retryJob: (id: number) => api.post(`/video/jobs/${id}/retry`),
   modelStatus: (modelId: string) => api.get('/video/models/status', { params: { model_id: modelId } }),
+  uploadImage: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post('/video/upload-image', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
   fileUrl: (id: number) => `/api/video/file/${id}`,
 }
 

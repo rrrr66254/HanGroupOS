@@ -3,7 +3,7 @@
 지원 모델: LTX-Video, CogVideoX, Text-to-Video-MS, JSON2Video 프레젠테이션
 """
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict
@@ -80,6 +80,13 @@ router = APIRouter(prefix="/api/video", tags=["video-generation"])
 # 영상 저장 디렉토리
 VIDEO_DIR = Path(os.path.expanduser("~")) / "han-video-store"
 VIDEO_DIR.mkdir(exist_ok=True)
+
+# 이미지 업로드 디렉토리
+IMAGE_DIR = VIDEO_DIR / "images"
+IMAGE_DIR.mkdir(exist_ok=True)
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
 
 # FAL-AI 모델 ID 매핑
 # - HuggingFace 모델 ID → fal-ai 앱 ID
@@ -964,3 +971,42 @@ def download_video(
         media_type="video/mp4",
         filename=f"video_{job.id}.mp4",
     )
+
+
+@router.post("/upload-image")
+async def upload_image(
+    request: Request,
+    file: UploadFile = File(...),
+    _: User = Depends(get_current_user),
+):
+    """배경 이미지 파일 업로드 → 서버 내 저장 후 접근 가능한 URL 반환."""
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(400, f"지원하지 않는 파일 형식입니다. (지원: JPEG, PNG, GIF, WebP)")
+
+    data = await file.read()
+    if len(data) > MAX_IMAGE_SIZE:
+        raise HTTPException(400, "파일 크기가 10MB를 초과합니다.")
+
+    import uuid
+    ext = Path(file.filename or "image.jpg").suffix.lower() or ".jpg"
+    fname = f"{uuid.uuid4().hex}{ext}"
+    dest = IMAGE_DIR / fname
+    dest.write_bytes(data)
+
+    base_url = str(request.base_url).rstrip("/")
+    url = f"{base_url}/api/video/images/{fname}"
+    return {"url": url, "filename": fname}
+
+
+@router.get("/images/{filename}")
+def serve_image(
+    filename: str,
+    _: User = Depends(get_current_user),
+):
+    """업로드된 배경 이미지 서빙."""
+    p = IMAGE_DIR / filename
+    if not p.exists() or not p.is_file():
+        raise HTTPException(404, "이미지를 찾을 수 없습니다")
+    import mimetypes
+    mt, _ = mimetypes.guess_type(str(p))
+    return FileResponse(str(p), media_type=mt or "image/jpeg")

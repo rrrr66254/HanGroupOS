@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Film, Play, Plus, Trash2, RefreshCw, AlertCircle, CheckCircle,
-  Clock, Loader2, Users, Building2, Download,
+  Clock, Loader2, Users, Building2, Download, Upload, X, ImageIcon,
 } from 'lucide-react'
 import { videoApi, companiesApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
@@ -67,6 +67,9 @@ export default function VideoStudio() {
   const wsRef = useRef<WebSocket | null>(null)
   const [wsProgress, setWsProgress] = useState<{ progress: number; message: string } | null>(null)
   const [hfStatuses, setHfStatuses] = useState<Record<string, string>>({})
+  const [bgImageUploading, setBgImageUploading] = useState(false)
+  const [bgImageDragOver, setBgImageDragOver] = useState(false)
+  const bgImageInputRef = useRef<HTMLInputElement>(null)
   const token = useAuthStore((s) => s.token)
 
   // 회사 ID → 이름 맵
@@ -157,6 +160,19 @@ export default function VideoStudio() {
         return updated ?? prev
       })
     })
+
+  const handleBgImageFile = async (file: File) => {
+    if (!file.type.startsWith('image/')) return
+    setBgImageUploading(true)
+    try {
+      const r = await videoApi.uploadImage(file)
+      setJ2vConfig((p) => ({ ...p, bgImageUrl: r.data.url }))
+    } catch {
+      // 업로드 실패 시 무시 (에러는 전역 처리)
+    } finally {
+      setBgImageUploading(false)
+    }
+  }
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return
@@ -314,14 +330,68 @@ export default function VideoStudio() {
                   </div>
                 )}
                 <div>
-                  <label className="text-[10px] text-slate-500 block mb-1">배경 이미지 URL (선택)</label>
-                  <input
-                    type="text"
-                    value={j2vConfig.bgImageUrl}
-                    onChange={(e) => setJ2vConfig((p) => ({ ...p, bgImageUrl: e.target.value }))}
-                    placeholder="https://example.com/bg.jpg"
-                    className="w-full bg-bg-base border border-bg-border rounded text-xs text-slate-200 p-1.5 focus:outline-none focus:border-brand/60 placeholder:text-slate-600"
-                  />
+                  <label className="text-[10px] text-slate-500 block mb-1">배경 이미지 (선택)</label>
+                  {j2vConfig.bgImageUrl ? (
+                    /* 업로드 완료 — 미리보기 + 제거 버튼 */
+                    <div className="flex items-center gap-2 p-2 bg-bg-base border border-bg-border rounded">
+                      <img
+                        src={j2vConfig.bgImageUrl}
+                        alt="배경 이미지"
+                        className="w-12 h-8 object-cover rounded border border-bg-border flex-shrink-0"
+                      />
+                      <span className="text-[10px] text-slate-400 truncate flex-1">이미지 등록됨</span>
+                      <button
+                        onClick={() => setJ2vConfig((p) => ({ ...p, bgImageUrl: '' }))}
+                        className="p-1 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors flex-shrink-0"
+                        title="제거"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ) : (
+                    /* 드래그앤드롭 + 파일 브라우저 */
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); setBgImageDragOver(true) }}
+                      onDragLeave={() => setBgImageDragOver(false)}
+                      onDrop={(e) => {
+                        e.preventDefault()
+                        setBgImageDragOver(false)
+                        const f = e.dataTransfer.files[0]
+                        if (f) handleBgImageFile(f)
+                      }}
+                      className={`border-2 border-dashed rounded p-3 text-center transition-colors cursor-pointer ${
+                        bgImageDragOver
+                          ? 'border-indigo-400 bg-indigo-500/10'
+                          : 'border-bg-border hover:border-indigo-500/50 hover:bg-indigo-500/5'
+                      }`}
+                      onClick={() => bgImageInputRef.current?.click()}
+                    >
+                      <input
+                        ref={bgImageInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleBgImageFile(f) }}
+                      />
+                      {bgImageUploading ? (
+                        <div className="flex items-center justify-center gap-2 text-[10px] text-slate-400">
+                          <Loader2 size={12} className="animate-spin" />
+                          업로드 중...
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-center gap-1.5 text-[10px] text-slate-400">
+                            <Upload size={11} />
+                            <span>파일을 드래그하거나</span>
+                          </div>
+                          <button className="text-[10px] text-indigo-400 underline underline-offset-2">
+                            내 컴퓨터에서 찾기
+                          </button>
+                          <p className="text-[9px] text-slate-600">JPEG · PNG · WebP · GIF, 최대 10MB</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
