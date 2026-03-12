@@ -1009,6 +1009,30 @@ cmd_update() {
       echo -e "  ${RED}  ✗ pip install 실패 — requirements.txt 확인 필요${NC}"
       echo "       pip install -r $HAN_DIR/backend/requirements.txt"
     fi
+
+    # GPU 패키지 동기화 (torch가 설치된 경우 diffusers 등 업데이트)
+    if python -c "import torch" &>/dev/null 2>&1; then
+      echo -e "  ${CYAN}  ▸ GPU 패키지 동기화 (torch 감지됨)...${NC}"
+      local gpu_ok=true
+      # torch CUDA 재검증
+      if ! python -c "import torch; assert torch.cuda.is_available()" &>/dev/null 2>&1; then
+        echo -e "  ${YELLOW}  ⚠ torch는 있으나 CUDA 비활성화 — PyTorch CUDA 재설치 중...${NC}"
+        pip install -q "torch>=2.6.0" torchvision torchaudio \
+          --index-url https://download.pytorch.org/whl/cu124 2>/dev/null || gpu_ok=false
+      fi
+      # diffusers + 관련 패키지 업데이트
+      pip install -q \
+        "diffusers>=0.33.0" transformers accelerate \
+        "imageio[ffmpeg]" imageio-ffmpeg sentencepiece protobuf 2>/dev/null \
+        && echo -e "  ${GREEN}  ✓ GPU 패키지(diffusers/transformers) 동기화 완료${NC}" \
+        || { echo -e "  ${RED}  ✗ GPU 패키지 업데이트 실패${NC}"; gpu_ok=false; }
+      if $gpu_ok; then
+        local torch_ver; torch_ver=$(python -c "import torch; print(torch.__version__)" 2>/dev/null)
+        echo -e "  ${GREEN}  ✓ PyTorch $torch_ver (CUDA: $(python -c "import torch; print(torch.version.cuda)" 2>/dev/null))${NC}"
+      fi
+    else
+      echo -e "  ${DIM}  - GPU 패키지 미설치 (torch 없음) — 'han setup-gpu' 로 설치 가능${NC}"
+    fi
   fi
 
   # ─ [2/3] 프론트엔드 의존성 ───────────────────────────────────────────────
