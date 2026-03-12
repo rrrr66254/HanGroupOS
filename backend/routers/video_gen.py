@@ -119,16 +119,24 @@ SUPPORTED_MODELS = [
     },
     {
         "id": "THUDM/CogVideoX-2b",
-        "label": "CogVideoX-2B (ZhipuAI) — 고품질",
+        "label": "CogVideoX-2B (ZhipuAI) — 오픈소스, 고품질",
         "provider": "fal-ai",
         "recommended": False,
     },
-    # ── HuggingFace Inference ────────────────────────────────────────────────
+    # ── HuggingFace Inference API (무료 티어 가능, HF 토큰 필요) ────────────
     {
-        "id": "ali-vilab/text-to-video-ms-1.7b",
-        "label": "Text-to-Video MS 1.7B (ModelScope) — HF 경량",
+        "id": "tencent/HunyuanVideo",
+        "label": "HunyuanVideo (Tencent) — 오픈소스, HF 무료 티어",
         "provider": "hf-inference",
         "recommended": False,
+        "note": "HF Inference API warm 상태 — 무료 사용 가능 (속도 제한 있음)",
+    },
+    {
+        "id": "genmo/mochi-1-preview",
+        "label": "Mochi-1 Preview (Genmo) — 오픈소스, HF 무료 티어",
+        "provider": "hf-inference",
+        "recommended": False,
+        "note": "HF Inference API warm 상태 — 자연스러운 움직임 특화",
     },
     # ── JSON2Video ───────────────────────────────────────────────────────────
     {
@@ -336,26 +344,26 @@ def _run_generation(job_id: int, token: str):
         try:
             from huggingface_hub import InferenceClient
 
-            client = InferenceClient(api_key=token)
-            video_progress.notify_sync(job_id, 15, "API 연결 완료, 영상 생성 시작...")
+            client = InferenceClient(token=token)
+            video_progress.notify_sync(job_id, 15, f"HF Inference API 연결 중: {job.model_id}")
 
-            # 영상 생성 (반환값: bytes)
-            kwargs: dict = {"model": job.model_id}
-            if job.meta.get("num_frames"):
+            # 영상 생성
+            kwargs: dict = {}
+            if job.meta and job.meta.get("num_frames"):
                 kwargs["num_frames"] = job.meta["num_frames"]
 
-            video_progress.notify_sync(job_id, 20, "영상 생성 중 (모델 추론)...")
-            video_bytes = client.text_to_video(job.prompt, **kwargs)
+            video_progress.notify_sync(job_id, 20, "영상 생성 중 (콜드 스타트 시 최대 3~5분)...")
+            video_bytes = client.text_to_video(job.prompt, model=job.model_id, **kwargs)
             video_progress.notify_sync(job_id, 85, "영상 저장 중...")
 
-            # 파일 저장
+            # 파일 저장 (bytes 또는 file-like 모두 처리)
             out_path = VIDEO_DIR / f"video_{job.id}.mp4"
-            if isinstance(video_bytes, bytes):
+            if isinstance(video_bytes, (bytes, bytearray)):
                 out_path.write_bytes(video_bytes)
+            elif hasattr(video_bytes, "read"):
+                out_path.write_bytes(video_bytes.read())
             else:
-                # huggingface_hub >= 0.27 returns a generator or file-like
-                data = b"".join(video_bytes) if hasattr(video_bytes, "__iter__") else bytes(video_bytes)
-                out_path.write_bytes(data)
+                out_path.write_bytes(b"".join(video_bytes))
 
             job.status = "done"
             job.video_path = str(out_path)
@@ -364,11 +372,21 @@ def _run_generation(job_id: int, token: str):
 
         except ImportError:
             job.status = "failed"
-            job.error_msg = "huggingface_hub 패키지가 설치되지 않았습니다. pip install huggingface_hub"
+            job.error_msg = "huggingface_hub 패키지가 없습니다. 서버에서 han update를 실행하세요."
             video_progress.done_sync(job_id, "failed")
         except Exception as e:
+            err = str(e)
+            # HF Inference API 주요 오류 안내
+            if "503" in err or "loading" in err.lower():
+                err = f"모델 로딩 중 (콜드 스타트) — 잠시 후 재시도하세요. 원본: {err[:200]}"
+            elif "401" in err or "authorization" in err.lower():
+                err = "HuggingFace 토큰 인증 실패 — 관리자 → 외부 API 키에서 토큰을 재등록하세요."
+            elif "404" in err or "not found" in err.lower():
+                err = f"모델을 찾을 수 없거나 HF Inference API 미지원 모델입니다: {job.model_id}"
+            elif "429" in err or "rate" in err.lower():
+                err = "HF API 요청 한도 초과 — 잠시 후 재시도하거나 HF Pro를 이용하세요."
             job.status = "failed"
-            job.error_msg = str(e)[:500]
+            job.error_msg = err[:500]
             job.finished_at = datetime.utcnow()
             video_progress.done_sync(job_id, "failed")
 
