@@ -207,10 +207,13 @@ def create_api_key(
     새 외부 API 키를 등록합니다.
     service 값: serpapi | newsapi | comtrade | wordpress | tistory | blogger | youtube
     """
+    # API 키 앞뒤 공백 제거 (복사-붙여넣기 오류 방지)
+    clean_key = (req.api_key or "").strip()
+
     # 동일 서비스가 이미 있으면 업데이트
     existing = db.query(ExternalApiKey).filter(ExternalApiKey.service == req.service).first()
     if existing:
-        existing.api_key = req.api_key
+        existing.api_key = clean_key
         existing.label = req.label or existing.label
         existing.extra_config = req.extra_config if req.extra_config else existing.extra_config
         existing.is_active = True
@@ -222,7 +225,7 @@ def create_api_key(
     obj = ExternalApiKey(
         service=req.service,
         label=req.label or req.service,
-        api_key=req.api_key,
+        api_key=clean_key,
         extra_config=req.extra_config,
         is_active=True,
     )
@@ -245,7 +248,7 @@ def update_api_key(
     if req.label is not None:
         obj.label = req.label
     if req.api_key is not None:
-        obj.api_key = req.api_key
+        obj.api_key = req.api_key.strip()
     if req.extra_config is not None:
         obj.extra_config = req.extra_config
     if req.is_active is not None:
@@ -304,6 +307,12 @@ def _test_connection(service: str, api_key: str) -> dict:
     import requests as _req
     try:
         if service == "huggingface":
+            # API 키 공백 재확인 (저장 시 strip 했어도 이중 보호)
+            api_key = api_key.strip()
+            if not api_key:
+                return {"ok": False, "message": "API 키가 비어 있습니다."}
+            if not api_key.startswith("hf_"):
+                return {"ok": False, "message": f"HuggingFace 토큰은 'hf_'로 시작해야 합니다. (현재: {api_key[:6]}...)"}
             r = _req.get(
                 "https://huggingface.co/api/whoami",
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -311,8 +320,12 @@ def _test_connection(service: str, api_key: str) -> dict:
             )
             ok = r.status_code == 200
             if ok:
-                name = r.json().get("name", "")
+                data = r.json()
+                name = data.get("name", "") or data.get("fullname", "")
                 msg = f"인증 성공 (계정: {name})" if name else "인증 성공"
+            elif r.status_code == 401:
+                msg = ("인증 실패 (HTTP 401) — 토큰이 만료되었거나 권한이 없습니다. "
+                       "HuggingFace → Settings → Access Tokens에서 'Read' 권한 토큰을 재발급하세요.")
             else:
                 msg = f"인증 실패 (HTTP {r.status_code})"
 

@@ -96,6 +96,7 @@ cmd_help() {
   echo -e "  ${GREEN}init_check${NC}                환경 점검 (Python/Node/포트/설정)"
   echo -e "  ${GREEN}init_check --fix${NC}          환경 점검 + 자동 수정 (venv/pip/npm/.env)"
   echo -e "  ${GREEN}diff-env${NC}                  .env 와 기본 템플릿 비교 (누락/미설정/커스텀 키)"
+  echo -e "  ${GREEN}diff-env --fix${NC}            누락/미설정 키를 대화형으로 직접 입력"
   echo ""
   echo -e "${BOLD}설정${NC}"
   echo -e "  ${GREEN}config${NC}                    .env 전체 보기 (API 키 마스킹)"
@@ -634,6 +635,44 @@ cmd_status() {
     provider=$(grep "^DEFAULT_PROVIDER=" "$HAN_DIR/backend/.env" | cut -d= -f2)
     echo "  AI 프로바이더 : ${provider:-미설정}"
   fi
+
+  # ─ DB 상태 ──────────────────────────────────────────────────────────────────
+  echo ""
+  local DB_PATH="$HAN_DIR/backend/han_group.db"
+  if [ -f "$DB_PATH" ]; then
+    local db_size table_count
+    db_size=$(du -sh "$DB_PATH" 2>/dev/null | cut -f1)
+    # SQLite 테이블 수 조회 (venv python 사용)
+    local VENV_PYTHON="$HAN_DIR/backend/venv/bin/python"
+    if [ -f "$VENV_PYTHON" ]; then
+      table_count=$(HAN_DIR="$HAN_DIR" "$VENV_PYTHON" -c "
+import sqlite3, os
+conn = sqlite3.connect(os.path.join(os.environ['HAN_DIR'],'backend','han_group.db'))
+n = conn.execute(\"SELECT count(*) FROM sqlite_master WHERE type='table'\").fetchone()[0]
+print(n)
+conn.close()
+" 2>/dev/null || echo "?")
+    else
+      table_count="?"
+    fi
+    echo -e "  ${BOLD}DB 상태${NC}"
+    echo "  ├ 파일  : $DB_PATH"
+    echo "  ├ 크기  : $db_size"
+    echo "  ├ 테이블: ${table_count}개"
+    # 마지막 마이그레이션 백업
+    local last_mig
+    last_mig=$(ls -t "$HAN_BACKUP_DIR"/han_group_before_migrate_*.db 2>/dev/null | head -1)
+    if [ -n "$last_mig" ]; then
+      local mig_time
+      mig_time=$(date -r "$last_mig" "+%Y-%m-%d %H:%M:%S" 2>/dev/null \
+                 || stat -c "%y" "$last_mig" 2>/dev/null | cut -d. -f1)
+      echo "  └ 마지막 migrate: $mig_time"
+    else
+      echo "  └ 마지막 migrate: 없음 (han migrate 로 초기화)"
+    fi
+  else
+    echo -e "  ${YELLOW}⚠ DB 없음${NC} — han start --daemon 실행 시 자동 생성됩니다."
+  fi
   echo ""
 }
 
@@ -859,8 +898,8 @@ cmd_update() {
     echo "       cd $HAN_DIR/frontend && npm install"
   fi
 
-  # ─ [3/3] han CLI 자신도 업데이트 ─────────────────────────────────────────
-  echo -e "  ${CYAN}▸ [3/3] han CLI 업데이트...${NC}"
+  # ─ [3/4] han CLI 자신도 업데이트 ─────────────────────────────────────────
+  echo -e "  ${CYAN}▸ [3/4] han CLI 업데이트...${NC}"
   local CLI_PATH
   CLI_PATH=$(command -v han 2>/dev/null || echo "")
   if [ -n "$CLI_PATH" ] && [ "$CLI_PATH" != "$HAN_DIR/han" ]; then
@@ -869,6 +908,65 @@ cmd_update() {
     echo -e "  ${GREEN}  ✓ han CLI 업데이트됨${NC} ($CLI_PATH)"
   else
     echo -e "  ${DIM}  - CLI 업데이트 불필요${NC}"
+  fi
+
+  # ─ [4/4] DB 스키마 자동 마이그레이션 ─────────────────────────────────────
+  echo -e "  ${CYAN}▸ [4/4] DB 스키마 마이그레이션...${NC}"
+  local VENV_PYTHON="$HAN_DIR/backend/venv/bin/python"
+  local DB_PATH_MIG="$HAN_DIR/backend/han_group.db"
+  if [ -f "$VENV_PYTHON" ] && [ -f "$DB_PATH_MIG" ]; then
+    # 마이그레이션 (백업은 이미 앞에서 했으므로 생략)
+    local MIG_OUT MIG_EXIT=0
+    set +e
+    MIG_OUT=$(HAN_DIR="$HAN_DIR" "$VENV_PYTHON" - <<'PYEOF' 2>&1
+import sys, os
+sys.path.insert(0, os.path.join(os.environ["HAN_DIR"], "backend"))
+from sqlalchemy import create_engine, inspect, text
+from core.database import Base
+import models.models  # noqa
+DB_URL = "sqlite:///" + os.path.join(os.environ["HAN_DIR"], "backend", "han_group.db")
+engine = create_engine(DB_URL)
+inspector = inspect(engine)
+existing_before = set(inspector.get_table_names())
+Base.metadata.create_all(engine, checkfirst=True)
+inspector = inspect(engine)
+new_tables = set(inspector.get_table_names()) - existing_before
+TYPE_MAP = {"VARCHAR":"TEXT","STRING":"TEXT","TEXT":"TEXT","INTEGER":"INTEGER",
+            "BIGINT":"INTEGER","INT":"INTEGER","FLOAT":"REAL","NUMERIC":"REAL",
+            "BOOLEAN":"INTEGER","DATETIME":"DATETIME","JSON":"TEXT","LARGEBINARY":"BLOB","BLOB":"BLOB"}
+def to_sqlite(t): return next((v for k,v in TYPE_MAP.items() if k in t.upper()), "TEXT")
+def dflt_clause(col):
+    if col.default and col.default.is_scalar:
+        dv = col.default.arg
+        if dv is None: return " DEFAULT NULL"
+        if isinstance(dv, bool): return f" DEFAULT {int(dv)}"
+        if isinstance(dv, str): return f" DEFAULT '{dv.replace(chr(39), chr(39)*2)}'"
+        return f" DEFAULT {dv}"
+    return " DEFAULT NULL"
+added = 0
+for tname, tobj in Base.metadata.tables.items():
+    if tname not in inspector.get_table_names(): continue
+    existing_cols = {c["name"] for c in inspector.get_columns(tname)}
+    for col in tobj.columns:
+        if col.name in existing_cols: continue
+        sql = f"ALTER TABLE {tname} ADD COLUMN {col.name} {to_sqlite(str(col.type))}{dflt_clause(col)}"
+        with engine.connect() as conn:
+            conn.execute(text(sql)); conn.commit()
+        added += 1
+print(f"신규 테이블: {len(new_tables)}개, 추가 컬럼: {added}개")
+PYEOF
+    )
+    MIG_EXIT=$?
+    set -e
+    if [ $MIG_EXIT -eq 0 ]; then
+      echo -e "  ${GREEN}  ✓ DB 마이그레이션 완료${NC}  (${MIG_OUT})"
+    else
+      echo -e "  ${YELLOW}  △ DB 마이그레이션 실패 — 수동 실행: han migrate${NC}"
+    fi
+  elif [ ! -f "$DB_PATH_MIG" ]; then
+    echo -e "  ${DIM}  - DB 없음 (첫 시작 시 자동 생성)${NC}"
+  else
+    echo -e "  ${DIM}  - venv 없음 — han init_check --fix 로 설치 후 한 번 더 실행하세요${NC}"
   fi
 
   echo ""
@@ -1426,6 +1524,9 @@ cmd_self_update() {
 # 현재 .env 와 기본 템플릿을 비교해 설정됨/기본값/누락/커스텀 키를 표시
 # ─────────────────────────────────────────────────────────────────────────────
 cmd_diff_env() {
+  local FIX_MODE=false
+  [[ "${1:-}" == "--fix" ]] && FIX_MODE=true
+
   local ENV_FILE="$HAN_DIR/backend/.env"
 
   # 템플릿 키 목록 (순서 유지)
@@ -1533,14 +1634,96 @@ cmd_diff_env() {
   [ $cnt_custom  -gt 0 ] && echo -e "  ${CYAN}+ 커스텀  ${NC}: ${cnt_custom}개"
   echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-  if [ $cnt_missing -gt 0 ]; then
+  if ! $FIX_MODE; then
+    if [ $cnt_missing -gt 0 ]; then
+      echo ""
+      echo -e "  ${YELLOW}▶ 누락 키 추가:${NC}  han init_check --fix"
+    fi
+    if [ $cnt_default -gt 0 ]; then
+      echo ""
+      echo -e "  ${DIM}▶ 대화형 설정:${NC}  han diff-env --fix"
+    fi
     echo ""
-    echo -e "  ${YELLOW}▶ 누락 키 추가:${NC}  han init_check --fix"
+    return 0
   fi
-  if [ $cnt_default -gt 0 ]; then
+
+  # ── --fix 모드: 누락/미설정 키를 대화형으로 입력 ──────────────────────────
+  local fix_count=0
+  if [ $((cnt_missing + cnt_default)) -eq 0 ]; then
     echo ""
-    echo -e "  ${DIM}▶ 값 변경:${NC}   han config set <KEY> <VALUE>"
+    echo -e "  ${GREEN}✓ 모든 키가 이미 설정되어 있습니다.${NC}"
+    echo ""
+    return 0
   fi
+
+  echo ""
+  echo -e "${BOLD}[ --fix 모드: 누락/미설정 키 입력 ]${NC}"
+  echo -e "  ${DIM}(Enter 건너뛰기, Ctrl+C 중단)${NC}"
+  echo ""
+
+  for KEY in "${TEMPLATE_KEYS[@]}"; do
+    local DFLT="${TDEFAULTS[$KEY]}"
+    local LINE
+    LINE=$(grep "^${KEY}=" "$ENV_FILE" 2>/dev/null || true)
+    local VAL="${LINE#*=}"
+
+    # 이미 사용자 설정된 키는 건너뜀
+    if [ -n "$LINE" ] && [ "$VAL" != "$DFLT" ] && [ -n "$VAL" ]; then
+      continue
+    fi
+
+    # 누락이거나 기본값/빈 값인 경우
+    local PROMPT_LABEL
+    if [ -z "$LINE" ]; then
+      PROMPT_LABEL="${RED}[누락]${NC}  "
+    elif [ -z "$VAL" ]; then
+      PROMPT_LABEL="${YELLOW}[미설정]${NC}"
+    else
+      PROMPT_LABEL="${DIM}[기본값]${NC}"
+    fi
+
+    # API 키 / SECRET 은 -s(숨김) 입력
+    local READ_OPTS=()
+    if [[ "$KEY" == *"API_KEY"* || "$KEY" == *"SECRET"* ]]; then
+      READ_OPTS=(-s)
+    fi
+
+    echo -e "  ${PROMPT_LABEL} ${KEY}"
+    [ -n "$DFLT" ] && echo -e "               현재/기본값: ${DIM}${DFLT}${NC}"
+
+    local NEW_VAL=""
+    read -r "${READ_OPTS[@]}" -p "               새 값 입력 (Enter=건너뛰기): " NEW_VAL
+    # -s 옵션 후 줄바꿈 출력
+    [[ "${READ_OPTS[*]}" == *"-s"* ]] && echo ""
+
+    if [ -z "$NEW_VAL" ]; then
+      echo -e "               ${DIM}→ 건너뜀${NC}"
+      echo ""
+      continue
+    fi
+
+    # .env 업데이트
+    if grep -q "^${KEY}=" "$ENV_FILE" 2>/dev/null; then
+      if sed --version 2>/dev/null | grep -q GNU; then
+        sed -i "s|^${KEY}=.*|${KEY}=${NEW_VAL}|" "$ENV_FILE"
+      else
+        sed -i '' "s|^${KEY}=.*|${KEY}=${NEW_VAL}|" "$ENV_FILE"
+      fi
+    else
+      echo "${KEY}=${NEW_VAL}" >> "$ENV_FILE"
+    fi
+    echo -e "               ${GREEN}✓ 저장됨${NC}"
+    echo ""
+    fix_count=$((fix_count+1))
+  done
+
+  echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  if [ $fix_count -gt 0 ]; then
+    echo -e "  ${GREEN}✓ ${fix_count}개 키 업데이트됨${NC}  — 변경 적용: han restart"
+  else
+    echo -e "  ${DIM}변경사항 없음${NC}"
+  fi
+  echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
 }
 
