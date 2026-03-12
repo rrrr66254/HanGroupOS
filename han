@@ -95,6 +95,7 @@ cmd_help() {
   echo -e "  ${GREEN}logs frontend${NC}             프론트엔드 로그만"
   echo -e "  ${GREEN}init_check${NC}                환경 점검 (Python/Node/포트/설정)"
   echo -e "  ${GREEN}init_check --fix${NC}          환경 점검 + 자동 수정 (venv/pip/npm/.env)"
+  echo -e "  ${GREEN}diff-env${NC}                  .env 와 기본 템플릿 비교 (누락/미설정/커스텀 키)"
   echo ""
   echo -e "${BOLD}설정${NC}"
   echo -e "  ${GREEN}config${NC}                    .env 전체 보기 (API 키 마스킹)"
@@ -103,6 +104,7 @@ cmd_help() {
   echo ""
   echo -e "${BOLD}업데이트 & 유지보수${NC}"
   echo -e "  ${GREEN}update${NC}                          GitHub 업데이트 + pip/npm 의존성 자동 동기화"
+  echo -e "  ${GREEN}migrate${NC}                         DB 스키마 자동 마이그레이션 (새 테이블/컬럼 추가, 데이터 보존)"
   echo -e "  ${GREEN}reset${NC}                           DB 초기화 후 재시작"
   echo -e "  ${GREEN}backup${NC}                          DB 즉시 백업"
   echo -e "  ${GREEN}backup --auto enable${NC}            자동 백업 cron 등록 (기본: 매일 오전 2시)"
@@ -1420,6 +1422,274 @@ cmd_self_update() {
   echo ""
 }
 
+# ── han diff-env ──────────────────────────────────────────────────────────────
+# 현재 .env 와 기본 템플릿을 비교해 설정됨/기본값/누락/커스텀 키를 표시
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_diff_env() {
+  local ENV_FILE="$HAN_DIR/backend/.env"
+
+  # 템플릿 키 목록 (순서 유지)
+  local TEMPLATE_KEYS=("SECRET_KEY" "DATABASE_URL" "DEFAULT_PROVIDER"
+    "ANTHROPIC_API_KEY" "OPENAI_API_KEY" "GEMINI_API_KEY"
+    "OLLAMA_BASE_URL" "OLLAMA_MODEL")
+
+  # 템플릿 기본값 (키=값 형태로 일치 여부 판단)
+  declare -A TDEFAULTS
+  TDEFAULTS["SECRET_KEY"]="han-group-os-secret-key-change-in-production"
+  TDEFAULTS["DATABASE_URL"]="sqlite:///./han_group.db"
+  TDEFAULTS["DEFAULT_PROVIDER"]="mock"
+  TDEFAULTS["ANTHROPIC_API_KEY"]=""
+  TDEFAULTS["OPENAI_API_KEY"]=""
+  TDEFAULTS["GEMINI_API_KEY"]=""
+  TDEFAULTS["OLLAMA_BASE_URL"]="http://localhost:11434"
+  TDEFAULTS["OLLAMA_MODEL"]="qwen2.5"
+
+  echo ""
+  echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
+  echo -e "${BOLD}║     han diff-env — .env 템플릿 비교          ║${NC}"
+  echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
+  echo ""
+
+  if [ ! -f "$ENV_FILE" ]; then
+    echo -e "  ${RED}✗ .env 파일 없음: $ENV_FILE${NC}"
+    echo "  han init_check --fix 로 먼저 생성하세요."
+    echo ""
+    exit 1
+  fi
+
+  echo -e "  ${DIM}파일: $ENV_FILE${NC}"
+  echo ""
+
+  local cnt_ok=0 cnt_default=0 cnt_missing=0 cnt_custom=0
+
+  # ─ 1. 템플릿 키 순서대로 비교 ───────────────────────────────────────────────
+  echo -e "${BOLD}[ 템플릿 키 비교 ]${NC}"
+  echo ""
+  for KEY in "${TEMPLATE_KEYS[@]}"; do
+    local DFLT="${TDEFAULTS[$KEY]}"
+    local LINE
+    LINE=$(grep "^${KEY}=" "$ENV_FILE" 2>/dev/null || true)
+
+    if [ -z "$LINE" ]; then
+      # 키 자체가 없음
+      echo -e "  ${RED}✗ [누락]   ${NC} ${KEY}"
+      echo -e "             기본값: ${DIM}${DFLT:-<빈 값>}${NC}"
+      cnt_missing=$((cnt_missing+1))
+    else
+      local VAL="${LINE#*=}"
+      # API 키 / SECRET 마스킹
+      local DISPLAY="$VAL"
+      if [[ "$KEY" == *"API_KEY"* || "$KEY" == *"SECRET"* ]] && [ ${#VAL} -gt 10 ]; then
+        DISPLAY="${VAL:0:6}****${VAL: -4}"
+      fi
+
+      if [ "$VAL" = "$DFLT" ]; then
+        if [ -z "$VAL" ]; then
+          echo -e "  ${YELLOW}△ [미설정] ${NC} ${KEY}=${DIM}<빈 값>${NC}"
+        else
+          echo -e "  ${DIM}○ [기본값] ${NC} ${KEY}=${DIM}${DISPLAY}${NC}"
+        fi
+        cnt_default=$((cnt_default+1))
+      else
+        echo -e "  ${GREEN}✓ [설정됨] ${NC} ${KEY}=${DISPLAY}"
+        cnt_ok=$((cnt_ok+1))
+      fi
+    fi
+  done
+
+  # ─ 2. 커스텀 키 (.env에만 있는 키) ─────────────────────────────────────────
+  echo ""
+  echo -e "${BOLD}[ 커스텀 키 (템플릿에 없는 항목) ]${NC}"
+  echo ""
+  local has_custom=false
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == "#"* ]] && continue
+    local K="${line%%=*}"
+    local found=false
+    for TK in "${TEMPLATE_KEYS[@]}"; do
+      [ "$TK" = "$K" ] && { found=true; break; }
+    done
+    if ! $found; then
+      local V="${line#*=}"
+      local DV="$V"
+      if [[ "$K" == *"API_KEY"* || "$K" == *"SECRET"* ]] && [ ${#V} -gt 10 ]; then
+        DV="${V:0:6}****${V: -4}"
+      fi
+      echo -e "  ${CYAN}+ [커스텀]  ${NC} ${K}=${DV}"
+      cnt_custom=$((cnt_custom+1))
+      has_custom=true
+    fi
+  done < "$ENV_FILE"
+  $has_custom || echo -e "  ${DIM}(없음)${NC}"
+
+  # ─ 요약 ────────────────────────────────────────────────────────────────────
+  echo ""
+  echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo -e "  결과 요약"
+  echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  [ $cnt_ok      -gt 0 ] && echo -e "  ${GREEN}✓ 설정됨  ${NC}: ${cnt_ok}개"
+  [ $cnt_default -gt 0 ] && echo -e "  ${YELLOW}△ 기본/미설정${NC}: ${cnt_default}개  (변경 권장)"
+  [ $cnt_missing -gt 0 ] && echo -e "  ${RED}✗ 누락    ${NC}: ${cnt_missing}개  → han init_check --fix"
+  [ $cnt_custom  -gt 0 ] && echo -e "  ${CYAN}+ 커스텀  ${NC}: ${cnt_custom}개"
+  echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  if [ $cnt_missing -gt 0 ]; then
+    echo ""
+    echo -e "  ${YELLOW}▶ 누락 키 추가:${NC}  han init_check --fix"
+  fi
+  if [ $cnt_default -gt 0 ]; then
+    echo ""
+    echo -e "  ${DIM}▶ 값 변경:${NC}   han config set <KEY> <VALUE>"
+  fi
+  echo ""
+}
+
+# ── han migrate ───────────────────────────────────────────────────────────────
+# SQLite 스키마 자동 마이그레이션
+#   - 새 테이블: Base.metadata.create_all(checkfirst=True)
+#   - 누락 컬럼: ALTER TABLE ... ADD COLUMN
+#   - 기존 데이터 보존, 실행 전 자동 백업
+# ─────────────────────────────────────────────────────────────────────────────
+cmd_migrate() {
+  local DB_PATH="$HAN_DIR/backend/han_group.db"
+  local VENV_PYTHON="$HAN_DIR/backend/venv/bin/python"
+
+  echo ""
+  echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
+  echo -e "${BOLD}║   han migrate — DB 스키마 자동 마이그레이션   ║${NC}"
+  echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
+  echo ""
+
+  if [ ! -f "$VENV_PYTHON" ]; then
+    echo -e "  ${RED}✗ Python venv 없음 — han init_check --fix 먼저 실행하세요.${NC}"
+    echo ""
+    exit 1
+  fi
+
+  if [ ! -f "$DB_PATH" ]; then
+    echo -e "  ${YELLOW}⚠ DB 파일이 없습니다.${NC}"
+    echo "    han start --daemon 으로 서버를 한 번 시작하면 자동 생성됩니다."
+    echo ""
+    exit 1
+  fi
+
+  # DB 자동 백업 (마이그레이션 전)
+  local ts
+  ts=$(date +%Y%m%d_%H%M%S)
+  local BACKUP_FILE="$HAN_BACKUP_DIR/han_group_before_migrate_${ts}.db"
+  cp "$DB_PATH" "$BACKUP_FILE"
+  echo -e "  ${GREEN}✓ DB 백업됨${NC} → $(basename "$BACKUP_FILE")"
+  echo ""
+
+  echo -e "  ${CYAN}▸ 스키마 비교 및 마이그레이션 실행 중...${NC}"
+  echo ""
+
+  local MIGRATE_EXIT=0
+  set +e
+  HAN_DIR="$HAN_DIR" "$VENV_PYTHON" - <<'PYEOF'
+import sys, os
+sys.path.insert(0, os.path.join(os.environ["HAN_DIR"], "backend"))
+
+from sqlalchemy import create_engine, inspect, text
+from core.database import Base
+import models.models  # noqa: F401 — 모든 모델 임포트해 metadata 등록
+
+DB_URL = "sqlite:///" + os.path.join(os.environ["HAN_DIR"], "backend", "han_group.db")
+engine = create_engine(DB_URL)
+
+# ─ 1. 새 테이블 생성 ─────────────────────────────────────────────────────────
+print("  [ 1/2 ] 새 테이블 확인...")
+inspector = inspect(engine)
+existing_tables_before = set(inspector.get_table_names())
+
+Base.metadata.create_all(engine, checkfirst=True)
+
+inspector = inspect(engine)
+existing_tables_after = set(inspector.get_table_names())
+new_tables = existing_tables_after - existing_tables_before
+
+if new_tables:
+    for t in sorted(new_tables):
+        print(f"    \033[32m+ 테이블 생성됨: {t}\033[0m")
+else:
+    print("    \033[2m신규 테이블 없음\033[0m")
+
+# ─ 2. 누락 컬럼 추가 (ALTER TABLE ADD COLUMN) ────────────────────────────────
+print("")
+print("  [ 2/2 ] 누락 컬럼 확인...")
+
+# SQLAlchemy 타입 문자열 → SQLite 타입
+TYPE_MAP = {
+    "VARCHAR": "TEXT", "STRING": "TEXT", "TEXT": "TEXT",
+    "INTEGER": "INTEGER", "BIGINT": "INTEGER", "INT": "INTEGER",
+    "FLOAT": "REAL", "NUMERIC": "REAL", "BOOLEAN": "INTEGER",
+    "DATETIME": "DATETIME", "JSON": "TEXT",
+    "LARGEBINARY": "BLOB", "BLOB": "BLOB",
+}
+
+def to_sqlite_type(col_type_str):
+    upper = col_type_str.upper()
+    for k, v in TYPE_MAP.items():
+        if k in upper:
+            return v
+    return "TEXT"
+
+def default_clause(col):
+    """컬럼 기본값 → SQL DEFAULT 절 문자열 반환."""
+    if col.default is not None and col.default.is_scalar:
+        dv = col.default.arg
+        if dv is None:
+            return " DEFAULT NULL"
+        if isinstance(dv, bool):
+            return f" DEFAULT {int(dv)}"
+        if isinstance(dv, str):
+            safe = dv.replace("'", "''")
+            return f" DEFAULT '{safe}'"
+        return f" DEFAULT {dv}"
+    # nullable 컬럼이거나 default 없으면 NULL 허용
+    return " DEFAULT NULL"
+
+added_cols = 0
+for table_name, table_obj in Base.metadata.tables.items():
+    if table_name not in existing_tables_after:
+        continue  # 방금 create_all로 생성된 테이블은 이미 완전한 스키마
+    existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
+    for col in table_obj.columns:
+        if col.name in existing_cols:
+            continue
+        sql_type = to_sqlite_type(str(col.type))
+        dflt = default_clause(col)
+        alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {col.name} {sql_type}{dflt}"
+        with engine.connect() as conn:
+            conn.execute(text(alter_sql))
+            conn.commit()
+        print(f"    \033[32m+ {table_name}.{col.name} ({sql_type}{dflt})\033[0m")
+        added_cols += 1
+
+if added_cols == 0:
+    print("    \033[2m누락 컬럼 없음\033[0m")
+
+print("")
+print(f"  \033[32m✅ 마이그레이션 완료\033[0m  "
+      f"(신규 테이블: {len(new_tables)}개, 추가 컬럼: {added_cols}개)")
+PYEOF
+  MIGRATE_EXIT=$?
+  set -e
+
+  if [ $MIGRATE_EXIT -ne 0 ]; then
+    echo ""
+    echo -e "  ${RED}✗ 마이그레이션 실패 (종료 코드: $MIGRATE_EXIT)${NC}"
+    echo ""
+    echo "  백업에서 복원하려면: han restore"
+    exit 1
+  fi
+
+  echo ""
+  echo -e "  ${DIM}백업 파일: $BACKUP_FILE${NC}"
+  echo -e "  ${DIM}복원이 필요하면: han restore${NC}"
+  echo ""
+}
+
 # ── han open ──────────────────────────────────────────────────────────────────
 cmd_open() {
   local URL="http://localhost:5173"
@@ -1445,6 +1715,8 @@ case "$COMMAND" in
   backup)               cmd_backup "$@" ;;
   restore)              cmd_restore ;;
   config)               cmd_config "$@" ;;
+  diff-env)             cmd_diff_env ;;
+  migrate)              cmd_migrate ;;
   path-fix)             cmd_path_fix "$@" ;;
   self-update)          cmd_self_update ;;
   open)                 cmd_open ;;
