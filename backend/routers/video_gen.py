@@ -637,10 +637,13 @@ def _run_local_gpu_generation(job_id: int):
             threading.Thread(target=_ollama_warmup, daemon=True).start()
 
         except ImportError as e:
+            missing = str(e).replace("No module named ", "").strip("'\"")
             job.status = "failed"
             job.error_msg = (
-                f"필수 패키지 미설치: {e}. "
-                "터미널에서 'han setup-gpu' 명령을 실행하여 설치하세요."
+                f"필수 패키지 미설치: {missing}\n"
+                "터미널에서 아래 명령을 실행하세요:\n\n"
+                "  han setup-gpu\n\n"
+                "설치 항목: PyTorch (CUDA), diffusers, transformers, accelerate"
             )
             video_progress.done_sync(job_id, "failed")
         except Exception as e:
