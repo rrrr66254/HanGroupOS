@@ -162,21 +162,36 @@
 curl -fsSL https://raw.githubusercontent.com/rrrr66254/HanGroupOS/master/install.sh | bash
 ```
 
+**Windows PowerShell:**
+```powershell
+irm https://raw.githubusercontent.com/rrrr66254/HanGroupOS/master/install.ps1 | iex
+```
+
 설치 완료 후 사용 가능한 명령어:
 
 ```bash
+# 서버 관리
 han start           # 서버 시작 (포그라운드)
 han start --daemon  # 백그라운드 시작
 han stop            # 서버 종료
 han restart         # 재시작
-han status          # 실행 상태 확인
+han status          # 실행 상태 + 버전 + 설정 요약
+
+# 진단 & 로그
+han init_check      # 환경 사전 점검 (Python/Node/포트/Ollama 연결 등)
 han logs            # 실시간 로그 보기
 han logs backend    # 백엔드 로그만
-han update          # 최신 버전 업데이트
+
+# 업데이트 & 유지보수
+han update          # GitHub 업데이트 확인 → 변경 내역 출력 → 적용
 han reset           # DB 초기화
-han config          # 현재 설정 보기 (.env)
+han backup          # DB 백업 (~/.han/backups/)
+han restore         # 백업 목록에서 선택해 복원
+
+# 설정 & 기타
+han config          # 현재 .env 보기 (API 키 마스킹)
 han open            # 브라우저 열기
-han --version       # 버전 확인
+han --version       # 버전 + 커밋 해시
 han help            # 전체 도움말
 ```
 
