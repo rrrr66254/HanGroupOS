@@ -26,6 +26,7 @@ export interface AppToast {
   type: 'success' | 'error' | 'info'
   title: string
   body?: string
+  link?: string  // 클릭 시 navigate할 경로
 }
 
 interface AppState {

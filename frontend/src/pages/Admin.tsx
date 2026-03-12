@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe, FlaskConical, Loader2, Webhook, Copy, HardDrive, Download, Star, Zap, XCircle, Terminal } from 'lucide-react'
 import { modelsApi, externalKeyApi, webhooksApi, videoApi } from '../api/client'
 import { useAuthStore } from '../store/useStore'
@@ -44,11 +45,18 @@ const PROVIDER_INFO: Record<string, { label: string; color: string; description:
   mock: { label: 'Mock AI', color: 'text-slate-400', description: 'API 없이 테스트 가능' },
 }
 
+const VALID_TABS = ['providers', 'catalog', 'external-keys', 'webhooks', 'ollama', 'gpu-log', 'system'] as const
+type AdminTab = typeof VALID_TABS[number]
+
 export default function Admin() {
+  const [searchParams] = useSearchParams()
   const [catalog, setCatalog] = useState<ModelCatalog[]>([])
   const [providers, setProviders] = useState<ProviderConfig[]>([])
   const [health, setHealth] = useState<Record<string, { status: string; model: string }>>({})
-  const [tab, setTab] = useState<'providers' | 'catalog' | 'external-keys' | 'webhooks' | 'ollama' | 'gpu-log' | 'system'>('providers')
+  const initialTab = (VALID_TABS.includes(searchParams.get('tab') as AdminTab)
+    ? searchParams.get('tab')
+    : 'providers') as AdminTab
+  const [tab, setTab] = useState<AdminTab>(initialTab)
 
   const [newProvider, setNewProvider] = useState({
     provider: 'anthropic', api_key: '', model_override: '', base_url: '',
@@ -80,6 +88,7 @@ export default function Admin() {
   // Pull WebSocket 상태 (model별 관리 + 페이지 재진입 복원)
   const [pullProgress, setPullProgress] = useState<{ pct: number; status: string; active: boolean; queued?: boolean } | null>(null)
   const [pullModel, setPullModel] = useState<string>('')  // 현재 pull 중인 모델명
+  const [cancelling, setCancelling] = useState(false)
   const pullWsRef = useRef<WebSocket | null>(null)
   // GPU 설치 로그 탭
   const [gpuLog, setGpuLog] = useState<string>('')
@@ -167,21 +176,20 @@ export default function Admin() {
 
   const handleCancelPull = async () => {
     const model = pullModel
+    setCancelling(true)
     // WebSocket 먼저 닫기 (UI 즉시 반응)
     pullWsRef.current?.close()
     pullWsRef.current = null
     setPullProgress(null)
     setPullModel('')
-    setOllamaMsg('다운로드 취소 중...')
     // 백엔드에 취소 요청 전송 — 실제 Ollama 스트림 중단
     if (model) {
       try {
         await videoApi.ollamaCancelPull(model)
-        setOllamaMsg('다운로드가 취소되었습니다.')
-      } catch {
-        setOllamaMsg('다운로드가 취소되었습니다.')
-      }
+      } catch { /* ignore */ }
     }
+    setCancelling(false)
+    setOllamaMsg('다운로드가 취소되었습니다.')
   }
 
   const handleOllamaUnload = async () => {
@@ -896,8 +904,15 @@ export default function Admin() {
                 className="flex-1 bg-bg-base border border-bg-border rounded text-xs text-slate-200 px-3 py-2 focus:outline-none focus:border-brand/60 placeholder:text-slate-600 disabled:opacity-50"
               />
               {pullProgress?.active ? (
-                <button onClick={handleCancelPull} className="px-3 py-2 rounded bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors">
-                  <XCircle size={12} />
+                <button
+                  onClick={handleCancelPull}
+                  disabled={cancelling}
+                  title="다운로드 취소"
+                  className="px-3 py-2 rounded bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500/30 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {cancelling
+                    ? <Loader2 size={12} className="animate-spin" />
+                    : <XCircle size={12} />}
                 </button>
               ) : (
                 <button onClick={handleOllamaPull} disabled={!ollamaPullName.trim()} className="btn-primary text-xs px-3">

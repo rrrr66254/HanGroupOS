@@ -42,6 +42,7 @@ export default function PullWatcher() {
             type: 'success',
             title: 'Ollama 모델 다운로드 완료',
             body: `"${model}" 다운로드가 완료되었습니다.`,
+            link: '/admin?tab=ollama',
           })
           ws.close()
           wsMapRef.current.delete(model)

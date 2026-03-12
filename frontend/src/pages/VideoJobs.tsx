@@ -3,6 +3,7 @@ import {
   Film, Trash2, RefreshCw, AlertCircle, CheckCircle,
   Loader2, Play, Download, Filter, Search, ExternalLink,
   Building2, BarChart2, Clock, TrendingUp, TrendingDown, RotateCcw, LayoutList, Layers,
+  Cpu,
 } from 'lucide-react'
 import { videoApi, companiesApi } from '../api/client'
 import { useNavigate } from 'react-router-dom'
@@ -24,6 +25,13 @@ interface VideoJob {
 interface Company {
   id: number
   name: string
+}
+
+interface GpuStatus {
+  gpu_locked?: boolean
+  queue_length?: number
+  pull_queue_length?: number
+  active_pulls?: string[]
 }
 
 interface VideoStats {
@@ -73,7 +81,9 @@ export default function VideoJobs() {
   const [batchDeleting, setBatchDeleting] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [groupByCompany, setGroupByCompany] = useState(false)
+  const [gpuStatus, setGpuStatus] = useState<GpuStatus | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const gpuPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const navigate = useNavigate()
 
   const loadStats = () => videoApi.stats().then((r) => setStats(r.data)).catch(() => {})
@@ -112,6 +122,17 @@ export default function VideoJobs() {
     }
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [jobs])
+
+  // GPU 상태 폴링 — 활성 잡 있을 때 3초, 없을 때 10초
+  useEffect(() => {
+    const hasActive = jobs.some((j) => j.status === 'pending' || j.status === 'running')
+    const fetchGpu = () =>
+      videoApi.gpuStatus().then((r) => setGpuStatus(r.data)).catch(() => {})
+    fetchGpu()
+    const interval = hasActive ? 3000 : 10000
+    gpuPollRef.current = setInterval(fetchGpu, interval)
+    return () => { if (gpuPollRef.current) clearInterval(gpuPollRef.current) }
+  }, [jobs.map((j) => `${j.id}:${j.status}`).join(',')])
 
   const handleDelete = async (job: VideoJob) => {
     setDeleting(job.id)
@@ -220,6 +241,17 @@ export default function VideoJobs() {
             <Film size={18} className="text-brand-light" />
             <h1 className="text-sm font-semibold text-slate-100">영상 잡 관리</h1>
             <span className="text-xs text-slate-500">({jobs.length}건)</span>
+            {/* GPU 큐 배지 */}
+            {gpuStatus && ((gpuStatus.queue_length ?? 0) > 0 || (gpuStatus.active_pulls?.length ?? 0) > 0 || gpuStatus.gpu_locked) && (
+              <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border bg-blue-500/10 border-blue-500/20 text-blue-300">
+                <Cpu size={9} />
+                {(gpuStatus.queue_length ?? 0) > 0
+                  ? `GPU ${gpuStatus.queue_length}개 대기`
+                  : (gpuStatus.active_pulls?.length ?? 0) > 0
+                  ? '모델 다운로드 중'
+                  : 'GPU 사용 중'}
+              </span>
+            )}
           </div>
 
           {/* Search */}
