@@ -140,9 +140,11 @@ cmd_init_check() {
   local PASS=0
 
   # 헬퍼: 체크 결과 출력 + 카운터
-  _ok()   { echo -e "  ${GREEN}✓${NC} $*"; ((PASS++)); }
-  _warn() { echo -e "  ${YELLOW}△${NC} $*"; ((WARN++)); }
-  _fail() { echo -e "  ${RED}✗${NC} $*"; ((FAIL++)); }
+  # ※ ((N++)) 는 N=0일 때 exit status 1 → set -e로 스크립트 종료됨
+  #    → 반드시 PASS=$((PASS+1)) 형태 사용
+  _ok()   { echo -e "  ${GREEN}✓${NC} $*"; PASS=$((PASS+1)); }
+  _warn() { echo -e "  ${YELLOW}△${NC} $*"; WARN=$((WARN+1)); }
+  _fail() { echo -e "  ${RED}✗${NC} $*"; FAIL=$((FAIL+1)); }
 
   echo ""
   echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"

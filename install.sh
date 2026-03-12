@@ -113,50 +113,55 @@ else
   echo -e "  ${GREEN}✓ PATH 이미 설정됨${NC}"
 fi
 
-# ── 완료 메시지 ───────────────────────────────────────────────────────────────
+# ── 환경 자동 점검 및 수정 ────────────────────────────────────────────────────
+echo -e "${BOLD}🔍 환경 점검 중 (han init_check --fix)...${NC}"
 echo ""
+"$HAN_CLI_DST" init_check --fix || true   # 실패해도 설치 계속 진행
+echo ""
+
+# ── 완료 메시지 ───────────────────────────────────────────────────────────────
 echo -e "${GREEN}════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}  ✅ HAN Group OS v${HAN_VERSION} 설치 완료!${NC}"
 echo ""
 echo "  설치 경로: $INSTALL_DIR"
 echo "  han CLI:   $HAN_CLI_DST"
 echo ""
-echo -e "${BOLD}  사용 방법:${NC}"
+
+# ── PATH 적용 안내 (curl|bash 는 서브쉘이라 export가 부모 터미널에 전파 안 됨) ──
+echo -e "${YELLOW}  ※ 'han' 명령을 바로 쓰려면 아래 중 하나를 실행하세요:${NC}"
 echo ""
-echo "    han start           # 서버 시작"
+echo -e "  ${CYAN}방법 1) 현재 터미널에서 즉시 적용:${NC}"
+echo "    source $SHELL_RC"
+echo ""
+echo -e "  ${CYAN}방법 2) 새 터미널을 열면 자동 적용됩니다.${NC}"
+echo ""
+echo -e "  ${CYAN}방법 3) 전체 경로로 바로 실행:${NC}"
+echo "    $HAN_CLI_DST start --daemon"
+echo ""
+echo -e "${BOLD}  사용 방법 (PATH 적용 후):${NC}"
+echo ""
 echo "    han start --daemon  # 백그라운드 시작"
 echo "    han status          # 실행 상태 확인"
 echo "    han stop            # 서버 종료"
 echo "    han logs            # 로그 보기"
 echo "    han update          # 업데이트"
-echo "    han reset           # DB 초기화"
-echo "    han --version       # 버전 확인"
 echo "    han help            # 전체 도움말"
 echo ""
 echo -e "${GREEN}════════════════════════════════════════════════${NC}"
 echo ""
 
-# ── 환경 자동 점검 및 수정 ────────────────────────────────────────────────────
-echo -e "${BOLD}🔍 환경 점검 중 (han init_check --fix)...${NC}"
-echo ""
-if "$HAN_CLI_DST" init_check --fix; then
-  echo ""
-  echo -e "  ${GREEN}✓ 환경 점검 완료${NC}"
-else
-  echo ""
-  echo -e "  ${YELLOW}⚠ 일부 항목을 수동으로 확인해 주세요${NC}"
-fi
-
-# ── 서버 즉시 시작 여부 (--daemon) ───────────────────────────────────────────
-echo ""
+# ── 서버 즉시 시작 여부 (--daemon, 전체 경로 사용) ───────────────────────────
 if [ -t 0 ]; then
   read -r -p "  지금 바로 서버를 백그라운드로 시작하시겠습니까? (Y/n) > " START_NOW
   START_NOW="${START_NOW:-Y}"
   if [[ "$START_NOW" =~ ^[Yy]$ ]]; then
     echo ""
     "$HAN_CLI_DST" start --daemon
+    echo ""
+    echo -e "  ${CYAN}서버 시작 후 터미널 PATH 적용: source $SHELL_RC${NC}"
   else
     echo ""
-    echo -e "  나중에 시작하려면: ${CYAN}han start --daemon${NC}"
+    echo -e "  시작하려면: ${CYAN}source $SHELL_RC && han start --daemon${NC}"
+    echo -e "  또는      : ${CYAN}$HAN_CLI_DST start --daemon${NC}"
   fi
 fi
