@@ -1,7 +1,23 @@
 import { useEffect, useState } from 'react'
-import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe, FlaskConical, Loader2, Webhook, Copy } from 'lucide-react'
-import { modelsApi, externalKeyApi, webhooksApi } from '../api/client'
+import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe, FlaskConical, Loader2, Webhook, Copy, HardDrive, Download, Star, Zap } from 'lucide-react'
+import { modelsApi, externalKeyApi, webhooksApi, videoApi } from '../api/client'
 import type { ModelCatalog, ProviderConfig } from '../types'
+
+interface OllamaModel {
+  name: string
+  size: number
+  digest: string
+  modified_at: string
+  details?: { parameter_size?: string; quantization_level?: string; family?: string }
+}
+
+interface OllamaInfo {
+  models: OllamaModel[]
+  default_model: string
+  loaded_model: string
+  ollama_running: boolean
+  error?: string
+}
 
 interface ExternalKey {
   id: number
@@ -31,7 +47,7 @@ export default function Admin() {
   const [catalog, setCatalog] = useState<ModelCatalog[]>([])
   const [providers, setProviders] = useState<ProviderConfig[]>([])
   const [health, setHealth] = useState<Record<string, { status: string; model: string }>>({})
-  const [tab, setTab] = useState<'providers' | 'catalog' | 'external-keys' | 'webhooks' | 'system'>('providers')
+  const [tab, setTab] = useState<'providers' | 'catalog' | 'external-keys' | 'webhooks' | 'ollama' | 'system'>('providers')
 
   const [newProvider, setNewProvider] = useState({
     provider: 'anthropic', api_key: '', model_override: '', base_url: '',
@@ -50,6 +66,67 @@ export default function Admin() {
   const [createdToken, setCreatedToken] = useState<string | null>(null)  // 최초 생성 시만 전체 토큰 표시
   const [tokenLoading, setTokenLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+
+  // Ollama 관리
+  const [ollamaInfo, setOllamaInfo] = useState<OllamaInfo | null>(null)
+  const [ollamaLoading, setOllamaLoading] = useState(false)
+  const [ollamaPullName, setOllamaPullName] = useState('')
+  const [ollamaMsg, setOllamaMsg] = useState('')
+  const [deletingModel, setDeletingModel] = useState<string | null>(null)
+  const [settingDefault, setSettingDefault] = useState<string | null>(null)
+
+  const loadOllama = () => {
+    setOllamaLoading(true)
+    videoApi.ollamaModels()
+      .then((r) => setOllamaInfo(r.data))
+      .catch(() => setOllamaInfo({ models: [], default_model: '', loaded_model: '', ollama_running: false, error: 'Ollama에 연결할 수 없습니다.' }))
+      .finally(() => setOllamaLoading(false))
+  }
+
+  const handleOllamaDelete = async (name: string) => {
+    if (!confirm(`"${name}" 모델을 삭제하시겠습니까?`)) return
+    setDeletingModel(name)
+    try {
+      await videoApi.ollamaDelete(name)
+      setOllamaMsg(`✓ ${name} 삭제 완료`)
+      loadOllama()
+    } catch (e: any) {
+      setOllamaMsg(`✗ 삭제 실패: ${e.response?.data?.detail || e.message}`)
+    } finally {
+      setDeletingModel(null)
+    }
+  }
+
+  const handleOllamaSetDefault = async (name: string) => {
+    setSettingDefault(name)
+    try {
+      await videoApi.ollamaSetDefault(name)
+      setOllamaMsg(`✓ 기본 모델을 "${name}"으로 변경했습니다.`)
+      loadOllama()
+    } catch (e: any) {
+      setOllamaMsg(`✗ 변경 실패: ${e.response?.data?.detail || e.message}`)
+    } finally {
+      setSettingDefault(null)
+    }
+  }
+
+  const handleOllamaPull = async () => {
+    const name = ollamaPullName.trim()
+    if (!name) return
+    setOllamaMsg(`⬇ "${name}" 다운로드 시작... (백그라운드 실행, 수 분 소요)`)
+    setOllamaPullName('')
+    try {
+      await videoApi.ollamaPull(name)
+    } catch (e: any) {
+      setOllamaMsg(`✗ 다운로드 요청 실패: ${e.response?.data?.detail || e.message}`)
+    }
+  }
+
+  const handleOllamaUnload = async () => {
+    await videoApi.ollamaUnload()
+    setOllamaMsg('✓ VRAM 언로드 완료')
+    setTimeout(loadOllama, 1000)
+  }
 
   const loadWebhookTokens = () => webhooksApi.listTokens().then((r) => setWebhookTokens(r.data))
 
@@ -81,6 +158,7 @@ export default function Admin() {
   const loadExtKeys = () => externalKeyApi.list().then((r) => setExtKeys(r.data))
 
   useEffect(() => { loadAll(); loadExtKeys(); loadWebhookTokens() }, [])
+  useEffect(() => { if (tab === 'ollama') loadOllama() }, [tab])
 
   const saveProvider = async () => {
     await modelsApi.saveProvider(newProvider)
@@ -134,6 +212,7 @@ export default function Admin() {
           { id: 'catalog', label: '모델 카탈로그' },
           { id: 'external-keys', label: '외부 API 키' },
           { id: 'webhooks', label: '웹훅 토큰' },
+          { id: 'ollama', label: 'Ollama 모델' },
           { id: 'system', label: '시스템 정보' },
         ].map((t) => (
           <button
@@ -575,6 +654,178 @@ export default function Admin() {
           </div>
         </div>
       )}
+
+      {tab === 'ollama' && (
+        <div className="space-y-4">
+          {/* 상태 헤더 */}
+          <div className="card p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+                <Cpu size={13} className="text-purple-400" /> Ollama 로컬 LLM 관리
+              </h3>
+              <button onClick={loadOllama} className="text-xs text-slate-500 hover:text-slate-300 flex items-center gap-1">
+                <FlaskConical size={11} /> 새로고침
+              </button>
+            </div>
+
+            {ollamaLoading && !ollamaInfo && (
+              <div className="flex items-center gap-2 text-xs text-slate-400 py-4">
+                <Loader2 size={13} className="animate-spin" /> Ollama 연결 중...
+              </div>
+            )}
+
+            {ollamaInfo && (
+              <div className="flex gap-6 text-xs flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <div className={`w-2 h-2 rounded-full ${ollamaInfo.ollama_running ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                  <span className="text-slate-400">Ollama</span>
+                  <span className={ollamaInfo.ollama_running ? 'text-emerald-400' : 'text-red-400'}>
+                    {ollamaInfo.ollama_running ? '실행 중' : '미실행'}
+                  </span>
+                </div>
+                {ollamaInfo.default_model && (
+                  <div className="flex items-center gap-1 text-slate-400">
+                    <Star size={10} className="text-yellow-400" />
+                    기본 모델: <span className="text-slate-200 font-mono ml-1">{ollamaInfo.default_model}</span>
+                  </div>
+                )}
+                {ollamaInfo.loaded_model && (
+                  <div className="flex items-center gap-1 text-slate-400">
+                    <Zap size={10} className="text-blue-400" />
+                    VRAM 로드: <span className="text-blue-300 font-mono ml-1">{ollamaInfo.loaded_model}</span>
+                    <button onClick={handleOllamaUnload} className="ml-2 text-[10px] text-slate-500 hover:text-red-400 border border-slate-700 hover:border-red-500/40 rounded px-1.5 py-0.5 transition-colors">
+                      언로드
+                    </button>
+                  </div>
+                )}
+                {!ollamaInfo.ollama_running && (
+                  <span className="text-red-400 text-[11px]">{ollamaInfo.error}</span>
+                )}
+              </div>
+            )}
+
+            {ollamaMsg && (
+              <div className={`mt-3 text-[11px] px-2.5 py-1.5 rounded ${
+                ollamaMsg.startsWith('✓') ? 'bg-emerald-500/10 text-emerald-300' :
+                ollamaMsg.startsWith('⬇') ? 'bg-blue-500/10 text-blue-300' :
+                'bg-red-500/10 text-red-400'
+              }`}>
+                {ollamaMsg}
+              </div>
+            )}
+          </div>
+
+          {/* 설치된 모델 목록 */}
+          <div className="card p-4">
+            <h3 className="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-2">
+              <HardDrive size={13} /> 설치된 모델 ({ollamaInfo?.models.length ?? 0}개)
+            </h3>
+            {ollamaInfo?.models.length === 0 ? (
+              <p className="text-xs text-slate-600 py-3 text-center">설치된 모델이 없습니다. 아래에서 모델을 다운로드하세요.</p>
+            ) : (
+              <div className="space-y-2">
+                {ollamaInfo?.models.map((m) => {
+                  const isDefault = m.name === ollamaInfo.default_model || m.name.split(':')[0] === ollamaInfo.default_model?.split(':')[0]
+                  const isLoaded = m.name === ollamaInfo.loaded_model
+                  const sizeGB = (m.size / 1024 / 1024 / 1024).toFixed(1)
+                  return (
+                    <div key={m.name} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 border ${
+                      isDefault ? 'bg-purple-500/8 border-purple-500/25' : 'bg-bg-elevated border-transparent'
+                    }`}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono text-slate-200 truncate">{m.name}</span>
+                          {isDefault && (
+                            <span className="text-[9px] bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 rounded px-1.5 py-0.5 flex-shrink-0">
+                              기본
+                            </span>
+                          )}
+                          {isLoaded && (
+                            <span className="text-[9px] bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded px-1.5 py-0.5 flex-shrink-0">
+                              VRAM
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-0.5 flex gap-2">
+                          <span>{sizeGB}GB</span>
+                          {m.details?.parameter_size && <span>{m.details.parameter_size}</span>}
+                          {m.details?.quantization_level && <span className="font-mono">{m.details.quantization_level}</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        {!isDefault && (
+                          <button
+                            onClick={() => handleOllamaSetDefault(m.name)}
+                            disabled={settingDefault === m.name}
+                            className="text-[10px] px-2 py-1 rounded border border-slate-700 hover:border-yellow-500/40 text-slate-500 hover:text-yellow-400 transition-colors disabled:opacity-50"
+                          >
+                            {settingDefault === m.name ? <Loader2 size={9} className="animate-spin" /> : '기본 설정'}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleOllamaDelete(m.name)}
+                          disabled={deletingModel === m.name}
+                          className="p-1.5 rounded text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                        >
+                          {deletingModel === m.name ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 새 모델 다운로드 */}
+          <div className="card p-4">
+            <h3 className="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-2">
+              <Download size={13} /> 모델 다운로드
+            </h3>
+            <div className="flex gap-2 mb-3">
+              <input
+                value={ollamaPullName}
+                onChange={(e) => setOllamaPullName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleOllamaPull()}
+                placeholder="모델 이름 (예: gemma3:27b)"
+                className="flex-1 bg-bg-base border border-bg-border rounded text-xs text-slate-200 px-3 py-2 focus:outline-none focus:border-brand/60 placeholder:text-slate-600"
+              />
+              <button onClick={handleOllamaPull} disabled={!ollamaPullName.trim()} className="btn-primary text-xs px-3">
+                <Download size={12} />
+              </button>
+            </div>
+            {/* RTX 5070 Ti 추천 모델 */}
+            <div>
+              <p className="text-[10px] text-slate-500 mb-2">RTX 5070 Ti (16GB) 추천 모델</p>
+              <div className="grid grid-cols-1 gap-1.5">
+                {[
+                  { name: 'gemma3:27b', desc: 'Google Gemma3 27B — 최고 품질', vram: '~15.6GB', tag: '권장' },
+                  { name: 'qwen2.5:14b', desc: 'Alibaba Qwen2.5 14B — 다국어/추론', vram: '~8.7GB', tag: '' },
+                  { name: 'gemma3:12b', desc: 'Google Gemma3 12B — 균형', vram: '~7.3GB', tag: '' },
+                  { name: 'deepseek-r1:14b', desc: 'DeepSeek R1 14B — 추론 특화', vram: '~8.5GB', tag: '' },
+                ].map((m) => (
+                  <div key={m.name} className="flex items-center gap-2 bg-bg-elevated rounded px-3 py-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-mono text-slate-200">{m.name}</span>
+                        {m.tag && <span className="text-[9px] bg-brand/20 text-brand-light border border-brand/30 rounded px-1 py-0.5">{m.tag}</span>}
+                      </div>
+                      <div className="text-[10px] text-slate-500">{m.desc} · {m.vram}</div>
+                    </div>
+                    <button
+                      onClick={() => { setOllamaPullName(m.name); setOllamaMsg(`⬇ "${m.name}" 다운로드 예약됨 — Pull 버튼을 눌러 시작하세요.`) }}
+                      className="text-[10px] px-2 py-1 rounded border border-slate-700 hover:border-brand/40 text-slate-500 hover:text-brand-light transition-colors"
+                    >
+                      선택
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

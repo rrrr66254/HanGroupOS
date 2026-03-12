@@ -343,6 +343,11 @@ export const videoApi = {
   },
   fileUrl: (id: number) => `/api/video/file/${id}`,
   gpuStatus: () => api.get('/video/gpu-status'),
+  ollamaModels: () => api.get('/video/ollama/models'),
+  ollamaDelete: (name: string) => api.delete(`/video/ollama/models/${encodeURIComponent(name)}`),
+  ollamaPull: (name: string) => api.post('/video/ollama/models/pull', { name }),
+  ollamaSetDefault: (name: string) => api.post('/video/ollama/default', { name }),
+  ollamaUnload: () => api.post('/video/ollama/unload', {}),
 }
 
 // ── Audit Log ──────────────────────────────────────────────────────────────────

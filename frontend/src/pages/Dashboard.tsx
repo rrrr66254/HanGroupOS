@@ -1,11 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Building2, Users, CheckSquare, Brain, FlaskConical,
   Map, TrendingUp, MessageSquare, ArrowRight, Zap, Activity,
+  Cpu, Thermometer, AlertTriangle,
 } from 'lucide-react'
-import { dashboardApi, approvalsApi, companiesApi, healthApi } from '../api/client'
+import { dashboardApi, approvalsApi, companiesApi, healthApi, videoApi } from '../api/client'
 import type { DashboardStats, ApprovalRequest, Company } from '../types'
+
+interface GpuStatus {
+  name?: string; total_mb?: number; used_mb?: number; free_mb?: number
+  temp_c?: number; util_pct?: number; vram_pct?: number; vram_warning?: boolean
+  gpu_locked?: boolean; ollama_loaded_model?: string
+}
 
 interface HealthScore {
   id: number
@@ -50,12 +57,19 @@ export default function Dashboard() {
   const [pending, setPending] = useState<ApprovalRequest[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
   const [healthScores, setHealthScores] = useState<HealthScore[]>([])
+  const [gpuStatus, setGpuStatus] = useState<GpuStatus | null>(null)
+  const gpuPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     dashboardApi.stats().then((r) => setStats(r.data))
     approvalsApi.inbox().then((r) => setPending(r.data.slice(0, 5)))
     companiesApi.list().then((r) => setCompanies(r.data.slice(0, 6)))
     healthApi.scores().then((r) => setHealthScores(r.data.slice(0, 6))).catch(() => {})
+    // GPU 폴링 — 5초마다 (대시보드는 가벼운 주기)
+    const fetchGpu = () => videoApi.gpuStatus().then((r) => setGpuStatus(r.data)).catch(() => {})
+    fetchGpu()
+    gpuPollRef.current = setInterval(fetchGpu, 5000)
+    return () => { if (gpuPollRef.current) clearInterval(gpuPollRef.current) }
   }, [])
 
   return (
@@ -89,6 +103,77 @@ export default function Dashboard() {
           <StatCard icon={Map} label="전략 항목" value={stats.total_strategies} color="bg-success/15 text-success" to="/strategy" />
           <StatCard icon={Users} label="오픈 회의" value={stats.open_meetings} color="bg-orange-400/15 text-orange-400" to="/meetings" />
           <StatCard icon={Building2} label="활성 계열사" value={stats.active_companies} color="bg-teal-400/15 text-teal-400" to="/companies" />
+        </div>
+      )}
+
+      {/* GPU 미니 위젯 — nvidia-smi 감지 시만 표시 */}
+      {gpuStatus && gpuStatus.name && (
+        <div className={`card p-4 border ${gpuStatus.vram_warning ? 'border-red-500/30' : 'border-bg-border'}`}>
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* GPU 이름 + 상태 */}
+            <div className="flex items-center gap-2 min-w-0">
+              <Cpu size={14} className="text-purple-400 flex-shrink-0" />
+              <span className="text-xs font-semibold text-slate-200 truncate">
+                {gpuStatus.name?.replace('NVIDIA GeForce ', '')}
+              </span>
+              {gpuStatus.gpu_locked && (
+                <span className="text-[9px] bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded px-1.5 py-0.5 flex-shrink-0">
+                  영상 생성 중
+                </span>
+              )}
+              {gpuStatus.vram_warning && (
+                <span className="text-[9px] bg-red-500/20 text-red-400 border border-red-500/30 rounded px-1.5 py-0.5 flex items-center gap-1 flex-shrink-0">
+                  <AlertTriangle size={8} /> VRAM 부족
+                </span>
+              )}
+            </div>
+
+            {/* VRAM 바 */}
+            {gpuStatus.total_mb && gpuStatus.total_mb > 0 && (
+              <div className="flex items-center gap-2 flex-1 min-w-48">
+                <span className="text-[10px] text-slate-500 flex-shrink-0">VRAM</span>
+                <div className="flex-1 h-2 bg-bg-elevated rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-700 ${
+                      (gpuStatus.vram_pct ?? 0) >= 90 ? 'bg-red-500' :
+                      (gpuStatus.vram_pct ?? 0) >= 65 ? 'bg-yellow-500' : 'bg-purple-500'
+                    }`}
+                    style={{ width: `${Math.min(gpuStatus.vram_pct ?? 0, 100)}%` }}
+                  />
+                </div>
+                <span className={`text-[10px] font-mono flex-shrink-0 ${
+                  (gpuStatus.vram_pct ?? 0) >= 90 ? 'text-red-400' :
+                  (gpuStatus.vram_pct ?? 0) >= 65 ? 'text-yellow-400' : 'text-slate-400'
+                }`}>
+                  {((gpuStatus.used_mb ?? 0) / 1024).toFixed(1)}/{Math.round((gpuStatus.total_mb ?? 0) / 1024)}GB
+                </span>
+              </div>
+            )}
+
+            {/* 온도 */}
+            {gpuStatus.temp_c !== undefined && (
+              <div className="flex items-center gap-1 text-[10px] text-slate-500 flex-shrink-0">
+                <Thermometer size={10} className={gpuStatus.temp_c > 80 ? 'text-red-400' : gpuStatus.temp_c > 65 ? 'text-yellow-400' : 'text-slate-500'} />
+                {gpuStatus.temp_c}°C
+              </div>
+            )}
+
+            {/* GPU 사용률 */}
+            {gpuStatus.util_pct !== undefined && (
+              <div className="flex items-center gap-1 text-[10px] text-slate-500 flex-shrink-0">
+                <Zap size={10} />
+                {gpuStatus.util_pct}%
+              </div>
+            )}
+
+            {/* Ollama 모델 */}
+            {gpuStatus.ollama_loaded_model && (
+              <div className="flex items-center gap-1 text-[10px] text-slate-500 flex-shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+                {gpuStatus.ollama_loaded_model.split(':')[0]}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

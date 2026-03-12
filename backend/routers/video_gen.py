@@ -1026,6 +1026,110 @@ def get_video_stats(
     }
 
 
+@router.get("/ollama/models")
+def ollama_list_models(current_user: User = Depends(get_current_user)):
+    """Ollama에 설치된 모델 목록 조회."""
+    try:
+        import httpx
+        from core.config import settings
+        r = httpx.get("http://localhost:11434/api/tags", timeout=5.0)
+        models = r.json().get("models", [])
+        default_model = getattr(settings, "OLLAMA_MODEL", "")
+        # 현재 로드된 모델 확인
+        loaded = ""
+        try:
+            ps = httpx.get("http://localhost:11434/api/ps", timeout=3.0)
+            ps_models = ps.json().get("models", [])
+            if ps_models:
+                loaded = ps_models[0].get("name", "")
+        except Exception:
+            pass
+        return {
+            "models": models,
+            "default_model": default_model,
+            "loaded_model": loaded,
+            "ollama_running": True,
+        }
+    except Exception as e:
+        return {"models": [], "default_model": "", "loaded_model": "", "ollama_running": False, "error": str(e)}
+
+
+@router.delete("/ollama/models/{model_name:path}")
+def ollama_delete_model(model_name: str, current_user: User = Depends(get_current_user)):
+    """Ollama 모델 삭제."""
+    try:
+        import httpx
+        r = httpx.request(
+            "DELETE",
+            "http://localhost:11434/api/delete",
+            json={"name": model_name},
+            timeout=30.0,
+        )
+        if r.status_code in (200, 204):
+            return {"ok": True, "deleted": model_name}
+        raise HTTPException(500, f"Ollama 삭제 실패: {r.text}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/ollama/models/pull")
+def ollama_pull_model(body: dict, current_user: User = Depends(get_current_user)):
+    """Ollama 모델 다운로드 (백그라운드)."""
+    model_name = body.get("name", "").strip()
+    if not model_name:
+        raise HTTPException(400, "모델 이름 필수")
+    import subprocess, threading
+    def _pull():
+        try:
+            subprocess.run(["ollama", "pull", model_name], timeout=1800, check=False)
+        except Exception:
+            pass
+    threading.Thread(target=_pull, daemon=True).start()
+    return {"ok": True, "pulling": model_name}
+
+
+@router.post("/ollama/default")
+def ollama_set_default(body: dict, current_user: User = Depends(get_current_user)):
+    """기본 Ollama 모델 변경 (.env + 런타임 settings 즉시 반영)."""
+    model_name = body.get("name", "").strip()
+    if not model_name:
+        raise HTTPException(400, "모델 이름 필수")
+    import re
+    from core.config import settings
+    # .env 파일 업데이트
+    env_path = os.path.join(os.path.dirname(__file__), "../../.env")
+    env_path = os.path.normpath(env_path)
+    try:
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                content = f.read()
+            if re.search(r"^OLLAMA_MODEL=", content, re.MULTILINE):
+                content = re.sub(r"^OLLAMA_MODEL=.*", f"OLLAMA_MODEL={model_name}", content, flags=re.MULTILINE)
+            else:
+                content += f"\nOLLAMA_MODEL={model_name}\n"
+            with open(env_path, "w") as f:
+                f.write(content)
+        else:
+            with open(env_path, "w") as f:
+                f.write(f"OLLAMA_MODEL={model_name}\n")
+    except Exception as e:
+        raise HTTPException(500, f".env 업데이트 실패: {e}")
+    # 런타임 즉시 반영
+    settings.OLLAMA_MODEL = model_name
+    # 새 모델 워밍업
+    threading.Thread(target=_ollama_warmup, daemon=True).start()
+    return {"ok": True, "default_model": model_name}
+
+
+@router.post("/ollama/unload")
+def ollama_unload_now(current_user: User = Depends(get_current_user)):
+    """Ollama 현재 모델 즉시 VRAM 언로드."""
+    _ollama_unload()
+    return {"ok": True}
+
+
 @router.get("/gpu-status")
 def gpu_status():
     """GPU VRAM 현황 및 큐 상태 조회."""
