@@ -90,9 +90,10 @@ export default function VideoStudio() {
     return Math.min(Math.round((elapsed / est) * 100), 95)
   }
 
-  const selectedModelInfo = models.find((m) => m.id === selectedModel)
+  const selectedModelInfo = models.find((m) => m.id === selectedModel) as (typeof models[0] & { vram_gb?: number }) | undefined
   const falModels = models.filter((m) => m.provider === 'fal-ai')
   const hfModels = models.filter((m) => m.provider === 'hf-inference')
+  const localModels = models.filter((m) => m.provider === 'local-gpu')
   const j2vModels = models.filter((m) => m.provider === 'json2video')
 
   useEffect(() => {
@@ -249,6 +250,13 @@ export default function VideoStudio() {
                   })}
                 </optgroup>
               )}
+              {localModels.length > 0 && (
+                <optgroup label="Local GPU (무료 — han setup-gpu 필요)">
+                  {localModels.map((m: any) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                </optgroup>
+              )}
               {j2vModels.length > 0 && (
                 <optgroup label="JSON2Video">
                   {j2vModels.map((m) => (
@@ -282,8 +290,17 @@ export default function VideoStudio() {
               </div>
             )}
 
-            {/* 모델별 API 키 안내 */}
-            {selectedModelInfo?.provider === 'json2video' ? (
+            {/* 모델별 안내 */}
+            {selectedModelInfo?.provider === 'local-gpu' ? (
+              <div className="bg-emerald-500/10 border border-emerald-500/20 rounded p-2.5 text-[10px] text-emerald-300 space-y-1">
+                <div className="font-semibold text-emerald-200">Local GPU — API 키 불필요, 완전 무료</div>
+                <div>필요 VRAM: {(selectedModelInfo as any).vram_gb ?? '?'}GB+ · RTX 5070 Ti 지원</div>
+                <div className="text-emerald-400">
+                  첫 실행 시 모델 자동 다운로드 (수 GB). 터미널에서{' '}
+                  <code className="bg-bg-base px-1 rounded">han setup-gpu</code>를 먼저 실행하세요.
+                </div>
+              </div>
+            ) : selectedModelInfo?.provider === 'json2video' ? (
               <div className="bg-indigo-500/10 border border-indigo-500/20 rounded p-2.5 text-[10px] text-indigo-300 space-y-1">
                 <div className="font-semibold text-indigo-200">JSON2Video — 프레젠테이션 영상</div>
                 <div>무료 600초 · 워터마크 포함 · 텍스트 슬라이드</div>
@@ -291,9 +308,8 @@ export default function VideoStudio() {
               </div>
             ) : selectedModelInfo?.provider === 'fal-ai' ? (
               <div className="bg-violet-500/10 border border-violet-500/20 rounded p-2.5 text-[10px] text-violet-300 space-y-1">
-                <div className="font-semibold text-violet-200">FAL-AI 모델</div>
-                <div>관리자 → API 키 관리 → <strong>fal-ai</strong> 서비스로 키 등록 (권장)</div>
-                <div className="text-violet-400">키 없을 시 HuggingFace 키로 자동 폴백</div>
+                <div className="font-semibold text-violet-200">FAL-AI 모델 — 유료</div>
+                <div>관리자 → API 키 관리 → <strong>fal-ai</strong> 서비스로 키 등록</div>
               </div>
             ) : (
               <div className="bg-amber-500/10 border border-amber-500/20 rounded p-2 text-[10px] text-amber-400">

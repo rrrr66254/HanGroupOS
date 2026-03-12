@@ -119,6 +119,7 @@ cmd_help() {
   echo -e "  ${GREEN}path-fix --apply${NC}            ~/.bashrc 에 PATH 영구 등록"
   echo -e "  ${GREEN}path-fix --status${NC}           현재 PATH 진단"
   echo -e "  ${GREEN}self-update${NC}                 han CLI 바이너리만 최신으로 교체 (빠름)"
+  echo -e "  ${GREEN}setup-gpu${NC}                   RTX 로컬 GPU 환경 자동 구성 (LLM + 영상생성)"
   echo ""
   echo -e "${BOLD}기타${NC}"
   echo -e "  ${GREEN}open${NC}               브라우저에서 앱 열기"
@@ -1989,6 +1990,186 @@ cmd_open() {
   fi
 }
 
+# ── han setup-gpu ─────────────────────────────────────────────────────────────
+cmd_setup_gpu() {
+  echo ""
+  echo -e "${BOLD}로컬 GPU 영상 생성 환경 구성${NC}"
+  echo -e "${DIM}RTX 5070 Ti Laptop (Blackwell / CUDA 12.4+) 기준${NC}"
+  echo ""
+
+  # ── 1. NVIDIA GPU 감지 ───────────────────────────────────────────────────
+  echo -e "${CYAN}[1/5] NVIDIA GPU 감지${NC}"
+  if ! command -v nvidia-smi &>/dev/null; then
+    echo -e "  ${RED}✗ nvidia-smi를 찾을 수 없습니다.${NC}"
+    echo "    NVIDIA 드라이버를 먼저 설치하세요:"
+    echo "    https://www.nvidia.com/Download/index.aspx"
+    exit 1
+  fi
+  local GPU_NAME; GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
+  local VRAM_MB; VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+  local VRAM_GB=$(( (VRAM_MB + 512) / 1024 ))
+  local DRIVER_VER; DRIVER_VER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1)
+  echo -e "  ${GREEN}✓ GPU: $GPU_NAME  |  VRAM: ${VRAM_GB}GB  |  드라이버: $DRIVER_VER${NC}"
+
+  if [ "$VRAM_GB" -lt 6 ]; then
+    echo -e "  ${RED}✗ VRAM이 6GB 미만입니다. 로컬 영상 생성은 최소 6GB가 필요합니다.${NC}"
+    exit 1
+  fi
+
+  # ── 2. CUDA 버전 확인 ────────────────────────────────────────────────────
+  echo -e "${CYAN}[2/5] CUDA 버전 확인${NC}"
+  local CUDA_VER; CUDA_VER=$(nvidia-smi | grep -oP 'CUDA Version: \K[\d.]+' 2>/dev/null || echo "미확인")
+  echo -e "  CUDA: $CUDA_VER"
+  local CUDA_MAJOR; CUDA_MAJOR=$(echo "$CUDA_VER" | cut -d. -f1)
+  if [ "${CUDA_MAJOR:-0}" -lt 12 ]; then
+    echo -e "  ${YELLOW}⚠ CUDA 12.4+ 권장. RTX 5070 Ti는 CUDA 12.4 이상이 필요합니다.${NC}"
+    echo "    최신 드라이버: https://www.nvidia.com/Download/index.aspx"
+  else
+    echo -e "  ${GREEN}✓ CUDA $CUDA_VER 확인됨${NC}"
+  fi
+
+  # ── 3. Python venv 활성화 ────────────────────────────────────────────────
+  echo -e "${CYAN}[3/5] Python 가상환경 확인${NC}"
+  cd "$HAN_DIR/backend"
+  if [ ! -d "venv" ]; then
+    python3 -m venv venv
+    echo -e "  ${GREEN}✓ venv 생성됨${NC}"
+  fi
+  source venv/bin/activate
+  echo -e "  ${GREEN}✓ venv 활성화됨${NC}"
+
+  # ── 4. PyTorch (CUDA) 설치 ───────────────────────────────────────────────
+  echo -e "${CYAN}[4/5] PyTorch + CUDA 설치 (Blackwell 지원 torch 2.6+)${NC}"
+  if python -c "import torch; assert torch.cuda.is_available()" &>/dev/null 2>&1; then
+    local TORCH_VER; TORCH_VER=$(python -c "import torch; print(torch.__version__)" 2>/dev/null)
+    echo -e "  ${GREEN}✓ PyTorch $TORCH_VER (CUDA 활성화됨) — 이미 설치됨${NC}"
+  else
+    echo "  PyTorch 2.6+ (CUDA 12.4) 설치 중..."
+    pip install --quiet \
+      "torch>=2.6.0" torchvision torchaudio \
+      --index-url https://download.pytorch.org/whl/cu124
+    if python -c "import torch; assert torch.cuda.is_available()" &>/dev/null 2>&1; then
+      local TORCH_VER; TORCH_VER=$(python -c "import torch; print(torch.__version__)" 2>/dev/null)
+      echo -e "  ${GREEN}✓ PyTorch $TORCH_VER 설치 완료${NC}"
+    else
+      echo -e "  ${RED}✗ PyTorch CUDA 활성화 실패. 드라이버/CUDA 버전을 확인하세요.${NC}"
+      exit 1
+    fi
+  fi
+
+  # ── 5. diffusers + 의존성 설치 ───────────────────────────────────────────
+  echo -e "${CYAN}[5/6] diffusers + 영상 생성 패키지 설치${NC}"
+  pip install --quiet \
+    "diffusers>=0.33.0" \
+    transformers accelerate \
+    "imageio[ffmpeg]" imageio-ffmpeg \
+    sentencepiece protobuf
+  echo -e "  ${GREEN}✓ diffusers 설치 완료${NC}"
+
+  # ── 6. Ollama 설치 + VRAM 최적 LLM 모델 선택 ────────────────────────────
+  echo -e "${CYAN}[6/6] Ollama + 로컬 LLM 자동 설정 (VRAM ${VRAM_GB}GB 기준)${NC}"
+
+  # VRAM에 따른 최적 모델 선택
+  if [ "$VRAM_GB" -ge 16 ]; then
+    RECOMMENDED_LLM="gemma3:27b"
+    LLM_NOTE="Google Gemma3 27B — 최고 품질, ~15.6GB VRAM"
+  elif [ "$VRAM_GB" -ge 12 ]; then
+    RECOMMENDED_LLM="qwen2.5:14b"
+    LLM_NOTE="Qwen2.5 14B — 뛰어난 다국어/추론, ~8.7GB VRAM"
+  elif [ "$VRAM_GB" -ge 8 ]; then
+    RECOMMENDED_LLM="gemma3:12b"
+    LLM_NOTE="Google Gemma3 12B — 균형, ~7.3GB VRAM"
+  else
+    RECOMMENDED_LLM="llama3.2:3b"
+    LLM_NOTE="Llama3.2 3B — 경량, ~2GB VRAM"
+  fi
+  echo -e "  선택 모델: ${BOLD}$RECOMMENDED_LLM${NC} ($LLM_NOTE)"
+
+  # Ollama 설치 여부 확인
+  if ! command -v ollama &>/dev/null; then
+    echo "  Ollama 설치 중..."
+    curl -fsSL https://ollama.com/install.sh | sh
+    if ! command -v ollama &>/dev/null; then
+      echo -e "  ${RED}✗ Ollama 설치 실패. https://ollama.com 에서 수동 설치 후 재시도하세요.${NC}"
+      exit 1
+    fi
+    echo -e "  ${GREEN}✓ Ollama 설치 완료${NC}"
+  else
+    local OLLAMA_VER; OLLAMA_VER=$(ollama --version 2>/dev/null | head -1)
+    echo -e "  ${GREEN}✓ Ollama 이미 설치됨: $OLLAMA_VER${NC}"
+  fi
+
+  # Ollama 서버 시작 (이미 실행 중이면 무시)
+  if ! curl -sf http://localhost:11434/api/tags &>/dev/null; then
+    echo "  Ollama 서버 시작 중..."
+    nohup ollama serve &>/dev/null &
+    sleep 3
+  fi
+
+  # 모델 다운로드 (없으면 pull)
+  local MODEL_BASE; MODEL_BASE="${RECOMMENDED_LLM%%:*}"
+  if ollama list 2>/dev/null | grep -q "$MODEL_BASE"; then
+    echo -e "  ${GREEN}✓ $RECOMMENDED_LLM 이미 설치됨${NC}"
+  else
+    echo "  모델 다운로드 중: $RECOMMENDED_LLM (수 GB, 수 분 소요)..."
+    ollama pull "$RECOMMENDED_LLM"
+    if [ $? -eq 0 ]; then
+      echo -e "  ${GREEN}✓ $RECOMMENDED_LLM 다운로드 완료${NC}"
+    else
+      echo -e "  ${YELLOW}⚠ 다운로드 실패. 나중에 'ollama pull $RECOMMENDED_LLM' 로 재시도하세요.${NC}"
+    fi
+  fi
+
+  # .env에 OLLAMA_MODEL 자동 업데이트
+  local ENV_FILE="$HAN_DIR/backend/.env"
+  if [ -f "$ENV_FILE" ]; then
+    if grep -q "^OLLAMA_MODEL=" "$ENV_FILE"; then
+      sed -i "s|^OLLAMA_MODEL=.*|OLLAMA_MODEL=$RECOMMENDED_LLM|" "$ENV_FILE"
+    else
+      echo "OLLAMA_MODEL=$RECOMMENDED_LLM" >> "$ENV_FILE"
+    fi
+    if grep -q "^DEFAULT_PROVIDER=" "$ENV_FILE"; then
+      sed -i "s|^DEFAULT_PROVIDER=.*|DEFAULT_PROVIDER=ollama|" "$ENV_FILE"
+    else
+      echo "DEFAULT_PROVIDER=ollama" >> "$ENV_FILE"
+    fi
+  else
+    printf "DEFAULT_PROVIDER=ollama\nOLLAMA_MODEL=%s\nOLLAMA_BASE_URL=http://localhost:11434\n" \
+      "$RECOMMENDED_LLM" > "$ENV_FILE"
+  fi
+  echo -e "  ${GREEN}✓ 설정 저장: DEFAULT_PROVIDER=ollama / OLLAMA_MODEL=$RECOMMENDED_LLM${NC}"
+
+  # ── GPU 정보 요약 + 사용 가능 모델 안내 ─────────────────────────────────
+  echo ""
+  echo -e "${GREEN}════════════════════════════════════════${NC}"
+  echo -e "${GREEN}  로컬 GPU 영상 생성 환경 준비 완료${NC}"
+  echo -e "${GREEN}════════════════════════════════════════${NC}"
+  echo ""
+  echo -e "  GPU   : $GPU_NAME"
+  echo -e "  VRAM  : ${VRAM_GB}GB"
+  echo ""
+  echo -e "  ${BOLD}사용 가능한 로컬 모델:${NC}"
+  if [ "$VRAM_GB" -ge 6 ]; then
+    echo -e "  ${GREEN}✓${NC} LTX-Video (VRAM 6GB+)  — 빠른 추론, 121프레임 @24fps"
+  fi
+  if [ "$VRAM_GB" -ge 8 ]; then
+    echo -e "  ${GREEN}✓${NC} Wan 2.1 1.3B (VRAM 8GB+) — 균형, 81프레임 @16fps"
+  fi
+  if [ "$VRAM_GB" -ge 12 ]; then
+    echo -e "  ${GREEN}✓${NC} CogVideoX-2B (VRAM 12GB+) — 고품질, 49프레임 @8fps"
+  fi
+  echo ""
+  echo -e ""
+  echo -e "  ${BOLD}로컬 LLM:${NC}"
+  echo -e "  ${GREEN}✓${NC} ${BOLD}$RECOMMENDED_LLM${NC} — $LLM_NOTE"
+  echo -e "  ${DIM}  Ollama 기본 주소: http://localhost:11434${NC}"
+  echo -e ""
+  echo -e "  ${DIM}첫 영상 생성 시 모델 파일을 자동 다운로드합니다.${NC}"
+  echo -e "  ${DIM}  LTX-Video  : ~6GB  |  Wan-1.3B : ~3GB  |  CogVideoX-2B : ~8GB${NC}"
+  echo -e "  ${DIM}영상 스튜디오에서 'Local GPU' 모델을 선택하세요.${NC}"
+  echo ""
+}
+
 # ── 명령 라우팅 ───────────────────────────────────────────────────────────────
 COMMAND="${1:-help}"
 shift 2>/dev/null || true
@@ -2010,6 +2191,7 @@ case "$COMMAND" in
   path-fix)             cmd_path_fix "$@" ;;
   self-update)          cmd_self_update ;;
   open)                 cmd_open ;;
+  setup-gpu)            cmd_setup_gpu ;;
   --version|-v)         cmd_version ;;
   help|--help|-h)       cmd_help ;;
   *)

@@ -130,10 +130,32 @@ SUPPORTED_MODELS = [
         "provider": "fal-ai",
         "recommended": False,
     },
-    # ── HuggingFace Inference API ────────────────────────────────────────────
-    # NOTE: HF 자체 inference 서버(hf-inference)는 text-to-video 태스크를 지원하지 않음.
-    # FAL-AI, Replicate 등 외부 유료 제공자를 통해서만 동작하므로 목록에서 제외.
-    # (지원 태스크: text-to-image, conversational, text-generation 등만 가능)
+    # ── Local GPU (RTX 5070 Ti / CUDA) ──────────────────────────────────────
+    # han setup-gpu 실행 후 사용 가능. API 키 불필요, 완전 무료.
+    {
+        "id": "local/ltx-video",
+        "label": "LTX-Video (로컬 GPU) — 빠른 추론, VRAM 6GB+",
+        "provider": "local-gpu",
+        "recommended": False,
+        "vram_gb": 6,
+        "hf_id": "Lightricks/LTX-Video",
+    },
+    {
+        "id": "local/wan-1.3b",
+        "label": "Wan 2.1 1.3B (로컬 GPU) — 균형, VRAM 8GB+",
+        "provider": "local-gpu",
+        "recommended": False,
+        "vram_gb": 8,
+        "hf_id": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    },
+    {
+        "id": "local/cogvideox-2b",
+        "label": "CogVideoX-2B (로컬 GPU) — 고품질, VRAM 12GB+",
+        "provider": "local-gpu",
+        "recommended": False,
+        "vram_gb": 12,
+        "hf_id": "THUDM/CogVideoX-2b",
+    },
     # ── JSON2Video ───────────────────────────────────────────────────────────
     {
         "id": "json2video/presentation",
@@ -401,6 +423,149 @@ def _run_generation(job_id: int, token: str):
         db.close()
 
 
+def _run_local_gpu_generation(job_id: int):
+    """로컬 GPU (diffusers)로 영상 생성 — RTX 5070 Ti / CUDA."""
+    from core.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
+        if not job:
+            return
+
+        job.status = "running"
+        db.commit()
+        video_progress.notify_sync(job_id, 3, "GPU 및 패키지 점검 중...")
+
+        try:
+            import torch
+            import importlib
+
+            if not torch.cuda.is_available():
+                raise RuntimeError(
+                    "CUDA를 사용할 수 없습니다. "
+                    "NVIDIA 드라이버와 PyTorch CUDA 버전을 확인하세요. "
+                    "han setup-gpu 를 실행하면 자동으로 설치됩니다."
+                )
+
+            device = "cuda"
+            vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+            gpu_name = torch.cuda.get_device_name(0)
+            video_progress.notify_sync(job_id, 5, f"GPU: {gpu_name} ({vram_gb:.1f}GB VRAM)")
+
+            # 모델별 파이프라인 설정
+            model_cfg = {
+                "local/ltx-video": {
+                    "hf_id": "Lightricks/LTX-Video",
+                    "pipeline_cls": "LTXPipeline",
+                    "module": "diffusers",
+                    "dtype": torch.bfloat16,
+                    "num_frames": 121,
+                    "fps": 24,
+                    "min_vram": 6,
+                },
+                "local/wan-1.3b": {
+                    "hf_id": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+                    "pipeline_cls": "AutoPipelineForText2Video",
+                    "module": "diffusers",
+                    "dtype": torch.float16,
+                    "num_frames": 81,
+                    "fps": 16,
+                    "min_vram": 8,
+                },
+                "local/cogvideox-2b": {
+                    "hf_id": "THUDM/CogVideoX-2b",
+                    "pipeline_cls": "CogVideoXPipeline",
+                    "module": "diffusers",
+                    "dtype": torch.float16,
+                    "num_frames": 49,
+                    "fps": 8,
+                    "min_vram": 10,
+                },
+            }
+
+            cfg = model_cfg.get(job.model_id)
+            if not cfg:
+                raise ValueError(f"알 수 없는 로컬 모델: {job.model_id}")
+
+            if vram_gb < cfg["min_vram"]:
+                raise RuntimeError(
+                    f"VRAM 부족: {vram_gb:.1f}GB (필요: {cfg['min_vram']}GB+). "
+                    f"다른 모델을 선택하거나 다른 앱을 종료 후 재시도하세요."
+                )
+
+            diffusers_mod = importlib.import_module(cfg["module"])
+            PipelineCls = getattr(diffusers_mod, cfg["pipeline_cls"])
+
+            video_progress.notify_sync(job_id, 10, f"모델 로딩 중: {cfg['hf_id']} (최초 실행 시 수 분 소요)")
+
+            pipe = PipelineCls.from_pretrained(cfg["hf_id"], torch_dtype=cfg["dtype"])
+            pipe = pipe.to(device)
+
+            # VRAM 최적화
+            if hasattr(pipe, "enable_model_cpu_offload"):
+                pass  # to(device)로 충분히 VRAM 확보 시 오프로드 불필요
+            if hasattr(pipe, "vae") and hasattr(pipe.vae, "enable_slicing"):
+                pipe.vae.enable_slicing()
+            if hasattr(pipe, "vae") and hasattr(pipe.vae, "enable_tiling"):
+                pipe.vae.enable_tiling()
+
+            num_frames = (job.meta or {}).get("num_frames") or cfg["num_frames"]
+            num_steps = (job.meta or {}).get("num_steps") or 30
+
+            # 진행률 콜백
+            step_total = [num_steps]
+
+            def progress_cb(pipe_obj, step_idx, timestep, callback_kwargs):
+                pct = 20 + int((step_idx / step_total[0]) * 65)
+                video_progress.notify_sync(job_id, pct, f"추론 중... {step_idx}/{step_total[0]} 스텝")
+                return callback_kwargs
+
+            video_progress.notify_sync(job_id, 20, "영상 생성 시작...")
+
+            result = pipe(
+                prompt=job.prompt,
+                num_frames=num_frames,
+                num_inference_steps=num_steps,
+                callback_on_step_end=progress_cb,
+            )
+            frames = result.frames[0]
+
+            video_progress.notify_sync(job_id, 88, "영상 저장 중...")
+
+            out_path = VIDEO_DIR / f"video_{job.id}.mp4"
+            from diffusers.utils import export_to_video
+            export_to_video(frames, str(out_path), fps=cfg["fps"])
+
+            # 메모리 해제
+            del pipe
+            torch.cuda.empty_cache()
+
+            job.status = "done"
+            job.video_path = str(out_path)
+            job.finished_at = datetime.utcnow()
+            video_progress.done_sync(job_id, "done")
+
+        except ImportError as e:
+            job.status = "failed"
+            job.error_msg = (
+                f"필수 패키지 미설치: {e}. "
+                "터미널에서 'han setup-gpu' 명령을 실행하여 설치하세요."
+            )
+            video_progress.done_sync(job_id, "failed")
+        except Exception as e:
+            job.status = "failed"
+            job.error_msg = str(e)[:500]
+            job.finished_at = datetime.utcnow()
+            video_progress.done_sync(job_id, "failed")
+
+        db.commit()
+        _notify_chat(db, job)
+
+    finally:
+        db.close()
+
+
 def _run_json2video_generation(job_id: int, api_key: str):
     """json2video.com API로 프레젠테이션 영상 생성 (백그라운드)."""
     import requests
@@ -577,7 +742,12 @@ def _start_video_job(job_id: int, db: Session) -> bool:
 
     provider = job.provider or "hf-inference"
 
-    if provider == "json2video":
+    if provider == "local-gpu":
+        t = threading.Thread(target=_run_local_gpu_generation, args=(job_id,), daemon=True)
+        t.start()
+        return True
+
+    elif provider == "json2video":
         api_key = _get_json2video_key(db)
         if not api_key:
             job.status = "failed"
@@ -784,8 +954,10 @@ def generate_video(
 
     provider = model_info["provider"]
 
-    # API 키 사전 확인
-    if provider == "json2video":
+    # API 키 사전 확인 (local-gpu는 API 키 불필요)
+    if provider == "local-gpu":
+        pass  # CUDA 가용 여부는 생성 시점에 확인
+    elif provider == "json2video":
         if not _get_json2video_key(db):
             raise HTTPException(
                 400,
