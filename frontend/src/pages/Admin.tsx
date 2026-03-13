@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe, FlaskConical, Loader2, Webhook, Copy, HardDrive, Download, Star, Zap, XCircle, Terminal } from 'lucide-react'
 import { modelsApi, externalKeyApi, webhooksApi, videoApi, groupSettingsApi } from '../api/client'
 import { useAuthStore, useGroupStore } from '../store/useStore'
+import { useT } from '../i18n'
 import type { ModelCatalog, ProviderConfig } from '../types'
 
 interface OllamaModel {
@@ -49,6 +50,7 @@ const VALID_TABS = ['providers', 'catalog', 'external-keys', 'webhooks', 'ollama
 type AdminTab = typeof VALID_TABS[number]
 
 export default function Admin() {
+  const t = useT()
   const [searchParams] = useSearchParams()
   const [catalog, setCatalog] = useState<ModelCatalog[]>([])
   const [providers, setProviders] = useState<ProviderConfig[]>([])
@@ -332,17 +334,17 @@ export default function Admin() {
           { id: 'webhooks', label: '웹훅 토큰' },
           { id: 'ollama', label: 'Ollama 모델' },
           { id: 'gpu-log', label: 'GPU 설치 로그' },
-          { id: 'group', label: '그룹 설정' },
+          { id: 'group', labelKey: 'admin.groupSettings' },
           { id: 'system', label: '시스템 정보' },
-        ].map((t) => (
+        ].map((tb) => (
           <button
-            key={t.id}
-            onClick={() => setTab(t.id as typeof tab)}
+            key={tb.id}
+            onClick={() => setTab(tb.id as typeof tab)}
             className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              tab === t.id ? 'bg-brand text-white' : 'text-slate-400 hover:text-slate-200'
+              tab === tb.id ? 'bg-brand text-white' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            {t.label}
+            {'labelKey' in tb ? t((tb as { labelKey: string }).labelKey) : (tb as { label: string }).label}
           </button>
         ))}
       </div>
@@ -745,11 +747,11 @@ export default function Admin() {
           <div className="space-y-4">
             <div className="card p-4">
               <h3 className="text-xs font-semibold text-slate-300 mb-4 flex items-center gap-2">
-                <Globe size={13} /> 그룹 이름 및 브랜딩 설정
+                <Globe size={13} /> {t('admin.groupSettings')}
               </h3>
               <div className="space-y-3">
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">그룹 이름 (영문)</label>
+                  <label className="block text-xs text-slate-500 mb-1">{t('admin.groupName')}</label>
                   <input
                     className="input"
                     value={groupForm.group_name}
@@ -758,7 +760,7 @@ export default function Admin() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">그룹 이름 (한국어)</label>
+                  <label className="block text-xs text-slate-500 mb-1">{t('admin.groupNameKo')}</label>
                   <input
                     className="input"
                     value={groupForm.group_name_ko}
@@ -767,7 +769,7 @@ export default function Admin() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">슬로건 (영문)</label>
+                  <label className="block text-xs text-slate-500 mb-1">{t('admin.slogan')}</label>
                   <input
                     className="input"
                     value={groupForm.slogan}
@@ -776,7 +778,7 @@ export default function Admin() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">슬로건 (한국어)</label>
+                  <label className="block text-xs text-slate-500 mb-1">{t('admin.sloganKo')}</label>
                   <input
                     className="input"
                     value={groupForm.slogan_ko}
@@ -799,12 +801,12 @@ export default function Admin() {
                   className="btn-primary text-xs px-4 py-2 flex items-center gap-2"
                 >
                   {groupSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                  {groupSaved ? '저장 완료!' : '설정 저장'}
+                  {groupSaved ? t('admin.saved') : t('save')}
                 </button>
               </div>
             </div>
             <div className="card p-4">
-              <h3 className="text-xs font-semibold text-slate-300 mb-2">미리보기</h3>
+              <h3 className="text-xs font-semibold text-slate-300 mb-2">{t('admin.preview')}</h3>
               <div className="bg-bg-elevated rounded-lg p-4 text-center space-y-1">
                 <div className="text-lg font-bold text-slate-100">{groupForm.group_name || 'Group'} OS</div>
                 <div className="text-xs text-slate-500">{groupForm.slogan || 'AI Corporate Operating System'}</div>

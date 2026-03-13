@@ -4,6 +4,7 @@ set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BACKEND="$ROOT/backend"
 FRONTEND="$ROOT/frontend"
+GROUP_DISPLAY_NAME="${GROUP_NAME:-Group OS}"
 
 # ── 색상 정의 ─────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -29,7 +30,7 @@ OS=$(detect_os)
 
 echo ""
 echo "╔══════════════════════════════════════════════╗"
-echo "║       HAN Group OS v30 — Startup             ║"
+echo "║       ${GROUP_DISPLAY_NAME} v32 — Startup             ║"
 echo "║  AI Corporate Operating System               ║"
 echo "╚══════════════════════════════════════════════╝"
 echo ""
@@ -371,7 +372,7 @@ FRONTEND_PID=$!
 sleep 3
 echo ""
 echo "════════════════════════════════════════════════"
-echo "  ✅ HAN Group OS v30 실행 중"
+echo "  ✅ ${GROUP_DISPLAY_NAME} v32 실행 중"
 echo ""
 echo "  🌐 앱:       http://localhost:5173"
 echo "  🔧 API:      http://localhost:8000"

@@ -779,6 +779,7 @@ def stream_message(
     # Capture values needed inside generator (DB session will be closed by then)
     session_id = req.session_id
     company_id = session.company_id
+    session_type = session.session_type
     user_id = current_user.id
     prov = provider
     sys_prompt = system_prompt
@@ -788,6 +789,8 @@ def stream_message(
 
     def generate():
         import httpx
+        import time as _time
+        _stream_start = _time.time()
         full_content = ""
 
         try:
@@ -871,6 +874,22 @@ def stream_message(
                 return
             except (json.JSONDecodeError, Exception):
                 pass  # fall through to normal execution
+
+        # 스트리밍 메트릭 자동 수집
+        try:
+            from services.ai_provider import _record_metric
+            _elapsed = int((_time.time() - _stream_start) * 1000)
+            _record_metric(
+                provider=prov.provider, model=prov.model,
+                response_time_ms=_elapsed,
+                prompt_tokens=sum(len((m.get("content") or "").split()) for m in msgs),
+                completion_tokens=len(full_content.split()) if full_content else 0,
+                session_type=session_type,
+                agent_name=name,
+                company_id=company_id or 0,
+            )
+        except Exception:
+            pass
 
         # Save complete AI message (new DB session since original is closed)
         with SessionLocal() as new_db:

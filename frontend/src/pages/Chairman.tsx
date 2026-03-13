@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { chatApi, orgApi, companiesApi, modelsApi } from '../api/client'
 import { useAuthStore, useGroupStore } from '../store/useStore'
+import { useT } from '../i18n'
 import { useProviderHealth } from '../components/ProviderStatusBanner'
 import MarkdownMessage from '../components/MarkdownMessage'
 import type { ChatSession, ChatMessage } from '../types'
@@ -180,6 +181,7 @@ function detectCompanyQuery(text: string, companies: Company[]): Company | null 
 export default function Chairman() {
   const navigate = useNavigate()
   const groupNameKo = useGroupStore((s) => s.config.group_name_ko)
+  const t = useT()
   const [selectedExec, setSelectedExec] = useState<Executive | null>(null)
   const [executives, setExecutives] = useState<Executive[]>([])
   const [execsLoading, setExecsLoading] = useState(true)
@@ -928,7 +930,7 @@ export default function Chairman() {
 
   // Derive placeholder text based on selected exec
   const getPlaceholder = () => {
-    if (!selectedExec) return '임원을 선택하세요…'
+    if (!selectedExec) return t('chairman.selectExec')
     if (selectedExec.sessionType === 'chairman') return '회장님께 지시사항을 입력하세요… (Enter 전송 / Shift+Enter 줄바꿈)'
     if (selectedExec.sessionType === 'ceo') return `${selectedExec.companyName} CEO에게 지시… (Enter 전송)`
     return `${selectedExec.name}에게 질문… (Enter 전송)`
@@ -1099,7 +1101,7 @@ export default function Chairman() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-sm font-bold text-slate-100">
-              {selectedExec ? `${selectedExec.name} · ${selectedExec.role}` : '임원과의 대화'}
+              {selectedExec ? `${selectedExec.name} · ${selectedExec.role}` : t('chairman.executiveChat')}
             </div>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <div className="flex items-center gap-1.5 text-[10px]" style={{ color: selectedExec?.color || '#e24c4b' }}>
@@ -1287,7 +1289,7 @@ export default function Chairman() {
                     ? `${selectedExec.companyName} CEO · 회사 운영, 전략, 성과 보고…`
                     : selectedExec
                     ? `${selectedExec.name} · 위원회 현안, 검토, 의결…`
-                    : '임원을 선택하세요'
+                    : t('chairman.selectExec')
                   }
                 </div>
                 <div className="text-xs text-slate-600 max-w-xs leading-relaxed">

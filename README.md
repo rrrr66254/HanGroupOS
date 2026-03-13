@@ -1,4 +1,4 @@
-# Group OS v32
+# Group OS v33
 **AI 기반 기업 운영 시스템 (AI Corporate Operating System)**
 
 <p align="center">
@@ -24,12 +24,47 @@
 | **다국어 지원 (i18n)** | 한국어·영어·일본어 UI 전환 (사이드바, 대시보드, 로그인 전체 적용) |
 | **CI/CD 파이프라인** | GitHub Actions — pytest + TypeScript 빌드 + Docker 빌드 자동화 |
 | **Docker Compose 배포** | 백엔드+프론트엔드+Ollama 원클릭 컨테이너 배포 |
+| **E2E 테스트 (Playwright)** | 로그인·대시보드·회장·계열사 시나리오별 브라우저 테스트 |
 | **pytest 테스트** | 인증·회사·승인·그룹설정 API 테스트 코드 |
 | **조직도 관리** | 회장 → 위원회 → 계열사 → 직책 계층 구조 |
 | **결재 워크플로우 + AI 사전 검토** | 요청 → AI 위험도 분석 → 승인/반려 파이프라인 |
 | **시장 분석 + 경쟁사 트렌드** | 산업별 기회/위협 리포트, 경쟁사 주간 뉴스량 차트 |
 | **전략 트래킹 + AI 진단** | 목표·이니셔티브·마일스톤·KPI 관리, AI 건강 진단 |
 | **멀티 AI 프로바이더** | Claude, GPT-4o, Gemini, Ollama (무료 로컬), Mock |
+
+---
+
+## v33 업데이트 내역
+
+### 1. 스트리밍 채팅 메트릭 수집
+- `/api/chat/stream` SSE 스트리밍 엔드포인트에 `_record_metric()` 자동 호출 추가
+- 스트리밍 응답 시간(ms), 토큰 수(추정), 세션 타입 자동 기록
+- DB 세션 닫힌 후에도 안전하게 동작하도록 로컬 변수 캡처 적용
+
+### 2. E2E 테스트 (Playwright)
+- `frontend/playwright.config.ts` — Vite 연동 + 스크린샷/트레이스 자동 수집
+- `frontend/e2e/auth.spec.ts` — 로그인 페이지, 성공 로그인, 잘못된 자격증명 테스트
+- `frontend/e2e/dashboard.spec.ts` — 통계 카드, 사이드바 네비게이션 테스트
+- `frontend/e2e/chairman.spec.ts` — 임원 목록, 채팅 UI 테스트
+- `frontend/e2e/companies.spec.ts` — 계열사 목록, 신규 생성 버튼 테스트
+- `npm run test:e2e` / `npm run test:e2e:ui` 스크립트 추가
+
+### 3. i18n 나머지 페이지 확장
+- `Chairman.tsx`, `Companies.tsx`, `Approvals.tsx`, `Admin.tsx`에 `useT()` 적용
+- ko/en/ja 번역 파일에 chairman, admin, companies, approvals 섹션 대폭 추가
+- Admin 페이지 탭 렌더링 변수 충돌 해결 (`t` → `tb`)
+
+### 4. 셸 스크립트 동적화 (완전 탈 하드코딩)
+- `han`, `install.sh`, `start.sh`, `start.ps1`, `install.ps1` 모든 사용자 문자열 동적화
+- `GROUP_DISPLAY_NAME="${GROUP_NAME:-Group OS}"` 환경변수 기반 설정
+- PowerShell: `$GroupDisplayName = if ($env:GROUP_NAME) { $env:GROUP_NAME } else { "Group OS" }`
+- "HAN Group OS" 하드코딩 0건 달성
+
+### 5. AI 메트릭 품질 점수 자동 평가
+- `_calc_quality_score()` 함수 추가 — 응답 길이·속도·입출력 비율 기반 0.0~1.0 자동 점수
+- `_record_metric()` 호출 시 `quality_score` 자동 계산 후 DB 저장
+- `AiAgentMetrics.quality_score` 컬럼 활용 (기존 nullable Float)
+- 성과 대시보드에서 품질 추이 확인 가능
 
 ---
 
@@ -151,10 +186,18 @@ npm install && npm run dev
 
 ## 테스트 실행
 
+**백엔드 (pytest)**
 ```bash
 cd backend
 pip install pytest httpx
 pytest tests/ -v
+```
+
+**프론트엔드 E2E (Playwright)**
+```bash
+cd frontend
+npx playwright install
+npm run test:e2e
 ```
 
 ---
@@ -225,7 +268,7 @@ HanGroupOS/
 
 서버 실행 후: `http://localhost:8000/docs`
 
-### 신규 API (v31-32)
+### 신규 API (v31-33)
 
 | 경로 | 설명 |
 |------|------|

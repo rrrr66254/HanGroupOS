@@ -49,16 +49,74 @@ def _record_fallback(from_provider: str, to_provider: str, reason: str, user_id:
     except Exception as e:
         logger.warning("폴백 이벤트 DB 기록 실패: %s", e)
 
+def _calc_quality_score(
+    completion_tokens: int, response_time_ms: int, prompt_tokens: int = 0,
+) -> float:
+    """응답 품질 점수 자동 계산 (0.0~1.0).
+
+    평가 기준:
+    - 응답 길이 적절성 (너무 짧거나 너무 길면 감점)
+    - 응답 속도 (빠를수록 가산)
+    - 입출력 비율 (프롬프트 대비 적절한 응답 길이)
+    """
+    score = 0.5  # 기본 점수
+
+    # 1) 응답 길이 점수 (0~0.3)
+    if completion_tokens <= 0:
+        len_score = 0.0
+    elif completion_tokens < 5:
+        len_score = 0.05  # 너무 짧음
+    elif completion_tokens < 20:
+        len_score = 0.15
+    elif completion_tokens <= 500:
+        len_score = 0.3  # 적정 범위
+    elif completion_tokens <= 1000:
+        len_score = 0.25
+    else:
+        len_score = 0.2  # 과도하게 긴 응답
+
+    # 2) 응답 속도 점수 (0~0.3)
+    if response_time_ms <= 0:
+        speed_score = 0.15
+    elif response_time_ms < 2000:
+        speed_score = 0.3
+    elif response_time_ms < 5000:
+        speed_score = 0.25
+    elif response_time_ms < 10000:
+        speed_score = 0.2
+    elif response_time_ms < 30000:
+        speed_score = 0.1
+    else:
+        speed_score = 0.05
+
+    # 3) 입출력 비율 점수 (0~0.2)
+    if prompt_tokens > 0 and completion_tokens > 0:
+        ratio = completion_tokens / max(prompt_tokens, 1)
+        if 0.3 <= ratio <= 3.0:
+            ratio_score = 0.2  # 적정 비율
+        elif 0.1 <= ratio <= 5.0:
+            ratio_score = 0.15
+        else:
+            ratio_score = 0.05
+    else:
+        ratio_score = 0.1
+
+    score = len_score + speed_score + ratio_score
+    # 0.0~1.0 클램핑
+    return round(max(0.0, min(1.0, score)), 3)
+
+
 def _record_metric(
     provider: str, model: str, response_time_ms: int,
     prompt_tokens: int = 0, completion_tokens: int = 0,
     session_type: str = "", agent_name: str = "", agent_role: str = "",
     org_node_id: int = 0, company_id: int = 0,
 ):
-    """AI 호출 메트릭을 DB에 자동 저장 (실패 시 무시)."""
+    """AI 호출 메트릭을 DB에 자동 저장 (품질 점수 자동 계산 포함, 실패 시 무시)."""
     try:
         from core.database import SessionLocal
         from models.models import AiAgentMetrics
+        q_score = _calc_quality_score(completion_tokens, response_time_ms, prompt_tokens)
         db = SessionLocal()
         db.add(AiAgentMetrics(
             org_node_id=org_node_id or None,
@@ -71,6 +129,7 @@ def _record_metric(
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
             response_time_ms=response_time_ms,
+            quality_score=q_score,
             session_type=session_type,
         ))
         db.commit()
