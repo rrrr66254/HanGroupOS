@@ -341,7 +341,7 @@ def analyze_synergy(
         for c in companies
     )
 
-    prompt = f"""한그룹 계열사 목록:
+    prompt = f"""그룹 계열사 목록:
 {company_list}
 
 위 계열사들 간의 구체적인 시너지 기회를 JSON으로 제안하세요.
@@ -532,7 +532,7 @@ def team_strategy_discussion(
 
     # 토론 결과 기반 전략 인사이트 생성
     provider = get_provider_from_db(db, current_user.id)
-    summary_prompt = f"""다음은 한그룹 계열사 CEO들의 전략 토론 내용입니다:
+    summary_prompt = f"""다음은 그룹 계열사 CEO들의 전략 토론 내용입니다:
 
 {formatted[:3000]}
 

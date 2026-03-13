@@ -573,7 +573,7 @@ def _get_system(session_type: str) -> str:
         return CHAIRMAN_SYSTEM
     elif session_type == "ceo":
         return CEO_SYSTEM
-    return "당신은 한그룹의 AI 어시스턴트입니다."
+    return "당신은 AI 기업 어시스턴트입니다."
 
 
 @router.get("/sessions", response_model=List[ChatSessionOut])
@@ -663,7 +663,9 @@ def send_message(
     if session.session_type == "chairman":
         system_prompt += build_api_key_context(db)
     ai_response = provider.chat(
-        messages, system=system_prompt, session_type=session.session_type
+        messages, system=system_prompt, session_type=session.session_type,
+        agent_name=session.agent_name or session.session_type,
+        company_id=session.company_id or 0,
     )
 
     # Execute any embedded action blocks
@@ -825,7 +827,7 @@ def stream_message(
                 stream_kwargs: dict = {
                     "model": prov.model,
                     "max_tokens": 16000 if supports_thinking else 4096,
-                    "system": sys_prompt or "You are an AI executive assistant for HAN Group.",
+                    "system": sys_prompt or "You are an AI executive assistant.",
                     "messages": msgs,
                 }
                 if supports_thinking:
@@ -1016,7 +1018,7 @@ def brief_ceo(
     ceo_name = ceo_node.name if ceo_node else f"{company.name} CEO"
 
     briefing = (
-        f"안녕하세요 {ceo_name}님. 한그룹 Admin입니다.\n\n"
+        f"안녕하세요 {ceo_name}님. Admin입니다.\n\n"
         f"'{company.name}' 설립을 진심으로 축하합니다.\n\n"
         f"회사 개요:\n"
         f"- 산업: {company.industry}\n"
@@ -1144,7 +1146,7 @@ def collaborate(
         },
     ]
 
-    topic = f"한그룹 회장의 협업 과제: {req.task}"
+    topic = f"그룹 회장의 협업 과제: {req.task}"
     team_result = asyncio.run(run_team_discussion(agents, topic, max_rounds=2))
 
     # 각 CEO의 발언 취합 (하위 호환 필드)
@@ -1350,7 +1352,7 @@ def performance_report(
             for i, r in enumerate(rankings)
         )
         prompt = (
-            f"다음은 한그룹 계열사 AI 활동 주간 현황입니다.\n\n{report_lines}\n\n"
+            f"다음은 그룹 계열사 AI 활동 주간 현황입니다.\n\n{report_lines}\n\n"
             f"각 계열사의 성과를 분석하고 강점과 개선점을 포함한 주간 성과 보고서를 작성해주세요. "
             f"상위 계열사의 성공 요인과 하위 계열사에 대한 구체적인 권고사항을 포함해주세요."
         )
@@ -1386,12 +1388,12 @@ def board_meeting(
 
     provider = get_provider_from_db(db, current_user.id)
     DIRECTOR_SYSTEM = (
-        "당신은 한그룹 이사회 구성원입니다. 안건에 대해 찬성/반대/보류 중 하나를 선택하고 "
+        "당신은 그룹 이사회 구성원입니다. 안건에 대해 찬성/반대/보류 중 하나를 선택하고 "
         "2~3문장으로 근거를 설명하세요. 반드시 첫 줄에 '투표: 찬성', '투표: 반대', '투표: 보류' 중 하나로 시작하세요."
     )
 
     votes = []
-    context = f"한그룹 이사회 안건: {req.agenda}\n\n참석자: {', '.join(v['name'] for v in voters)}"
+    context = f"그룹 이사회 안건: {req.agenda}\n\n참석자: {', '.join(v['name'] for v in voters)}"
     for voter in voters:
         prompt = (
             f"{context}\n\n[{voter['name']} / {voter['title']}] 발언 차례입니다. "
@@ -1445,7 +1447,7 @@ def recommended_actions(
     recent_directives = [m.content[:60] for m in recent_msgs]
 
     prompt = (
-        f"현재 한그룹 현황:\n"
+        f"현재 그룹 현황:\n"
         f"- 활성 계열사: {company_count}개\n"
         f"- 최근 회장 지시: {'; '.join(recent_directives) if recent_directives else '없음'}\n\n"
         f"오늘 회장이 취해야 할 중요 액션 3가지를 JSON 배열로 제시하세요. "
@@ -1534,7 +1536,7 @@ def agent_chat(
 
     system = (
         f"당신은 {node.role} {node.name}입니다.\n"
-        f"{node.description or '한그룹 계열사의 AI 임직원입니다.'}"
+        f"{node.description or '그룹 계열사의 AI 임직원입니다.'}"
         f"{personality_ctx}"
         + (f"\n\n{memory_ctx}" if memory_ctx else "")
     )
@@ -1544,6 +1546,10 @@ def agent_chat(
         messages=[{"role": "user", "content": message}],
         system=system,
         max_tokens=600,
+        agent_name=node.name,
+        agent_role=node.role,
+        org_node_id=node.id,
+        company_id=node.company_id or 0,
     )
 
     return {

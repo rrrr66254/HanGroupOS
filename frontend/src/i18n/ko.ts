@@ -12,6 +12,23 @@ const ko = {
   refresh: '새로고침',
   login: '로그인',
   logout: '로그아웃',
+  noData: '데이터가 없습니다.',
+  error: '오류가 발생했습니다.',
+  success: '성공',
+  submit: '제출',
+  back: '뒤로',
+  next: '다음',
+  previous: '이전',
+  all: '전체',
+  active: '활성',
+  inactive: '비활성',
+  pending: '대기',
+  actions: '액션',
+  status: '상태',
+  name: '이름',
+  description: '설명',
+  date: '날짜',
+  type: '유형',
 
   // 네비게이션
   nav: {
@@ -66,6 +83,10 @@ const ko = {
     activeCompanies: '활성 계열사',
     quickActions: '빠른 실행',
     healthScorecard: '계열사 건강 스코어카드',
+    recentActivity: '최근 활동',
+    systemStatus: '시스템 상태',
+    live: '실시간',
+    offline: '오프라인',
   },
 
   // 승인
@@ -74,6 +95,85 @@ const ko = {
     approved: '승인',
     rejected: '반려',
     noPending: '대기 중인 승인이 없습니다.',
+    approve: '승인하기',
+    reject: '반려하기',
+    requestDate: '요청 일시',
+    requestType: '요청 유형',
+    requester: '요청자',
+  },
+
+  // 회장
+  chairman: {
+    commandCenter: '커맨드센터',
+    topDecisionMaker: '최고 의사결정권자',
+    executiveChat: '임원과의 대화',
+    selectExec: '임원을 선택하세요',
+    boardMeeting: '경영진 회의',
+    boardResolution: '이사회 결의',
+    companySetup: '회사 설립, 전략 수립…',
+    chatInstructions: '회사 설립, 전략 수립, 현황 조회 등\n대화만으로 모든 지시를 내릴 수 있습니다',
+  },
+
+  // 관리자
+  admin: {
+    settings: '설정',
+    users: '사용자',
+    system: '시스템',
+    aiProvider: 'AI Provider',
+    groupSettings: '그룹 설정',
+    groupName: '그룹명 (영문)',
+    groupNameKo: '그룹명 (한국어)',
+    slogan: '슬로건 (영문)',
+    sloganKo: '슬로건 (한국어)',
+    preview: '미리보기',
+    saved: '저장 완료!',
+    saving: '저장 중...',
+  },
+
+  // 계열사
+  companies: {
+    title: '계열사 관리',
+    newCompany: '새 계열사',
+    industry: '업종',
+    vision: '비전',
+    orgChart: '조직도',
+    employees: '임직원',
+    noCompanies: '계열사가 없습니다.',
+    createFirst: '첫 번째 계열사를 만들어보세요.',
+  },
+
+  // 영상 스튜디오
+  video: {
+    studio: '영상 스튜디오',
+    sharedStudio: '공유 영상 스튜디오',
+    generate: '영상 생성',
+    generating: '생성 중...',
+    prompt: '프롬프트',
+    model: '모델',
+    duration: '길이',
+  },
+
+  // AI 성과
+  performance: {
+    title: 'AI 성과 분석',
+    totalRequests: '총 요청',
+    totalTokens: '총 토큰',
+    avgResponseTime: '평균 응답 시간',
+    avgQuality: '평균 품질',
+    dailyTrend: '일별 추이',
+    providerDistribution: '프로바이더 분포',
+    agentRanking: '에이전트 랭킹',
+    recentCalls: '최근 호출 이력',
+  },
+
+  // 로그인
+  auth: {
+    loginTitle: '로그인',
+    username: '사용자명',
+    password: '비밀번호',
+    loginButton: '로그인',
+    loginFailed: '로그인 실패. 사용자명과 비밀번호를 확인하세요.',
+    welcomeMessage: 'AI 기업 운영 시스템',
   },
 }
 

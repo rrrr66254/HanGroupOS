@@ -12,6 +12,23 @@ const en = {
   refresh: 'Refresh',
   login: 'Login',
   logout: 'Logout',
+  noData: 'No data available.',
+  error: 'An error occurred.',
+  success: 'Success',
+  submit: 'Submit',
+  back: 'Back',
+  next: 'Next',
+  previous: 'Previous',
+  all: 'All',
+  active: 'Active',
+  inactive: 'Inactive',
+  pending: 'Pending',
+  actions: 'Actions',
+  status: 'Status',
+  name: 'Name',
+  description: 'Description',
+  date: 'Date',
+  type: 'Type',
 
   // Navigation
   nav: {
@@ -66,6 +83,10 @@ const en = {
     activeCompanies: 'Active Companies',
     quickActions: 'Quick Actions',
     healthScorecard: 'Company Health Scorecard',
+    recentActivity: 'Recent Activity',
+    systemStatus: 'System Status',
+    live: 'LIVE',
+    offline: 'OFFLINE',
   },
 
   // Approvals
@@ -74,6 +95,85 @@ const en = {
     approved: 'Approved',
     rejected: 'Rejected',
     noPending: 'No pending approvals.',
+    approve: 'Approve',
+    reject: 'Reject',
+    requestDate: 'Request Date',
+    requestType: 'Request Type',
+    requester: 'Requester',
+  },
+
+  // Chairman
+  chairman: {
+    commandCenter: 'Command Center',
+    topDecisionMaker: 'Top Decision Maker',
+    executiveChat: 'Executive Chat',
+    selectExec: 'Select an executive',
+    boardMeeting: 'Executive Meeting',
+    boardResolution: 'Board Resolution',
+    companySetup: 'Company setup, strategy planning…',
+    chatInstructions: 'Issue commands through conversation:\ncompany setup, strategy, status checks, and more',
+  },
+
+  // Admin
+  admin: {
+    settings: 'Settings',
+    users: 'Users',
+    system: 'System',
+    aiProvider: 'AI Provider',
+    groupSettings: 'Group Settings',
+    groupName: 'Group Name (EN)',
+    groupNameKo: 'Group Name (KO)',
+    slogan: 'Slogan (EN)',
+    sloganKo: 'Slogan (KO)',
+    preview: 'Preview',
+    saved: 'Saved!',
+    saving: 'Saving...',
+  },
+
+  // Companies
+  companies: {
+    title: 'Company Management',
+    newCompany: 'New Company',
+    industry: 'Industry',
+    vision: 'Vision',
+    orgChart: 'Org Chart',
+    employees: 'Employees',
+    noCompanies: 'No companies yet.',
+    createFirst: 'Create your first company.',
+  },
+
+  // Video Studio
+  video: {
+    studio: 'Video Studio',
+    sharedStudio: 'Shared Video Studio',
+    generate: 'Generate Video',
+    generating: 'Generating...',
+    prompt: 'Prompt',
+    model: 'Model',
+    duration: 'Duration',
+  },
+
+  // AI Performance
+  performance: {
+    title: 'AI Performance Analytics',
+    totalRequests: 'Total Requests',
+    totalTokens: 'Total Tokens',
+    avgResponseTime: 'Avg Response Time',
+    avgQuality: 'Avg Quality',
+    dailyTrend: 'Daily Trend',
+    providerDistribution: 'Provider Distribution',
+    agentRanking: 'Agent Ranking',
+    recentCalls: 'Recent Calls',
+  },
+
+  // Auth
+  auth: {
+    loginTitle: 'Login',
+    username: 'Username',
+    password: 'Password',
+    loginButton: 'Login',
+    loginFailed: 'Login failed. Check your username and password.',
+    welcomeMessage: 'AI Corporate Operating System',
   },
 }
 

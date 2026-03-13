@@ -12,6 +12,23 @@ const ja = {
   refresh: '更新',
   login: 'ログイン',
   logout: 'ログアウト',
+  noData: 'データがありません。',
+  error: 'エラーが発生しました。',
+  success: '成功',
+  submit: '送信',
+  back: '戻る',
+  next: '次へ',
+  previous: '前へ',
+  all: 'すべて',
+  active: 'アクティブ',
+  inactive: '非アクティブ',
+  pending: '保留',
+  actions: 'アクション',
+  status: 'ステータス',
+  name: '名前',
+  description: '説明',
+  date: '日付',
+  type: 'タイプ',
 
   // ナビゲーション
   nav: {
@@ -66,6 +83,10 @@ const ja = {
     activeCompanies: 'アクティブ会社',
     quickActions: 'クイックアクション',
     healthScorecard: '会社ヘルススコアカード',
+    recentActivity: '最近の活動',
+    systemStatus: 'システム状態',
+    live: 'ライブ',
+    offline: 'オフライン',
   },
 
   // 承認
@@ -74,6 +95,85 @@ const ja = {
     approved: '承認済み',
     rejected: '却下',
     noPending: '承認待ちの案件はありません。',
+    approve: '承認する',
+    reject: '却下する',
+    requestDate: 'リクエスト日',
+    requestType: 'リクエストタイプ',
+    requester: 'リクエスター',
+  },
+
+  // 会長
+  chairman: {
+    commandCenter: 'コマンドセンター',
+    topDecisionMaker: '最高意思決定者',
+    executiveChat: '役員チャット',
+    selectExec: '役員を選択してください',
+    boardMeeting: '経営会議',
+    boardResolution: '取締役会決議',
+    companySetup: '会社設立、戦略策定…',
+    chatInstructions: '会話でコマンドを発行：\n会社設立、戦略策定、状況確認など',
+  },
+
+  // 管理者
+  admin: {
+    settings: '設定',
+    users: 'ユーザー',
+    system: 'システム',
+    aiProvider: 'AIプロバイダー',
+    groupSettings: 'グループ設定',
+    groupName: 'グループ名（英語）',
+    groupNameKo: 'グループ名（韓国語）',
+    slogan: 'スローガン（英語）',
+    sloganKo: 'スローガン（韓国語）',
+    preview: 'プレビュー',
+    saved: '保存完了！',
+    saving: '保存中...',
+  },
+
+  // 関連会社
+  companies: {
+    title: '関連会社管理',
+    newCompany: '新しい会社',
+    industry: '業種',
+    vision: 'ビジョン',
+    orgChart: '組織図',
+    employees: '社員',
+    noCompanies: '関連会社がありません。',
+    createFirst: '最初の関連会社を作成しましょう。',
+  },
+
+  // 映像スタジオ
+  video: {
+    studio: '映像スタジオ',
+    sharedStudio: '共有映像スタジオ',
+    generate: '映像生成',
+    generating: '生成中...',
+    prompt: 'プロンプト',
+    model: 'モデル',
+    duration: '再生時間',
+  },
+
+  // AI成果
+  performance: {
+    title: 'AI成果分析',
+    totalRequests: '総リクエスト',
+    totalTokens: '総トークン',
+    avgResponseTime: '平均応答時間',
+    avgQuality: '平均品質',
+    dailyTrend: '日次トレンド',
+    providerDistribution: 'プロバイダー分布',
+    agentRanking: 'エージェントランキング',
+    recentCalls: '最近の呼出',
+  },
+
+  // 認証
+  auth: {
+    loginTitle: 'ログイン',
+    username: 'ユーザー名',
+    password: 'パスワード',
+    loginButton: 'ログイン',
+    loginFailed: 'ログインに失敗しました。ユーザー名とパスワードを確認してください。',
+    welcomeMessage: 'AI企業運営システム',
   },
 }
 

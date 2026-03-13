@@ -47,7 +47,7 @@ GUIDES = {
                 "description": "API 사용을 위한 앱을 등록합니다.",
                 "actions": [
                     "https://www.tistory.com/guide/api/manage/register 접속",
-                    "앱 이름: 원하는 이름 입력 (예: HanGroup OS)",
+                    "앱 이름: 원하는 이름 입력 (예: Group OS)",
                     "서비스 URL: http://localhost (로컬 테스트용)",
                     "CallBack: http://localhost (로컬 테스트용)",
                     "등록 후 App ID와 Secret Key 확인",
@@ -123,7 +123,7 @@ GUIDES = {
                     "WordPress 관리자 대시보드 로그인 (yoursite.com/wp-admin)",
                     "좌측 메뉴: 사용자(Users) → 프로필(Profile) 클릭",
                     "페이지 하단의 '애플리케이션 비밀번호(Application Passwords)' 섹션으로 이동",
-                    "새 애플리케이션 이름 입력 (예: HanGroup OS)",
+                    "새 애플리케이션 이름 입력 (예: Group OS)",
                     "'새 애플리케이션 비밀번호 추가' 버튼 클릭",
                     "생성된 비밀번호를 즉시 복사 (다시 볼 수 없음!)",
                 ],
@@ -171,7 +171,7 @@ GUIDES = {
                 "actions": [
                     "https://console.cloud.google.com 접속 (Google 계정 로그인)",
                     "상단 프로젝트 선택 → '새 프로젝트' 클릭",
-                    "프로젝트 이름 입력 (예: HanGroup OS) → 만들기",
+                    "프로젝트 이름 입력 (예: Group OS) → 만들기",
                 ],
                 "url": "https://console.cloud.google.com/projectcreate",
             },

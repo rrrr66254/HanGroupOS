@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { Zap } from 'lucide-react'
 import { authApi, groupSettingsApi } from '../api/client'
 import { useAuthStore, useGroupStore } from '../store/useStore'
+import { useT } from '../i18n'
 
 export default function Login() {
   const navigate = useNavigate()
+  const t = useT()
   const setAuth = useAuthStore((s) => s.setAuth)
   const setGroupConfig = useGroupStore((s) => s.setConfig)
   const groupName = useGroupStore((s) => s.config.group_name)
@@ -60,7 +62,7 @@ export default function Login() {
         <div className="card p-6">
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5">아이디</label>
+              <label className="block text-xs text-slate-400 mb-1.5">{t('auth.username')}</label>
               <input
                 className="input"
                 value={username}
@@ -70,7 +72,7 @@ export default function Login() {
               />
             </div>
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5">비밀번호</label>
+              <label className="block text-xs text-slate-400 mb-1.5">{t('auth.password')}</label>
               <input
                 className="input"
                 type="password"
@@ -94,10 +96,10 @@ export default function Login() {
               {loading ? (
                 <>
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  로그인 중...
+                  {t('loading')}
                 </>
               ) : (
-                `${groupName} OS 접속`
+                `${groupName} OS ${t('login')}`
               )}
             </button>
           </form>

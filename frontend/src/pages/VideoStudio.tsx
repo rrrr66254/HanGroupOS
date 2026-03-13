@@ -5,7 +5,7 @@ import {
   Cpu, Zap, AlertTriangle,
 } from 'lucide-react'
 import { videoApi, companiesApi } from '../api/client'
-import { useAuthStore } from '../store/useStore'
+import { useAuthStore, useGroupStore } from '../store/useStore'
 
 interface GpuStatus {
   name?: string
@@ -72,6 +72,7 @@ const EST_SECONDS: Record<string, number> = {
 }
 
 export default function VideoStudio() {
+  const groupName = useGroupStore((s) => s.config.group_name)
   const [models, setModels] = useState<VideoModel[]>([])
   const [jobs, setJobs] = useState<VideoJob[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
@@ -475,7 +476,7 @@ export default function VideoStudio() {
                       type="text"
                       value={j2vConfig.logo}
                       onChange={(e) => setJ2vConfig((p) => ({ ...p, logo: e.target.value }))}
-                      placeholder="HAN Group"
+                      placeholder={groupName}
                       className="w-full bg-bg-base border border-bg-border rounded text-xs text-slate-200 p-1.5 focus:outline-none focus:border-brand/60 placeholder:text-slate-600"
                     />
                   </div>
@@ -728,7 +729,7 @@ export default function VideoStudio() {
           <div className="flex-1 flex flex-col items-center justify-center gap-4 text-slate-600">
             <Film size={48} strokeWidth={1} />
             <div className="text-center">
-              <p className="text-sm text-slate-400">HAN Group 공유 영상 스튜디오</p>
+              <p className="text-sm text-slate-400">{groupName} 공유 영상 스튜디오</p>
               <p className="text-xs mt-1">FAL-AI · HuggingFace · JSON2Video 지원</p>
               <p className="text-xs text-slate-600 mt-1">왼쪽에서 프롬프트를 입력하고 영상을 생성하세요</p>
             </div>

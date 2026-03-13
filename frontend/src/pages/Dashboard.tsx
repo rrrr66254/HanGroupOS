@@ -10,6 +10,7 @@ import {
 } from 'recharts'
 import { dashboardApi, approvalsApi, companiesApi, healthApi, videoApi } from '../api/client'
 import { useGroupStore, useAuthStore } from '../store/useStore'
+import { useT } from '../i18n'
 import type { DashboardStats, ApprovalRequest, Company } from '../types'
 
 interface GpuStatus {
@@ -62,6 +63,7 @@ const HEALTH_CONFIG = {
 export default function Dashboard() {
   const groupName = useGroupStore((s) => s.config.group_name)
   const token = useAuthStore((s) => s.token)
+  const t = useT()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [pending, setPending] = useState<ApprovalRequest[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
@@ -161,14 +163,14 @@ export default function Dashboard() {
       {/* Stats */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard icon={Building2} label="전체 계열사" value={stats.total_companies} color="bg-brand/15 text-brand-light" to="/companies" />
-          <StatCard icon={Users} label="AI 조직원" value={stats.total_org_nodes} color="bg-accent/15 text-accent" to="/live-office" />
-          <StatCard icon={CheckSquare} label="승인 대기" value={stats.pending_approvals} color="bg-warning/15 text-warning" to="/approvals" />
-          <StatCard icon={Brain} label="기업 기억" value={stats.total_memories} color="bg-purple-400/15 text-purple-400" to="/memory" />
-          <StatCard icon={FlaskConical} label="시뮬레이션" value={stats.recent_simulations} color="bg-pink-400/15 text-pink-400" to="/simulation" />
-          <StatCard icon={Map} label="전략 항목" value={stats.total_strategies} color="bg-success/15 text-success" to="/strategy" />
-          <StatCard icon={Users} label="오픈 회의" value={stats.open_meetings} color="bg-orange-400/15 text-orange-400" to="/meetings" />
-          <StatCard icon={Building2} label="활성 계열사" value={stats.active_companies} color="bg-teal-400/15 text-teal-400" to="/companies" />
+          <StatCard icon={Building2} label={t('dashboard.totalCompanies')} value={stats.total_companies} color="bg-brand/15 text-brand-light" to="/companies" />
+          <StatCard icon={Users} label={t('dashboard.aiMembers')} value={stats.total_org_nodes} color="bg-accent/15 text-accent" to="/live-office" />
+          <StatCard icon={CheckSquare} label={t('dashboard.pendingApprovals')} value={stats.pending_approvals} color="bg-warning/15 text-warning" to="/approvals" />
+          <StatCard icon={Brain} label={t('dashboard.corporateMemory')} value={stats.total_memories} color="bg-purple-400/15 text-purple-400" to="/memory" />
+          <StatCard icon={FlaskConical} label={t('dashboard.simulations')} value={stats.recent_simulations} color="bg-pink-400/15 text-pink-400" to="/simulation" />
+          <StatCard icon={Map} label={t('dashboard.strategyItems')} value={stats.total_strategies} color="bg-success/15 text-success" to="/strategy" />
+          <StatCard icon={Users} label={t('dashboard.openMeetings')} value={stats.open_meetings} color="bg-orange-400/15 text-orange-400" to="/meetings" />
+          <StatCard icon={Building2} label={t('dashboard.activeCompanies')} value={stats.active_companies} color="bg-teal-400/15 text-teal-400" to="/companies" />
         </div>
       )}
 

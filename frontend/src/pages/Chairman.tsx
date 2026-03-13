@@ -7,7 +7,7 @@ import {
   Clock, Trophy, FileText, Coffee, BookOpen, Vote, Paperclip,
 } from 'lucide-react'
 import { chatApi, orgApi, companiesApi, modelsApi } from '../api/client'
-import { useAuthStore } from '../store/useStore'
+import { useAuthStore, useGroupStore } from '../store/useStore'
 import { useProviderHealth } from '../components/ProviderStatusBanner'
 import MarkdownMessage from '../components/MarkdownMessage'
 import type { ChatSession, ChatMessage } from '../types'
@@ -179,6 +179,7 @@ function detectCompanyQuery(text: string, companies: Company[]): Company | null 
 
 export default function Chairman() {
   const navigate = useNavigate()
+  const groupNameKo = useGroupStore((s) => s.config.group_name_ko)
   const [selectedExec, setSelectedExec] = useState<Executive | null>(null)
   const [executives, setExecutives] = useState<Executive[]>([])
   const [execsLoading, setExecsLoading] = useState(true)
@@ -266,7 +267,7 @@ export default function Chairman() {
           const msgs = await chatApi.messages(existing[0].id)
           setMessages(msgs.data)
         } else {
-          const newS = await chatApi.createSession({ session_type: 'chairman', title: '한그룹 커맨드센터', agent_name: exec.name })
+          const newS = await chatApi.createSession({ session_type: 'chairman', title: `${groupNameKo} 커맨드센터`, agent_name: exec.name })
           setSession(newS.data as ChatSession)
         }
       } else if (exec.sessionType === 'ceo' && exec.companyId) {
@@ -1103,7 +1104,7 @@ export default function Chairman() {
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <div className="flex items-center gap-1.5 text-[10px]" style={{ color: selectedExec?.color || '#e24c4b' }}>
                 <div className="w-1.5 h-1.5 rounded-full blink" style={{ background: selectedExec?.color || '#e24c4b' }} />
-                {selectedExec?.sessionType === 'chairman' ? '한그룹 최고 의사결정권자' : selectedExec?.sessionType === 'ceo' ? `${selectedExec.companyName} 대표이사` : selectedExec?.role || '임원'}
+                {selectedExec?.sessionType === 'chairman' ? `${groupNameKo} 최고 의사결정권자` : selectedExec?.sessionType === 'ceo' ? `${selectedExec.companyName} 대표이사` : selectedExec?.role || '임원'}
               </div>
               {/* Real-time model + provider dropdown */}
               {selectedExec && (
@@ -1281,7 +1282,7 @@ export default function Chairman() {
               <div className="text-center space-y-1">
                 <div className="text-base font-semibold text-slate-300">
                   {selectedExec?.sessionType === 'chairman'
-                    ? '한그룹 AI 회장님 · 회사 설립, 전략 수립…'
+                    ? `${groupNameKo} AI 회장님 · 회사 설립, 전략 수립…`
                     : selectedExec?.sessionType === 'ceo'
                     ? `${selectedExec.companyName} CEO · 회사 운영, 전략, 성과 보고…`
                     : selectedExec
@@ -1963,7 +1964,7 @@ export default function Chairman() {
             >
               <div style={{ fontSize: 22 }}>🏛️</div>
               <div className="flex-1">
-                <div className="text-sm font-bold text-slate-100">한그룹 경영진 회의</div>
+                <div className="text-sm font-bold text-slate-100">{groupNameKo} 경영진 회의</div>
                 <div className="text-[10px] text-indigo-400 mt-0.5 truncate">{meetingResult.topic}</div>
               </div>
               <div className="flex items-center gap-1.5 mr-2">
@@ -2163,7 +2164,7 @@ export default function Chairman() {
             >
               <div style={{ fontSize: 22 }}>⚖️</div>
               <div className="flex-1">
-                <div className="text-sm font-bold text-slate-100">한그룹 이사회 결의</div>
+                <div className="text-sm font-bold text-slate-100">{groupNameKo} 이사회 결의</div>
                 <div className="text-[10px] text-slate-400 mt-0.5 truncate">{boardResult.agenda}</div>
               </div>
               <div

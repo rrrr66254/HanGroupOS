@@ -1,4 +1,4 @@
-# Group OS v31
+# Group OS v32
 **AI 기반 기업 운영 시스템 (AI Corporate Operating System)**
 
 <p align="center">
@@ -17,62 +17,60 @@
 |------|------|
 | **동적 그룹 이름 설정** | 관리자 > 그룹 설정에서 그룹 이름/슬로건을 자유롭게 변경 (전체 UI 즉시 반영) |
 | **AI 허브 (다중 AI 대화)** | 회장·위원회·CEO 등 AI 구성원 각자와 1:1 대화 |
-| **AI 에이전트 성과 분석** | 에이전트별 응답 품질, 토큰 사용량, 처리 시간 대시보드 |
+| **AI 에이전트 성과 분석** | 에이전트별 응답 품질, 토큰 사용량, 처리 시간 대시보드 (자동 수집) |
 | **픽셀 AI 오피스** | AI 캐릭터가 실시간으로 움직이는 픽셀아트 사무실 |
 | **역할별 AI 자동 배정** | 계열사 설립 시 직급·역할에 맞는 AI 모델 자동 배정 |
 | **실시간 대시보드** | WebSocket 기반 실시간 KPI 변동, 승인 알림, 이벤트 반영 |
-| **다국어 지원 (i18n)** | 한국어·영어·일본어 UI 전환 (헤더에서 즉시 변경) |
+| **다국어 지원 (i18n)** | 한국어·영어·일본어 UI 전환 (사이드바, 대시보드, 로그인 전체 적용) |
+| **CI/CD 파이프라인** | GitHub Actions — pytest + TypeScript 빌드 + Docker 빌드 자동화 |
 | **Docker Compose 배포** | 백엔드+프론트엔드+Ollama 원클릭 컨테이너 배포 |
 | **pytest 테스트** | 인증·회사·승인·그룹설정 API 테스트 코드 |
 | **조직도 관리** | 회장 → 위원회 → 계열사 → 직책 계층 구조 |
 | **결재 워크플로우 + AI 사전 검토** | 요청 → AI 위험도 분석 → 승인/반려 파이프라인 |
 | **시장 분석 + 경쟁사 트렌드** | 산업별 기회/위협 리포트, 경쟁사 주간 뉴스량 차트 |
 | **전략 트래킹 + AI 진단** | 목표·이니셔티브·마일스톤·KPI 관리, AI 건강 진단 |
-| **KPI 이력 + 스파크라인** | KPI 동기화 이력 추적, SVG 스파크라인 시각화 |
-| **계열사 건강 스코어카드** | 진척률·KPI·데이터 종합 건강 점수 |
-| **그룹 주간 브리핑** | 최근 7일 데이터 기반 AI 자동 마크다운 브리핑 생성 |
 | **멀티 AI 프로바이더** | Claude, GPT-4o, Gemini, Ollama (무료 로컬), Mock |
 
 ---
 
-## v31 업데이트 내역
+## v32 업데이트 내역
 
-### 1. 동적 그룹 이름 설정
-- 하드코딩된 "HAN Group"/"한그룹" 완전 제거
-- `GroupSettings` DB 모델로 그룹 이름/슬로건 저장
-- `GET/PATCH /api/group-settings` API
-- 관리자 페이지에 "그룹 설정" 탭 추가 (미리보기 포함)
-- 로그인 화면, 사이드바, 헤더, 대시보드, 그룹홈 등 전체 UI 동적 반영
+### 1. AI 시스템 프롬프트 동적화
+- 모든 AI 시스템 프롬프트(CHAIRMAN, CEO, CFO, CMO, CTO, COO, CPO, MARKET_ANALYST)에서 하드코딩 그룹명 제거
+- `__GROUP__`/`__GROUP_EN__` 플레이스홀더 → DB GroupSettings 기반 런타임 치환
+- `get_chairman_system(db)`, `get_system_for_role(role, level, db)` 동적 함수 제공
+- `_resolve_group()` 헬퍼로 모든 역할 프롬프트 자동 그룹명 적용
 
-### 2. pytest 기반 API 테스트
-- `backend/tests/` 디렉토리 생성
-- `conftest.py` — 테스트용 인메모리 DB, FastAPI TestClient
-- `test_auth.py` — 로그인, 인증 테스트
-- `test_companies.py` — 회사 CRUD 테스트
-- `test_approvals.py` — 승인 워크플로우 테스트
-- `test_group_settings.py` — 그룹 설정 API 테스트
+### 2. 백엔드 하드코딩 완전 제거
+- `chat.py` — 브리핑, 이사회, 주간 리포트, 추천 액션 등 모든 "한그룹" 참조 제거
+- `strategy.py` — 시너지 분석, CEO 토론 요약 프롬프트 동적화
+- `ir_service.py` — IR 페이지 기본 텍스트 동적화
+- `site_service.py` — 사이트 빌더 푸터 동적화
+- `work_service.py` — 주간 보고서 시스템 프롬프트 동적화
+- `platform_guides.py` — 앱 이름 예시 동적화
+- `config.py` — APP_NAME 기본값 "Group OS"
+- 프론트엔드 `Chairman.tsx`, `VideoStudio.tsx` — `useGroupStore` 연동
 
-### 3. Docker Compose 배포
-- `docker-compose.yml` — backend + frontend + Ollama GPU 지원
-- `backend/Dockerfile` — Python 3.11 기반
-- `frontend/Dockerfile` — Node 빌드 → Nginx 서빙
-- `frontend/nginx.conf` — SPA 라우팅 + API/WS 프록시
+### 3. i18n 전체 페이지 적용
+- 번역 키 대폭 확장: 공통(30+), 네비게이션, 대시보드, 승인, 회장, 관리자, 계열사, 영상, 성과, 인증
+- `Sidebar.tsx` — 전체 네비게이션(5개 그룹 + 30개 메뉴) `useT()` 적용
+- `Dashboard.tsx` — 8개 통계 카드 i18n 적용
+- `Login.tsx` — 폼 라벨/버튼 i18n 적용
+- 일본어(ja) 번역 전체 키 동기화
 
-### 4. 실시간 대시보드 WebSocket
-- 대시보드에 WebSocket 연결 (`/ws/notifications`)
-- 실시간 LIVE 상태 표시 (연결/해제)
-- 알림 수신 시 KPI, 승인, 계열사 데이터 자동 갱신
+### 4. AI 성과 메트릭 자동 수집
+- `AIProvider.chat()` → `_chat_inner()` 래핑으로 모든 AI 호출 자동 계측
+- 응답 시간(ms), 토큰 수(추정), 프로바이더/모델 자동 기록
+- `_record_metric()` — `AiAgentMetrics` DB 자동 저장 (실패 시 무시)
+- `chat.py` 주요 엔드포인트에 `agent_name`, `company_id`, `org_node_id` 전달
+- 성과 대시보드 (`/agent-performance`)에서 실시간 데이터 확인 가능
 
-### 5. 다국어(i18n) 지원
-- `frontend/src/i18n/` — 한국어(ko), 영어(en), 일본어(ja) 번역 파일
-- `useI18nStore` Zustand 스토어 (localStorage 영속화)
-- 헤더에 언어 선택 드롭다운 추가 (즉시 전환)
-
-### 6. AI 에이전트 성과 분석 대시보드
-- `AiAgentMetrics` DB 모델 — 토큰, 응답시간, 품질 기록
-- `GET /api/agent-metrics/summary` — 에이전트별/프로바이더별/일별 집계
-- `GET /api/agent-metrics/recent` — 최근 호출 이력
-- `/agent-performance` 페이지 — KPI 카드, 일별 추이 차트, 프로바이더 파이 차트, 에이전트 랭킹 바 차트
+### 5. CI/CD 파이프라인 (GitHub Actions)
+- `.github/workflows/ci.yml` 생성
+- **backend-test** 잡: Python 3.11 + pytest 자동 실행
+- **frontend-build** 잡: Node 20 + TypeScript 타입 체크 + Vite 빌드
+- **docker-build** 잡: push 시 backend/frontend Docker 이미지 빌드 검증
+- `requirements.txt`에 pytest 의존성 추가
 
 ---
 
@@ -101,9 +99,10 @@
 - Ollama (로컬 — 무료, API 키 불필요)
 - Mock (API 키 없이 테스트)
 
-**배포**
+**배포 / CI**
 - Docker Compose (backend + frontend + Ollama)
 - Nginx (프론트엔드 서빙 + API 프록시)
+- GitHub Actions (pytest + TypeScript 빌드 + Docker 빌드)
 
 ---
 
@@ -191,12 +190,13 @@ OLLAMA_MODEL=llama3.2
 
 ```
 HanGroupOS/
-├── docker-compose.yml        # 컨테이너 배포 설정
+├── .github/workflows/ci.yml  # CI/CD 파이프라인
+├── docker-compose.yml         # 컨테이너 배포 설정
 ├── frontend/
-│   ├── Dockerfile            # 프론트엔드 컨테이너
-│   ├── nginx.conf            # Nginx 설정
+│   ├── Dockerfile             # 프론트엔드 컨테이너
+│   ├── nginx.conf             # Nginx 설정
 │   ├── src/
-│   │   ├── i18n/             # 다국어 번역 (ko/en/ja)
+│   │   ├── i18n/              # 다국어 번역 (ko/en/ja)
 │   │   ├── pages/
 │   │   │   ├── AgentPerformance.tsx  # AI 성과 분석
 │   │   │   └── ...
@@ -214,7 +214,9 @@ HanGroupOS/
     │   ├── group_settings.py  # 그룹 설정 API
     │   ├── agent_metrics.py   # AI 성과 분석 API
     │   └── ...
-    └── models/models.py       # GroupSettings, AiAgentMetrics 모델 추가
+    ├── services/
+    │   └── ai_provider.py     # 동적 시스템 프롬프트 + 자동 메트릭 수집
+    └── models/models.py       # GroupSettings, AiAgentMetrics 모델
 ```
 
 ---
@@ -223,13 +225,13 @@ HanGroupOS/
 
 서버 실행 후: `http://localhost:8000/docs`
 
-### 신규 API (v31)
+### 신규 API (v31-32)
 
 | 경로 | 설명 |
 |------|------|
 | `GET /api/group-settings` | 그룹 설정 조회 |
 | `PATCH /api/group-settings` | 그룹 설정 변경 (이름, 슬로건) |
-| `GET /api/agent-metrics/summary` | AI 에이전트 성과 요약 |
+| `GET /api/agent-metrics/summary` | AI 에이전트 성과 요약 (자동 수집 데이터) |
 | `GET /api/agent-metrics/recent` | 최근 AI 호출 이력 |
 
 ---

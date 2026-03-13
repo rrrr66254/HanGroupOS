@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { useAppStore, useGroupStore } from '../store/useStore'
 import { approvalsApi, terminalApi } from '../api/client'
+import { useT } from '../i18n'
 
 // Badge metadata: which items get which badge count
 const ITEM_BADGES: Record<string, 'approvals' | 'terminals'> = {
@@ -20,74 +21,74 @@ const ITEM_BADGES: Record<string, 'approvals' | 'terminals'> = {
 const NAV_GROUPS = [
   {
     id: 'management',
-    label: '경영',
+    labelKey: 'groups.management',
     icon: Briefcase,
     badge: 'approvals' as const,
     items: [
-      { to: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
-      { to: '/companies', icon: Building2, label: '계열사' },
-      { to: '/approvals', icon: CheckSquare, label: '승인함' },
+      { to: '/dashboard', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
+      { to: '/companies', icon: Building2, labelKey: 'nav.companies' },
+      { to: '/approvals', icon: CheckSquare, labelKey: 'nav.approvals' },
     ],
   },
   {
     id: 'strategy',
-    label: '분석/전략',
+    labelKey: 'groups.strategy',
     icon: TrendingUp,
     badge: null,
     items: [
-      { to: '/market', icon: TrendingUp, label: '시장분석' },
-      { to: '/strategy', icon: Map, label: '전략맵' },
-      { to: '/synergy', icon: GitMerge, label: '시너지분석' },
-      { to: '/simulation', icon: FlaskConical, label: '시뮬레이션' },
-      { to: '/data-analytics', icon: DatabaseZap, label: '데이터 분석' },
-      { to: '/insights', icon: Lightbulb, label: '인사이트' },
-      { to: '/competitors', icon: Crosshair, label: '경쟁사 모니터링' },
+      { to: '/market', icon: TrendingUp, labelKey: 'nav.market' },
+      { to: '/strategy', icon: Map, labelKey: 'nav.strategy' },
+      { to: '/synergy', icon: GitMerge, labelKey: 'nav.synergy' },
+      { to: '/simulation', icon: FlaskConical, labelKey: 'nav.simulation' },
+      { to: '/data-analytics', icon: DatabaseZap, labelKey: 'nav.dataAnalytics' },
+      { to: '/insights', icon: Lightbulb, labelKey: 'nav.insights' },
+      { to: '/competitors', icon: Crosshair, labelKey: 'nav.competitors' },
     ],
   },
   {
     id: 'org',
-    label: '조직/AI',
+    labelKey: 'groups.org',
     icon: Users,
     badge: null,
     items: [
-      { to: '/live-office', icon: Monitor, label: 'AI 오피스' },
-      { to: '/memory', icon: Brain, label: '기업기억' },
-      { to: '/talent-match', icon: UserCheck, label: '인재추천' },
-      { to: '/agent-performance', icon: Activity, label: 'AI 성과 분석' },
+      { to: '/live-office', icon: Monitor, labelKey: 'nav.liveOffice' },
+      { to: '/memory', icon: Brain, labelKey: 'nav.memory' },
+      { to: '/talent-match', icon: UserCheck, labelKey: 'nav.talentMatch' },
+      { to: '/agent-performance', icon: Activity, labelKey: 'nav.agentPerformance' },
     ],
   },
   {
     id: 'content',
-    label: '보고/콘텐츠',
+    labelKey: 'groups.content',
     icon: FileText,
     badge: null,
     items: [
-      { to: '/doc-generator', icon: ScrollText, label: 'AI 문서 생성기' },
-      { to: '/weekly-report', icon: FileText, label: '주간보고서' },
-      { to: '/ir-report', icon: BarChart2, label: 'IR 보고서' },
-      { to: '/site-builder', icon: Globe, label: '웹사이트' },
-      { to: '/site-evaluator', icon: Star, label: '사이트평가' },
-      { to: '/game', icon: Gamepad2, label: '게임 플랫폼' },
-      { to: '/video-studio', icon: Film, label: '영상 스튜디오' },
-      { to: '/video-jobs', icon: ListVideo, label: '영상 잡 관리' },
+      { to: '/doc-generator', icon: ScrollText, labelKey: 'nav.docGenerator' },
+      { to: '/weekly-report', icon: FileText, labelKey: 'nav.weeklyReport' },
+      { to: '/ir-report', icon: BarChart2, labelKey: 'nav.irReport' },
+      { to: '/site-builder', icon: Globe, labelKey: 'nav.siteBuilder' },
+      { to: '/site-evaluator', icon: Star, labelKey: 'nav.siteEvaluator' },
+      { to: '/game', icon: Gamepad2, labelKey: 'nav.game' },
+      { to: '/video-studio', icon: Film, labelKey: 'nav.videoStudio' },
+      { to: '/video-jobs', icon: ListVideo, labelKey: 'nav.videoJobs' },
     ],
   },
   {
     id: 'system',
-    label: '시스템',
+    labelKey: 'groups.system',
     icon: Settings,
     badge: 'terminals' as const,
     items: [
-      { to: '/terminal', icon: Terminal, label: '터미널' },
-      { to: '/audit', icon: Shield, label: '감사 로그' },
-      { to: '/admin', icon: Settings, label: '관리자' },
+      { to: '/terminal', icon: Terminal, labelKey: 'nav.terminal' },
+      { to: '/audit', icon: Shield, labelKey: 'nav.audit' },
+      { to: '/admin', icon: Settings, labelKey: 'nav.admin' },
     ],
   },
 ]
 
 const TOP_ITEMS = [
-  { to: '/group-home', icon: Home, label: '그룹 홈', highlight: true },
-  { to: '/chairman', icon: MessageSquare, label: 'AI 회장' },
+  { to: '/group-home', icon: Home, labelKey: 'nav.groupHome', highlight: true },
+  { to: '/chairman', icon: MessageSquare, labelKey: 'nav.chairman' },
 ]
 
 function Badge({ count, color = 'red' }: { count: number; color?: 'red' | 'orange' | 'yellow' }) {
@@ -115,6 +116,7 @@ export default function Sidebar() {
     badgeTick,
   } = useAppStore()
   const groupName = useGroupStore((s) => s.config.group_name)
+  const t = useT()
   const [approvalsByType, setApprovalsByType] = useState<Record<string, number>>({})
   const [logoError, setLogoError] = useState(false)
   const location = useLocation()
@@ -196,8 +198,9 @@ export default function Sidebar() {
   }
 
   const NavItem = ({
-    to, icon: Icon, label, highlight,
-  }: { to: string; icon: React.ElementType; label: string; highlight?: boolean }) => {
+    to, icon: Icon, labelKey, highlight,
+  }: { to: string; icon: React.ElementType; labelKey: string; highlight?: boolean }) => {
+    const label = t(labelKey)
     const showHomeBadge = to === '/group-home' && newEventCount > 0
     const itemBadge = getItemBadge(to)
 
@@ -306,7 +309,7 @@ export default function Sidebar() {
                 >
                   <GroupIcon size={15} className={hasActive ? 'text-brand-light' : ''} />
                   <span className="flex-1 text-left animate-fade-in uppercase tracking-wider">
-                    {group.label}
+                    {t(group.labelKey)}
                   </span>
                   {groupBadge > 0 && <Badge count={groupBadge} color="orange" />}
                   {hasActive && !isOpen && groupBadge === 0 && (
@@ -375,7 +378,7 @@ export default function Sidebar() {
           >
             <div className="px-3 py-1.5 flex items-center justify-between border-b border-bg-border mb-1">
               <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
-                {group.label}
+                {t(group.labelKey)}
               </span>
               {getBadgeCount(group.badge) > 0 && (
                 <Badge count={getBadgeCount(group.badge)} color="orange" />
@@ -395,7 +398,7 @@ export default function Sidebar() {
                   }`}
                 >
                   <ItemIcon size={14} />
-                  <span className="flex-1">{item.label}</span>
+                  <span className="flex-1">{t(item.labelKey)}</span>
                   {badge > 0 && <Badge count={badge} color="orange" />}
                 </NavLink>
               )
