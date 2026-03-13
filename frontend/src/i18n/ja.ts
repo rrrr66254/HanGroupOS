@@ -71,6 +71,7 @@ const ja = {
     workflowBuilder: 'AIワークフロー',
     financial: '財務諸表',
     permissions: '権限管理',
+    messenger: 'メッセンジャー',
   },
 
   // グループカテゴリ

@@ -62,6 +62,7 @@ export interface AppToast {
 interface AppState {
   selectedCompany: Company | null
   sidebarOpen: boolean
+  mobileSidebarOpen: boolean
   newEventCount: number
   pendingApprovals: number
   pendingTerminals: number
@@ -70,6 +71,7 @@ interface AppState {
   toasts: AppToast[]
   setSelectedCompany: (company: Company | null) => void
   toggleSidebar: () => void
+  setMobileSidebarOpen: (open: boolean) => void
   setNewEventCount: (n: number) => void
   clearNewEvents: () => void
   setPendingApprovals: (n: number) => void
@@ -83,6 +85,7 @@ interface AppState {
 export const useAppStore = create<AppState>((set) => ({
   selectedCompany: null,
   sidebarOpen: true,
+  mobileSidebarOpen: false,
   newEventCount: 0,
   pendingApprovals: 0,
   pendingTerminals: 0,
@@ -91,6 +94,7 @@ export const useAppStore = create<AppState>((set) => ({
   toasts: [],
   setSelectedCompany: (company) => set({ selectedCompany: company }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+  setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
   setNewEventCount: (n) => set({ newEventCount: n }),
   clearNewEvents: () => set({ newEventCount: 0 }),
   setPendingApprovals: (n) => set({ pendingApprovals: n }),

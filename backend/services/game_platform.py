@@ -23,6 +23,13 @@ def search_trending_games(
     SerpAPI 키가 없으면 Google News RSS로 폴백.
     """
     from core.utils import get_active_api_key
+    from core.cache import cache_get, cache_set
+
+    cache_key = f"trending:{query}:{platform}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        cached["_cached"] = True
+        return cached
 
     serpapi_key_row = get_active_api_key(db, "serpapi")
 
@@ -88,13 +95,16 @@ def search_trending_games(
         except Exception as e:
             logger.warning("[GamePlatform] RSS 폴백도 실패: {e}")
 
-    return {
+    result = {
         "query": search_query,
         "platform": platform,
         "source": source_used,
         "count": len(results),
         "results": results,
     }
+    if results:
+        cache_set(cache_key, result, ttl=600)  # 10분 캐시
+    return result
 
 
 def get_game_analytics(game_title: str, db: Session) -> Dict[str, Any]:

@@ -823,6 +823,48 @@ class UserCompanyRole(Base):
 
 
 # ── News Feed Subscriptions ─────────────────────────────────────────────────
+# ── Group Messenger ──────────────────────────────────────────────────────────
+class ChatRoom(Base):
+    """그룹 내부 메신저 채팅방."""
+    __tablename__ = "chat_rooms"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, default="")
+    room_type = Column(String(20), default="group")  # group | direct | project
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    members = relationship("ChatRoomMember", back_populates="room", lazy="selectin")
+    messages = relationship("ChatRoomMessage", back_populates="room", lazy="dynamic")
+
+
+class ChatRoomMember(Base):
+    """채팅방 멤버."""
+    __tablename__ = "chat_room_members"
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("chat_rooms.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    role = Column(String(20), default="member")  # admin | member
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    room = relationship("ChatRoom", back_populates="members")
+
+
+class ChatRoomMessage(Base):
+    """채팅방 메시지."""
+    __tablename__ = "chat_room_messages"
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("chat_rooms.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    message_type = Column(String(20), default="text")  # text | system | file
+    reply_to = Column(Integer, ForeignKey("chat_room_messages.id"), nullable=True)
+    is_edited = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    room = relationship("ChatRoom", back_populates="messages")
+
+
 class NewsFeedSubscription(Base):
     """회사별 뉴스 피드 구독 설정."""
     __tablename__ = "news_feed_subscriptions"

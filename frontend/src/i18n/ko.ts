@@ -71,6 +71,7 @@ const ko = {
     workflowBuilder: 'AI 워크플로우',
     financial: '재무제표',
     permissions: '권한 관리',
+    messenger: '메신저',
   },
 
   // 그룹 카테고리

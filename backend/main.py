@@ -3,6 +3,7 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+from sqlalchemy import text as import_text
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import init_db, SessionLocal
@@ -15,7 +16,7 @@ logging.getLogger().addHandler(_log_handler)
 logging.getLogger("uvicorn.access").addHandler(_log_handler)
 logging.getLogger("uvicorn.error").addHandler(_log_handler)
 logging.getLogger().setLevel(logging.INFO)
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks, group_settings, agent_metrics, delegation, kpi_scoreboard, agent_personality, data_feeds, webhook_notify, chat_summary, synergy_match, dashboard_layout, ai_feedback, workflow, financial, permissions, news
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks, group_settings, agent_metrics, delegation, kpi_scoreboard, agent_personality, data_feeds, webhook_notify, chat_summary, synergy_match, dashboard_layout, ai_feedback, workflow, financial, permissions, news, messenger
 
 
 app = FastAPI(
@@ -31,6 +32,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Rate Limiter ─────────────────────────────────────────────────────────────
+from core.rate_limit import RateLimitMiddleware
+app.add_middleware(RateLimitMiddleware)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(auth.router)
@@ -77,11 +82,91 @@ app.include_router(workflow.router)       # AI 워크플로우 빌더
 app.include_router(financial.router)      # 계열사 재무제표 자동 생성
 app.include_router(permissions.router)    # 멀티테넌트 권한 관리
 app.include_router(news.router)           # 뉴스 수집 + AI 브리핑 (NewsAPI/RSS)
+app.include_router(messenger.router)      # 그룹 내부 메신저 (채팅방/메시지)
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok", "version": settings.VERSION, "system": settings.APP_NAME}
+def health(detail: bool = False):
+    """헬스체크 — detail=true 시 DB/AI/외부 API/캐시/Rate Limit 상태 포함."""
+    import time as _time
+
+    result = {
+        "status": "ok",
+        "version": settings.VERSION,
+        "system": settings.APP_NAME,
+        "timestamp": _time.time(),
+    }
+    if not detail:
+        return result
+
+    checks = {}
+
+    # 1) DB 연결 확인
+    try:
+        db = SessionLocal()
+        db.execute(import_text("SELECT 1"))
+        db.close()
+        checks["database"] = {"status": "ok", "type": "sqlite"}
+    except Exception as e:
+        checks["database"] = {"status": "error", "error": str(e)}
+        result["status"] = "degraded"
+
+    # 2) Ollama 확인
+    try:
+        import httpx
+        r = httpx.get(f"{settings.OLLAMA_BASE_URL}/api/tags", timeout=3.0)
+        models = [m["name"] for m in r.json().get("models", [])]
+        checks["ollama"] = {"status": "ok", "models": models[:5], "url": settings.OLLAMA_BASE_URL}
+    except Exception:
+        checks["ollama"] = {"status": "unavailable", "url": settings.OLLAMA_BASE_URL}
+
+    # 3) KTransformers 확인
+    try:
+        import httpx
+        kt_base = settings.KTRANSFORMERS_BASE_URL.rstrip("/")
+        if kt_base.endswith("/v1"):
+            kt_base = kt_base[:-3]
+        r = httpx.get(f"{kt_base}/health", timeout=2.0)
+        checks["ktransformers"] = {"status": "ok" if r.status_code == 200 else "error"}
+    except Exception:
+        checks["ktransformers"] = {"status": "unavailable"}
+
+    # 4) 클라우드 AI 키 설정 여부
+    ai_keys = {}
+    if settings.ANTHROPIC_API_KEY:
+        ai_keys["anthropic"] = "configured"
+    if settings.OPENAI_API_KEY:
+        ai_keys["openai"] = "configured"
+    if settings.GEMINI_API_KEY:
+        ai_keys["gemini"] = "configured"
+    checks["ai_providers"] = ai_keys if ai_keys else {"status": "none_configured"}
+
+    # 5) 외부 API 키 현황 (DB)
+    try:
+        from models.models import ExternalApiKey
+        db = SessionLocal()
+        ext_keys = db.query(ExternalApiKey).filter(ExternalApiKey.is_active == True).all()
+        checks["external_api_keys"] = {k.service: {"label": k.label, "active": True} for k in ext_keys}
+        db.close()
+    except Exception:
+        checks["external_api_keys"] = {"status": "error"}
+
+    # 6) 캐시 상태
+    try:
+        from core.cache import cache_stats
+        checks["cache"] = cache_stats()
+    except Exception:
+        checks["cache"] = {"status": "unavailable"}
+
+    # 7) Rate Limit 상태
+    try:
+        from core.rate_limit import get_rate_limit_stats
+        checks["rate_limit"] = get_rate_limit_stats()
+    except Exception:
+        checks["rate_limit"] = {"status": "unavailable"}
+
+    result["checks"] = checks
+    return result
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
@@ -899,8 +984,11 @@ def _start_scheduler():
         # 1분마다 GPU 상태 수집 (nvidia-smi 있을 때만 실제 동작)
         from routers.video_gen import _record_gpu_history
         scheduler.add_job(_record_gpu_history, "interval", minutes=1, id="gpu_history")
+        # 10분마다 캐시 만료 항목 정리
+        from core.cache import cache_cleanup
+        scheduler.add_job(cache_cleanup, "interval", minutes=10, id="cache_cleanup")
         scheduler.start()
-        print("✓ 데이터 수집 스케줄러 시작 (뉴스 6h · 경쟁사 주1회 · KPI 6h · GPU 1min)")
+        print("✓ 데이터 수집 스케줄러 시작 (뉴스 6h · 경쟁사 주1회 · KPI 6h · GPU 1min · 캐시정리 10min)")
     except Exception as e:
         print(f"⚠️  스케줄러 시작 실패 (무시): {e}")
 

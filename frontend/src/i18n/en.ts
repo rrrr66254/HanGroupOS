@@ -71,6 +71,7 @@ const en = {
     workflowBuilder: 'AI Workflow',
     financial: 'Financial',
     permissions: 'Permissions',
+    messenger: 'Messenger',
   },
 
   // Group categories

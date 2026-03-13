@@ -1,4 +1,4 @@
-# Group OS v36
+# Group OS v37
 **AI 기반 기업 운영 시스템 (AI Corporate Operating System)**
 
 <p align="center">
@@ -41,6 +41,52 @@
 | **AI 피드백 루프** | 좋아요/싫어요 피드백 + 에이전트별 만족도 통계 |
 | **멀티 AI 프로바이더** | Claude, GPT-4o, Gemini, Ollama (무료 로컬), Mock |
 | **뉴스 수집 + AI 브리핑** | NewsAPI/RSS 기반 산업별 뉴스 자동 수집, AI 경영진 브리핑 생성, 구독 관리 |
+| **API Rate Limiter** | 경로별 분당 요청 제한, 슬라이딩 윈도우, Rate Limit 헤더 자동 부여 |
+| **인메모리 캐싱** | 외부 API 호출 결과 TTL 기반 캐시, 뉴스/트렌딩 10분 캐시 |
+| **고급 헬스체크** | DB/Ollama/KTransformers/AI키/캐시/Rate Limit 상태 통합 진단 |
+| **그룹 메신저** | 프로젝트/팀별 채팅방, 실시간 메시지, 멤버 관리, WebSocket 알림 |
+| **모바일 반응형** | 햄버거 메뉴, 오버레이 사이드바, 반응형 그리드, 터치 최적화 |
+
+---
+
+## v37 업데이트 내역
+
+### 1. API Rate Limiter
+- 인메모리 슬라이딩 윈도우 기반 요청 제한 (Redis 불필요)
+- 경로별 커스텀 제한: AI 호출 20req/min, 영상 생성 5req/min, 일반 60req/min
+- `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` 헤더 자동 부여
+- 인증 사용자는 username 기반, 미인증은 IP 기반 식별
+- 429 Too Many Requests 응답 + `Retry-After` 헤더
+
+### 2. 헬스체크 고도화
+- `GET /health?detail=true` 시 전체 시스템 상태 진단:
+  - Database (SQLite 연결), Ollama (모델 목록), KTransformers
+  - AI Provider 키 설정 여부 (Anthropic/OpenAI/Gemini)
+  - 외부 API 키 현황 (ExternalApiKey 테이블)
+  - 캐시 통계, Rate Limit 통계
+
+### 3. API 응답 캐싱 레이어
+- 인메모리 TTL 캐시 (`core/cache.py`) — 스레드 세이프
+- 뉴스 검색, 트렌딩 게임 검색 결과 10분 캐시
+- `@cached(ttl=600)` 데코레이터 제공
+- APScheduler 10분마다 만료 항목 자동 정리
+- `cache_stats()` / `cache_cleanup()` 유틸리티
+
+### 4. 그룹 내부 메신저
+- 채팅방 생성/삭제/멤버 관리 (admin/member 역할)
+- 실시간 메시지 전송 + 5초 폴링 갱신
+- 시스템 메시지 (입장/퇴장/초대)
+- WebSocket 실시간 알림 (채팅방 멤버에게)
+- `ChatRoom`, `ChatRoomMember`, `ChatRoomMessage` DB 모델
+- 메신저 UI: 카카오톡 스타일 채팅 버블, 검색, 모달
+- API: `POST/GET/DELETE /api/messenger/rooms`, `/messages`
+
+### 5. 모바일 반응형 UI 개선
+- **햄버거 메뉴**: md 이하에서 사이드바 → 오버레이 드로어 (backdrop 터치 닫기)
+- **컴팩트 헤더**: 모바일에서 높이 축소, 언어선택 숨김, 프로바이더 배너 숨김
+- **반응형 그리드**: grid-cols-2/3/4 → 모바일 단일 컬럼 자동 변환
+- **축소 패딩**: p-6 → p-3(모바일) / p-4(태블릿) / p-6(데스크톱)
+- **메신저 모바일**: 채팅방 목록 ↔ 대화 화면 전환 (뒤로가기 버튼)
 
 ---
 

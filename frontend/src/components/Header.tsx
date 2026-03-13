@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom'
-import { LogOut, User, Sun, Moon, Globe } from 'lucide-react'
+import { LogOut, User, Sun, Moon, Globe, Menu } from 'lucide-react'
 import { useState } from 'react'
 import { useAuthStore, useAppStore, useGroupStore } from '../store/useStore'
 import { useI18nStore, LOCALE_LABELS, type Locale } from '../i18n'
@@ -22,6 +22,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/workflow-builder': 'AI 워크플로우 빌더',
   '/financial': '재무제표 관리',
   '/permissions': '권한 관리',
+  '/messenger': '그룹 메신저',
 }
 
 export default function Header() {
@@ -40,19 +41,30 @@ export default function Header() {
     navigate('/login')
   }
 
+  const setMobileSidebarOpen = useAppStore((s) => s.setMobileSidebarOpen)
+
   return (
-    <header className="h-16 flex items-center justify-between px-6 bg-bg-card border-b border-bg-border flex-shrink-0">
-      <div>
-        <h1 className="text-base font-semibold text-slate-100">{title}</h1>
-        <p className="text-xs text-slate-500 font-mono">{groupName} OS v30</p>
+    <header className="h-14 sm:h-16 flex items-center justify-between px-3 sm:px-6 bg-bg-card border-b border-bg-border flex-shrink-0">
+      <div className="flex items-center gap-2">
+        {/* Mobile hamburger */}
+        <button
+          onClick={() => setMobileSidebarOpen(true)}
+          className="md:hidden p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-bg-elevated transition-colors"
+        >
+          <Menu size={20} />
+        </button>
+        <div>
+          <h1 className="text-sm sm:text-base font-semibold text-slate-100">{title}</h1>
+          <p className="text-[10px] sm:text-xs text-slate-500 font-mono hidden sm:block">{groupName} OS v30</p>
+        </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <ProviderStatusBanner />
-        <div className="h-4 w-px bg-bg-border" />
+      <div className="flex items-center gap-1.5 sm:gap-3">
+        <div className="hidden lg:block"><ProviderStatusBanner /></div>
+        <div className="h-4 w-px bg-bg-border hidden sm:block" />
 
-        {/* 언어 선택 */}
-        <div className="relative">
+        {/* 언어 선택 — 작은 화면에서 숨김 */}
+        <div className="relative hidden sm:block">
           <button
             onClick={() => setLangOpen(!langOpen)}
             className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-bg-elevated transition-colors flex items-center gap-1"

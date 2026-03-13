@@ -598,3 +598,21 @@ export const permissionsApi = {
   check: (companyId: number) => api.get(`/permissions/company/${companyId}/check`),
   users: () => api.get('/permissions/users'),
 }
+
+// ── Messenger ────────────────────────────────────────────────────────────────
+export const messengerApi = {
+  listRooms: () => api.get('/messenger/rooms'),
+  createRoom: (data: { name: string; description?: string; room_type?: string; company_id?: number; member_ids?: number[] }) =>
+    api.post('/messenger/rooms', data),
+  getRoom: (roomId: number) => api.get(`/messenger/rooms/${roomId}`),
+  deleteRoom: (roomId: number) => api.delete(`/messenger/rooms/${roomId}`),
+  addMember: (roomId: number, data: { user_id: number; role?: string }) =>
+    api.post(`/messenger/rooms/${roomId}/members`, data),
+  removeMember: (roomId: number, userId: number) =>
+    api.delete(`/messenger/rooms/${roomId}/members/${userId}`),
+  listMessages: (roomId: number, limit?: number, beforeId?: number) =>
+    api.get(`/messenger/rooms/${roomId}/messages`, { params: { limit, before_id: beforeId } }),
+  sendMessage: (roomId: number, data: { content: string; message_type?: string; reply_to?: number }) =>
+    api.post(`/messenger/rooms/${roomId}/messages`, data),
+  listUsers: () => api.get('/messenger/users'),
+}

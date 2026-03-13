@@ -102,6 +102,7 @@ const NAV_GROUPS = [
 const TOP_ITEMS = [
   { to: '/group-home', icon: Home, labelKey: 'nav.groupHome', highlight: true },
   { to: '/chairman', icon: MessageSquare, labelKey: 'nav.chairman' },
+  { to: '/messenger', icon: MessageSquare, labelKey: 'nav.messenger' },
 ]
 
 function Badge({ count, color = 'red' }: { count: number; color?: 'red' | 'orange' | 'yellow' }) {
@@ -127,6 +128,7 @@ export default function Sidebar() {
     pendingApprovals, pendingTerminals,
     setPendingApprovals, setPendingTerminals,
     badgeTick,
+    mobileSidebarOpen, setMobileSidebarOpen,
   } = useAppStore()
   const groupName = useGroupStore((s) => s.config.group_name)
   const t = useT()
@@ -220,6 +222,7 @@ export default function Sidebar() {
     return (
       <NavLink
         to={to}
+        onClick={handleNavClick}
         className={({ isActive }) =>
           `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150 group relative
           ${isActive
@@ -269,9 +272,15 @@ export default function Sidebar() {
     )
   }
 
+  const handleNavClick = () => {
+    // 모바일에서 네비게이션 클릭 시 사이드바 자동 닫기
+    if (window.innerWidth < 768) setMobileSidebarOpen(false)
+  }
+
   return (
     <aside
-      className="fixed top-0 left-0 h-full bg-bg-card border-r border-bg-border flex flex-col z-40 transition-all duration-200"
+      className={`fixed top-0 left-0 h-full bg-bg-card border-r border-bg-border flex flex-col z-40 transition-all duration-200
+        ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
       style={{ width: sidebarOpen ? 240 : 64 }}
     >
       {/* Logo */}

@@ -98,6 +98,20 @@ html.light .text-slate-700 { color: #94a3b8 !important }
   @apply bg-bg-elevated border border-bg-border rounded-2xl rounded-bl-sm px-4 py-3 text-sm text-slate-300;
 }
 
+/* ── Mobile Responsive ─────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  /* 테이블 가로 스크롤 */
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* 모달/카드 풀와이드 */
+  .card, .card-elevated { border-radius: 0.75rem; }
+  /* 그리드 → 단일 컬럼 */
+  .grid-cols-2, .grid-cols-3, .grid-cols-4 { grid-template-columns: 1fr !important; }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .grid-cols-3, .grid-cols-4 { grid-template-columns: repeat(2, 1fr) !important; }
+}
+
 /* Animations */
 @keyframes blink {
   0%, 100% { opacity: 1; }

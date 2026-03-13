@@ -44,8 +44,16 @@ def search_news(
     """
     NewsAPI everything/top-headlines 검색.
     API 키 없으면 Google News RSS 폴백.
+    결과는 10분간 캐시됨.
     """
     from core.utils import get_active_api_key
+    from core.cache import cache_get, cache_set
+
+    cache_key = f"news:{query}:{category}:{country}:{page_size}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        cached["_cached"] = True
+        return cached
 
     newsapi_key_row = get_active_api_key(db, "newsapi")
     results = []
@@ -106,7 +114,7 @@ def search_news(
     if not results:
         results, source_used = _fallback_google_rss(query or category or "한국 비즈니스")
 
-    return {
+    result = {
         "query": query,
         "category": category,
         "country": country,
@@ -114,6 +122,9 @@ def search_news(
         "count": len(results),
         "articles": results,
     }
+    if results:
+        cache_set(cache_key, result, ttl=600)  # 10분 캐시
+    return result
 
 
 def get_industry_news(

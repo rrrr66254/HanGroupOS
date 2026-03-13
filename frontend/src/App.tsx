@@ -47,6 +47,7 @@ import AiFeedbackPage from './pages/AiFeedbackPage'
 import WorkflowBuilder from './pages/WorkflowBuilder'
 import FinancialStatements from './pages/FinancialStatements'
 import Permissions from './pages/Permissions'
+import Messenger from './pages/Messenger'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -131,6 +132,7 @@ export default function App() {
           <Route path="workflow-builder" element={<WorkflowBuilder />} />
           <Route path="financial" element={<FinancialStatements />} />
           <Route path="permissions" element={<Permissions />} />
+          <Route path="messenger" element={<Messenger />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>
