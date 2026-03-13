@@ -1,4 +1,4 @@
-# Group OS v34
+# Group OS v35
 **AI 기반 기업 운영 시스템 (AI Corporate Operating System)**
 
 <p align="center">
@@ -40,6 +40,40 @@
 | **대시보드 위젯 커스터마이징** | 사용자별 대시보드 위젯 표시/숨김/순서 설정 |
 | **AI 피드백 루프** | 좋아요/싫어요 피드백 + 에이전트별 만족도 통계 |
 | **멀티 AI 프로바이더** | Claude, GPT-4o, Gemini, Ollama (무료 로컬), Mock |
+
+---
+
+## v35 업데이트 내역
+
+### 1. 실시간 알림 센터 (인앱)
+- Header 알림 벨 클릭 시 슬라이드 드로어로 알림 목록 표시
+- WebSocket 기반 실시간 알림 수신 + 자동 목록 갱신
+- 전체/미읽음 필터, 개별 읽음 처리, 전체 읽음, 삭제 지원
+- 알림 타입별 컬러 배지 (info/success/warning/error/approval/video/work/form)
+- 클릭 시 해당 페이지로 자동 이동 (link 필드 기반)
+
+### 2. AI 에이전트 워크플로우 빌더
+- 노드 기반 비주얼 편집기로 AI 처리 파이프라인 설계
+- 10종 노드 타입: AI 대화, AI 분석, 데이터 조회, 필터, 변환, 알림, 승인, 웹훅, 대기, 병합
+- 토폴로지 정렬 기반 자동 실행 순서 결정
+- 노드 드래그, 연결선, 설정 패널, 실행 이력 UI
+- `WorkflowDefinition` + `WorkflowExecution` DB 모델
+- `GET/POST/PATCH/DELETE /api/workflows`, `POST /api/workflows/{id}/execute` API
+
+### 3. 계열사 재무제표 자동 생성
+- 매출/비용/손익/자산/부채 데이터 입력 → AI 경영 분석 리포트 자동 생성
+- 수익성 분석 (영업이익률, 순이익률), 안정성 분석 (부채비율), A~F 등급 평가
+- 계열사별 종합 재무 리포트 (성장 추이, 리스크, 추천사항)
+- `FinancialStatement` DB 모델
+- `GET/POST /api/financial`, `POST /api/financial/{id}/analyze`, `POST /api/financial/company/{id}/report` API
+
+### 4. 멀티테넌트 권한 관리 시스템
+- 사용자별 역할 기반 접근 제어: 회장/CEO/관리자/뷰어 4단계
+- 계열사별 데이터 격리 (company_id 기반)
+- 사용자별 보기 / 계열사별 보기 UI
+- 권한 부여/변경/제거 + admin 또는 해당 계열사 chairman/ceo만 관리 가능
+- `UserCompanyRole` DB 모델 + `check_permission()` 유틸리티
+- `GET/POST/PATCH/DELETE /api/permissions`, `GET /api/permissions/company/{id}/check` API
 
 ---
 
@@ -384,6 +418,13 @@ HanGroupOS/
 | `GET/PUT /api/dashboard-layout` | 대시보드 위젯 레이아웃 |
 | `POST /api/ai-feedback` | AI 피드백 제출 |
 | `GET /api/ai-feedback/stats` | 에이전트별 만족도 통계 |
+| `GET/POST /api/workflows` | AI 워크플로우 관리 |
+| `POST /api/workflows/{id}/execute` | 워크플로우 실행 |
+| `GET/POST /api/financial` | 재무제표 관리 |
+| `POST /api/financial/{id}/analyze` | AI 재무 분석 |
+| `POST /api/financial/company/{id}/report` | 종합 재무 리포트 |
+| `GET/POST /api/permissions` | 권한 관리 |
+| `GET /api/permissions/company/{id}/check` | 접근 권한 확인 |
 
 ---
 

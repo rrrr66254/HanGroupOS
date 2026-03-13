@@ -68,6 +68,9 @@ const en = {
     terminal: 'Terminal',
     audit: 'Audit Log',
     admin: 'Admin',
+    workflowBuilder: 'AI Workflow',
+    financial: 'Financial',
+    permissions: 'Permissions',
   },
 
   // Group categories

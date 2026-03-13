@@ -45,6 +45,7 @@ const NAV_GROUPS = [
       { to: '/insights', icon: Lightbulb, labelKey: 'nav.insights' },
       { to: '/competitors', icon: Crosshair, labelKey: 'nav.competitors' },
       { to: '/delegation', icon: GitMerge, labelKey: 'nav.delegation' },
+      { to: '/financial', icon: DollarSign, labelKey: 'nav.financial' },
       { to: '/kpi-scoreboard', icon: BarChart2, labelKey: 'nav.kpiScoreboard' },
       { to: '/synergy-match', icon: Zap, labelKey: 'nav.synergyMatch' },
     ],
@@ -62,6 +63,7 @@ const NAV_GROUPS = [
       { to: '/cost-analytics', icon: DollarSign, labelKey: 'nav.costAnalytics' },
       { to: '/agent-personality', icon: Sparkles, labelKey: 'nav.agentPersonality' },
       { to: '/ai-feedback', icon: Star, labelKey: 'nav.aiFeedback' },
+      { to: '/workflow-builder', icon: Zap, labelKey: 'nav.workflowBuilder' },
     ],
   },
   {
@@ -91,6 +93,7 @@ const NAV_GROUPS = [
       { to: '/data-feeds', icon: Rss, labelKey: 'nav.dataFeeds' },
       { to: '/webhook-settings', icon: Bell, labelKey: 'nav.webhookSettings' },
       { to: '/dashboard-customize', icon: LayoutGrid, labelKey: 'nav.dashboardCustomize' },
+      { to: '/permissions', icon: Shield, labelKey: 'nav.permissions' },
       { to: '/admin', icon: Settings, labelKey: 'nav.admin' },
     ],
   },

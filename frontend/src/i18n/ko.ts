@@ -68,6 +68,9 @@ const ko = {
     terminal: '터미널',
     audit: '감사 로그',
     admin: '관리자',
+    workflowBuilder: 'AI 워크플로우',
+    financial: '재무제표',
+    permissions: '권한 관리',
   },
 
   // 그룹 카테고리

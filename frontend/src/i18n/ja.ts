@@ -68,6 +68,9 @@ const ja = {
     terminal: 'ターミナル',
     audit: '監査ログ',
     admin: '管理者',
+    workflowBuilder: 'AIワークフロー',
+    financial: '財務諸表',
+    permissions: '権限管理',
   },
 
   // グループカテゴリ

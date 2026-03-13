@@ -554,3 +554,44 @@ export const docsApi = {
   weeklyReport: (companyId: number) => api.post(`/work/weekly-report/${companyId}`),
   types: () => api.get('/docs/types'),
 }
+
+// ── Workflow Builder ─────────────────────────────────────────────────────────
+export const workflowApi = {
+  list: (companyId?: number, status?: string) =>
+    api.get('/workflows', { params: { company_id: companyId, status } }),
+  get: (id: number) => api.get(`/workflows/${id}`),
+  create: (data: object) => api.post('/workflows', data),
+  update: (id: number, data: object) => api.patch(`/workflows/${id}`, data),
+  delete: (id: number) => api.delete(`/workflows/${id}`),
+  execute: (id: number, inputData?: object) =>
+    api.post(`/workflows/${id}/execute`, { input_data: inputData || {} }),
+  history: (id: number, limit?: number) =>
+    api.get(`/workflows/${id}/history`, { params: { limit } }),
+  nodeTypes: () => api.get('/workflows/node-types'),
+}
+
+// ── Financial Statements ─────────────────────────────────────────────────────
+export const financialApi = {
+  list: (companyId?: number, statementType?: string) =>
+    api.get('/financial', { params: { company_id: companyId, statement_type: statementType } }),
+  get: (id: number) => api.get(`/financial/${id}`),
+  create: (data: object) => api.post('/financial', data),
+  update: (id: number, data: object) => api.patch(`/financial/${id}`, data),
+  delete: (id: number) => api.delete(`/financial/${id}`),
+  analyze: (id: number) => api.post(`/financial/${id}/analyze`),
+  companyReport: (companyId: number) => api.post(`/financial/company/${companyId}/report`),
+  companySummary: (companyId: number) => api.get(`/financial/company/${companyId}/summary`),
+}
+
+// ── Permissions (Multi-tenant) ───────────────────────────────────────────────
+export const permissionsApi = {
+  list: () => api.get('/permissions'),
+  my: () => api.get('/permissions/my'),
+  grant: (data: { user_id: number; company_id: number; role: string }) =>
+    api.post('/permissions/grant', data),
+  revoke: (id: number) => api.delete(`/permissions/${id}`),
+  update: (id: number, data: { role: string }) => api.patch(`/permissions/${id}`, data),
+  company: (companyId: number) => api.get(`/permissions/company/${companyId}`),
+  check: (companyId: number) => api.get(`/permissions/company/${companyId}/check`),
+  users: () => api.get('/permissions/users'),
+}

@@ -44,6 +44,9 @@ import WebhookSettings from './pages/WebhookSettings'
 import SynergyMatch from './pages/SynergyMatch'
 import DashboardCustomize from './pages/DashboardCustomize'
 import AiFeedbackPage from './pages/AiFeedbackPage'
+import WorkflowBuilder from './pages/WorkflowBuilder'
+import FinancialStatements from './pages/FinancialStatements'
+import Permissions from './pages/Permissions'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -125,6 +128,9 @@ export default function App() {
           <Route path="synergy-match" element={<SynergyMatch />} />
           <Route path="dashboard-customize" element={<DashboardCustomize />} />
           <Route path="ai-feedback" element={<AiFeedbackPage />} />
+          <Route path="workflow-builder" element={<WorkflowBuilder />} />
+          <Route path="financial" element={<FinancialStatements />} />
+          <Route path="permissions" element={<Permissions />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>

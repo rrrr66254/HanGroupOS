@@ -753,3 +753,70 @@ class AiFeedback(Base):
     comment = Column(Text, default="")
     agent_name = Column(String(100), default="")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ── AI 워크플로우 빌더 ──────────────────────────────────────────────────────
+class WorkflowDefinition(Base):
+    """노드 기반 AI 처리 파이프라인 정의."""
+    __tablename__ = "workflow_definitions"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, default="")
+    nodes = Column(JSON, default=[])       # [{id, type, label, position, config}]
+    edges = Column(JSON, default=[])       # [{id, source, target, label}]
+    status = Column(String(20), default="draft")  # draft | active | archived
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WorkflowExecution(Base):
+    """워크플로우 실행 이력."""
+    __tablename__ = "workflow_executions"
+    id = Column(Integer, primary_key=True, index=True)
+    workflow_id = Column(Integer, ForeignKey("workflow_definitions.id"), nullable=False, index=True)
+    status = Column(String(20), default="running")  # running | completed | failed
+    input_data = Column(JSON, default={})
+    output_data = Column(JSON, default={})
+    node_results = Column(JSON, default={})  # {node_id: {status, output, duration_ms}}
+    error_msg = Column(Text, default="")
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
+
+
+# ── 재무제표 ──────────────────────────────────────────────────────────────────
+class FinancialStatement(Base):
+    """계열사 재무제표 데이터."""
+    __tablename__ = "financial_statements"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    period = Column(String(20), nullable=False)         # 2026-Q1, 2025-12 등
+    statement_type = Column(String(50), default="income")  # income | balance | cashflow
+    revenue = Column(Float, default=0.0)
+    cost_of_sales = Column(Float, default=0.0)
+    operating_expense = Column(Float, default=0.0)
+    operating_income = Column(Float, default=0.0)
+    net_income = Column(Float, default=0.0)
+    total_assets = Column(Float, default=0.0)
+    total_liabilities = Column(Float, default=0.0)
+    total_equity = Column(Float, default=0.0)
+    cash_flow = Column(Float, default=0.0)
+    raw_data = Column(JSON, default={})                 # 추가 항목
+    ai_analysis = Column(Text, default="")              # AI 분석 리포트
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── 멀티테넌트 권한 관리 ─────────────────────────────────────────────────────
+class UserCompanyRole(Base):
+    """사용자별 계열사 권한 (역할 기반 접근 제어)."""
+    __tablename__ = "user_company_roles"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    role = Column(String(30), nullable=False)  # chairman | ceo | manager | viewer
+    granted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
