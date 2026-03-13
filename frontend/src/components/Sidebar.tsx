@@ -6,9 +6,9 @@ import {
   Brain, Settings, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Zap, Home, Bell, FileText, Globe, Star, GitMerge, BarChart2, UserCheck,
   Terminal, Gamepad2, Shield, Briefcase, Users, Film, ListVideo,
-  DatabaseZap, ScrollText, Lightbulb, Crosshair,
+  DatabaseZap, ScrollText, Lightbulb, Crosshair, Activity,
 } from 'lucide-react'
-import { useAppStore } from '../store/useStore'
+import { useAppStore, useGroupStore } from '../store/useStore'
 import { approvalsApi, terminalApi } from '../api/client'
 
 // Badge metadata: which items get which badge count
@@ -53,6 +53,7 @@ const NAV_GROUPS = [
       { to: '/live-office', icon: Monitor, label: 'AI 오피스' },
       { to: '/memory', icon: Brain, label: '기업기억' },
       { to: '/talent-match', icon: UserCheck, label: '인재추천' },
+      { to: '/agent-performance', icon: Activity, label: 'AI 성과 분석' },
     ],
   },
   {
@@ -113,6 +114,7 @@ export default function Sidebar() {
     setPendingApprovals, setPendingTerminals,
     badgeTick,
   } = useAppStore()
+  const groupName = useGroupStore((s) => s.config.group_name)
   const [approvalsByType, setApprovalsByType] = useState<Record<string, number>>({})
   const [logoError, setLogoError] = useState(false)
   const location = useLocation()
@@ -261,7 +263,7 @@ export default function Sidebar() {
         <div className="flex items-center gap-3 overflow-hidden">
           <div className="w-8 h-8 flex items-center justify-center flex-shrink-0">
             {!logoError ? (
-              <img src="/logo.png" alt="HAN Group" className="w-8 h-8 object-contain" onError={() => setLogoError(true)} />
+              <img src="/logo.png" alt={groupName} className="w-8 h-8 object-contain" onError={() => setLogoError(true)} />
             ) : (
               <div className="w-8 h-8 bg-brand rounded-lg flex items-center justify-center">
                 <Zap size={16} className="text-white" />
@@ -270,7 +272,7 @@ export default function Sidebar() {
           </div>
           {sidebarOpen && (
             <div className="animate-fade-in">
-              <div className="text-sm font-bold text-slate-100">HAN Group</div>
+              <div className="text-sm font-bold text-slate-100">{groupName}</div>
               <div className="text-[10px] text-slate-500 font-mono">OS v29</div>
             </div>
           )}

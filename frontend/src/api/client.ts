@@ -455,6 +455,21 @@ export const policyApi = {
   sourceStatus: () => api.get('/data/source-status'),
 }
 
+// ── Group Settings ───────────────────────────────────────────────────────────
+export const groupSettingsApi = {
+  get: () => api.get('/group-settings'),
+  update: (data: { group_name?: string; group_name_ko?: string; slogan?: string; slogan_ko?: string }) =>
+    api.patch('/group-settings', data),
+}
+
+// ── Agent Metrics ────────────────────────────────────────────────────────────
+export const agentMetricsApi = {
+  summary: (days = 7, companyId?: number) =>
+    api.get('/agent-metrics/summary', { params: { days, company_id: companyId } }),
+  recent: (limit = 50, companyId?: number) =>
+    api.get('/agent-metrics/recent', { params: { limit, company_id: companyId } }),
+}
+
 // ── Document Generator ────────────────────────────────────────────────────────
 export const docsApi = {
   businessPlan: (companyId: number) => api.post(`/docs/business-plan/${companyId}`),

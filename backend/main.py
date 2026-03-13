@@ -15,13 +15,13 @@ logging.getLogger().addHandler(_log_handler)
 logging.getLogger("uvicorn.access").addHandler(_log_handler)
 logging.getLogger("uvicorn.error").addHandler(_log_handler)
 logging.getLogger().setLevel(logging.INFO)
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks, group_settings, agent_metrics
 
 
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.VERSION,
-    description="HAN Group AI Corporate Operating System — V27",
+    description="AI Corporate Operating System",
 )
 
 app.add_middleware(
@@ -62,6 +62,8 @@ app.include_router(competitors.router)    # 경쟁사 모니터링
 app.include_router(kpi_links.router)      # KPI 데이터 연동
 app.include_router(briefing.router)       # 그룹 주간 브리핑
 app.include_router(webhooks.router)       # 외부 웹훅 수신 API
+app.include_router(group_settings.router) # 그룹 설정 (이름, 슬로건 등)
+app.include_router(agent_metrics.router)  # AI 에이전트 성과 분석
 
 
 @app.get("/health")
@@ -214,7 +216,7 @@ def _check_ktransformers():
 def _seed_data():
     from core.security import get_password_hash
     from models.models import (
-        User, Company, OrgNode, ModelCatalog, CorporateMemory, StrategyItem
+        User, Company, OrgNode, ModelCatalog, CorporateMemory, StrategyItem, GroupSettings
     )
     from services.org_service import create_company_org
 
@@ -224,7 +226,7 @@ def _seed_data():
         if not db.query(User).filter(User.username == "admin").first():
             admin = User(
                 username="admin",
-                email="admin@hangroup.ai",
+                email="admin@group.ai",
                 hashed_password=get_password_hash("admin1234"),
                 role="admin",
             )
@@ -232,6 +234,15 @@ def _seed_data():
             db.flush()
 
         admin = db.query(User).filter(User.username == "admin").first()
+
+        # ── Group name helper ─────────────────────────────────────────────────
+        def _gname():
+            row = db.query(GroupSettings).filter(GroupSettings.key == "group_name").first()
+            return row.value if row else "Group"
+
+        def _gname_ko():
+            row = db.query(GroupSettings).filter(GroupSettings.key == "group_name_ko").first()
+            return row.value if row else "그룹"
 
         # ── Model Catalog ─────────────────────────────────────────────────────
         if db.query(ModelCatalog).count() == 0:
@@ -267,15 +278,17 @@ def _seed_data():
 
         # ── Group-level Org (Chairman + Committees) ───────────────────────────
         if db.query(OrgNode).filter(OrgNode.company_id == None).count() == 0:
+            gn = _gname()
+            gn_ko = _gname_ko()
             chairman = OrgNode(
                 company_id=None,
                 name="AI 회장",
-                role="HAN Group Chairman",
+                role=f"{gn} Chairman",
                 level="chairman",
                 parent_id=None,
                 ai_provider="mock",
                 ai_model="claude-opus-4-6",
-                description="한그룹 전략 총괄 AI 회장",
+                description=f"{gn_ko} 전략 총괄 AI 회장",
             )
             db.add(chairman)
             db.flush()
@@ -300,10 +313,11 @@ def _seed_data():
 
         # ── Initial Corporate Memory ──────────────────────────────────────────
         if db.query(CorporateMemory).count() == 0:
+            gn_ko = _gname_ko()
             memories = [
                 CorporateMemory(
-                    title="한그룹 창립 헌장",
-                    content="AI와 인간이 협력하여 새로운 기업 생태계를 만드는 것이 한그룹의 핵심 목표다.",
+                    title=f"{gn_ko} 창립 헌장",
+                    content=f"AI와 인간이 협력하여 새로운 기업 생태계를 만드는 것이 {gn_ko}의 핵심 목표다.",
                     memory_type="fact",
                     importance="critical",
                     tags=["창립", "헌장", "비전"],
@@ -336,7 +350,7 @@ def _seed_data():
                 db.add(s)
 
         db.commit()
-        print(f"✓ HAN Group OS v{settings.VERSION} started. DB seeded.")
+        print(f"✓ Group OS v{settings.VERSION} started. DB seeded.")
 
     except Exception as e:
         db.rollback()

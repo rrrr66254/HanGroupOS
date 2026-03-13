@@ -1,10 +1,11 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect } from 'react'
-import { useAuthStore, useAppStore } from './store/useStore'
+import { useAuthStore, useAppStore, useGroupStore } from './store/useStore'
 import Layout from './components/Layout'
 import ErrorBoundary from './components/ErrorBoundary'
 import OllamaSetupNotice from './components/OllamaSetupNotice'
 import { startHealthPoller } from './components/ProviderStatusBanner'
+import { groupSettingsApi } from './api/client'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Chairman from './pages/Chairman'
@@ -33,6 +34,7 @@ import DocGenerator from './pages/DocGenerator'
 import DataAnalytics from './pages/DataAnalytics'
 import InsightsDashboard from './pages/InsightsDashboard'
 import Competitors from './pages/Competitors'
+import AgentPerformance from './pages/AgentPerformance'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -48,7 +50,13 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 export default function App() {
   const theme = useAppStore((s) => s.theme)
   const token = useAuthStore((s) => s.token)
+  const setGroupConfig = useGroupStore((s) => s.setConfig)
   useEffect(() => { if (token) startHealthPoller() }, [token])
+  useEffect(() => {
+    if (token) {
+      groupSettingsApi.get().then((r) => setGroupConfig(r.data)).catch(() => {})
+    }
+  }, [token])
   useEffect(() => {
     if (theme === 'light') {
       document.documentElement.classList.add('light')
@@ -98,6 +106,7 @@ export default function App() {
           <Route path="data-analytics" element={<DataAnalytics />} />
           <Route path="insights" element={<InsightsDashboard />} />
           <Route path="competitors" element={<Competitors />} />
+          <Route path="agent-performance" element={<AgentPerformance />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>

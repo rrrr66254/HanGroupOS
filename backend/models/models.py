@@ -640,6 +640,34 @@ class GpuHistory(Base):
     util_pct = Column(Integer, default=0)
 
 
+class GroupSettings(Base):
+    """그룹 전역 설정 (이름, 로고, 슬로건 등)."""
+    __tablename__ = "group_settings"
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    value = Column(Text, default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AiAgentMetrics(Base):
+    """AI 에이전트 성과 측정 기록."""
+    __tablename__ = "ai_agent_metrics"
+    id = Column(Integer, primary_key=True, index=True)
+    org_node_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    agent_name = Column(String(100), nullable=False)
+    agent_role = Column(String(100), default="")
+    provider = Column(String(50), default="")
+    model = Column(String(100), default="")
+    prompt_tokens = Column(Integer, default=0)
+    completion_tokens = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    response_time_ms = Column(Integer, default=0)
+    quality_score = Column(Float, nullable=True)  # 0.0~1.0
+    session_type = Column(String(50), default="")
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class AiProviderFallbackLog(Base):
     """AI Provider 자동 폴백 이벤트 로그."""
     __tablename__ = "ai_provider_fallback_log"

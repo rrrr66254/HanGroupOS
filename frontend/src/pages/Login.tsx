@@ -1,16 +1,23 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Zap } from 'lucide-react'
-import { authApi } from '../api/client'
-import { useAuthStore } from '../store/useStore'
+import { authApi, groupSettingsApi } from '../api/client'
+import { useAuthStore, useGroupStore } from '../store/useStore'
 
 export default function Login() {
   const navigate = useNavigate()
   const setAuth = useAuthStore((s) => s.setAuth)
+  const setGroupConfig = useGroupStore((s) => s.setConfig)
+  const groupName = useGroupStore((s) => s.config.group_name)
+  const slogan = useGroupStore((s) => s.config.slogan)
   const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('admin1234')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    groupSettingsApi.get().then((r) => setGroupConfig(r.data)).catch(() => {})
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -45,8 +52,8 @@ export default function Login() {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-brand rounded-2xl mb-4 shadow-lg shadow-brand/30">
             <Zap size={28} className="text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-100">HAN Group OS</h1>
-          <p className="text-slate-500 text-sm mt-1 font-mono">v27 · AI Corporate OS</p>
+          <h1 className="text-2xl font-bold text-slate-100">{groupName} OS</h1>
+          <p className="text-slate-500 text-sm mt-1 font-mono">v30 · {slogan}</p>
         </div>
 
         {/* Card */}
@@ -90,7 +97,7 @@ export default function Login() {
                   로그인 중...
                 </>
               ) : (
-                'HAN Group OS 접속'
+                `${groupName} OS 접속`
               )}
             </button>
           </form>
@@ -103,7 +110,7 @@ export default function Login() {
         </div>
 
         <p className="text-center text-xs text-slate-600 mt-6">
-          HAN Group AI Corporate Operating System
+          {groupName} {slogan}
         </p>
       </div>
     </div>

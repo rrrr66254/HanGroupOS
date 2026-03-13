@@ -21,6 +21,36 @@ export const useAuthStore = create<AuthState>()(
   )
 )
 
+// ── Group Settings Store ─────────────────────────────────────────────────────
+export interface GroupConfig {
+  group_name: string
+  group_name_ko: string
+  slogan: string
+  slogan_ko: string
+}
+
+interface GroupSettingsState {
+  config: GroupConfig
+  loaded: boolean
+  setConfig: (c: GroupConfig) => void
+}
+
+export const useGroupStore = create<GroupSettingsState>()(
+  persist(
+    (set) => ({
+      config: {
+        group_name: 'Group',
+        group_name_ko: '그룹',
+        slogan: 'AI Corporate Operating System',
+        slogan_ko: 'AI 기업 운영 시스템',
+      },
+      loaded: false,
+      setConfig: (c) => set({ config: c, loaded: true }),
+    }),
+    { name: 'group-settings' }
+  )
+)
+
 export interface AppToast {
   id: string
   type: 'success' | 'error' | 'info'
