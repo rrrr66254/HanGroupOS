@@ -6,7 +6,7 @@ import {
   Brain, Settings, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Zap, Home, Bell, FileText, Globe, Star, GitMerge, BarChart2, UserCheck,
   Terminal, Gamepad2, Shield, Briefcase, Users, Film, ListVideo,
-  DatabaseZap, ScrollText, Lightbulb, Crosshair, Activity, DollarSign,
+  DatabaseZap, ScrollText, Lightbulb, Crosshair, Activity, DollarSign, Sparkles, Rss,
 } from 'lucide-react'
 import { useAppStore, useGroupStore } from '../store/useStore'
 import { approvalsApi, terminalApi } from '../api/client'
@@ -43,6 +43,8 @@ const NAV_GROUPS = [
       { to: '/data-analytics', icon: DatabaseZap, labelKey: 'nav.dataAnalytics' },
       { to: '/insights', icon: Lightbulb, labelKey: 'nav.insights' },
       { to: '/competitors', icon: Crosshair, labelKey: 'nav.competitors' },
+      { to: '/delegation', icon: GitMerge, labelKey: 'nav.delegation' },
+      { to: '/kpi-scoreboard', icon: BarChart2, labelKey: 'nav.kpiScoreboard' },
     ],
   },
   {
@@ -56,6 +58,7 @@ const NAV_GROUPS = [
       { to: '/talent-match', icon: UserCheck, labelKey: 'nav.talentMatch' },
       { to: '/agent-performance', icon: Activity, labelKey: 'nav.agentPerformance' },
       { to: '/cost-analytics', icon: DollarSign, labelKey: 'nav.costAnalytics' },
+      { to: '/agent-personality', icon: Sparkles, labelKey: 'nav.agentPersonality' },
     ],
   },
   {
@@ -82,6 +85,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/terminal', icon: Terminal, labelKey: 'nav.terminal' },
       { to: '/audit', icon: Shield, labelKey: 'nav.audit' },
+      { to: '/data-feeds', icon: Rss, labelKey: 'nav.dataFeeds' },
       { to: '/admin', icon: Settings, labelKey: 'nav.admin' },
     ],
   },

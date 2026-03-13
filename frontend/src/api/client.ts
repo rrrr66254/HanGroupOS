@@ -473,6 +473,43 @@ export const agentMetricsApi = {
   pricing: () => api.get('/agent-metrics/pricing'),
 }
 
+// ── Delegation Chain ──────────────────────────────────────────────────────────
+export const delegationApi = {
+  run: (question: string, companyId: number) =>
+    api.post('/delegation/run', { question, company_id: companyId }),
+  detect: (question: string, companyId: number) =>
+    api.post('/delegation/detect', { question, company_id: companyId }),
+}
+
+// ── KPI Scoreboard ───────────────────────────────────────────────────────────
+export const kpiScoreboardApi = {
+  ranking: () => api.get('/kpi-scoreboard/ranking'),
+  companyKpis: (companyId: number) => api.get(`/kpi-scoreboard/company/${companyId}`),
+  upsertKpi: (data: { company_id: number; metric_name: string; metric_label?: string; value: number; target?: number; unit?: string }) =>
+    api.post('/kpi-scoreboard/kpi', data),
+}
+
+// ── Agent Personality ────────────────────────────────────────────────────────
+export const agentPersonalityApi = {
+  presets: () => api.get('/agent-personality/presets'),
+  get: (nodeId: number) => api.get(`/agent-personality/node/${nodeId}`),
+  update: (nodeId: number, data: Record<string, unknown>) => api.put(`/agent-personality/node/${nodeId}`, data),
+  company: (companyId: number) => api.get(`/agent-personality/company/${companyId}`),
+}
+
+// ── Data Feeds ───────────────────────────────────────────────────────────────
+export const dataFeedsApi = {
+  types: () => api.get('/data-feeds/types'),
+  list: () => api.get('/data-feeds'),
+  create: (data: { name: string; feed_type: string; url?: string; config?: string; interval_minutes?: number }) =>
+    api.post('/data-feeds', data),
+  update: (id: number, data: Record<string, unknown>) => api.put(`/data-feeds/${id}`, data),
+  delete: (id: number) => api.delete(`/data-feeds/${id}`),
+  collect: (id: number) => api.post(`/data-feeds/${id}/collect`),
+  data: (id: number, limit?: number) => api.get(`/data-feeds/${id}/data`, { params: { limit } }),
+  contextData: () => api.get('/data-feeds/context-data'),
+}
+
 // ── Document Generator ────────────────────────────────────────────────────────
 export const docsApi = {
   businessPlan: (companyId: number) => api.post(`/docs/business-plan/${companyId}`),

@@ -15,7 +15,7 @@ logging.getLogger().addHandler(_log_handler)
 logging.getLogger("uvicorn.access").addHandler(_log_handler)
 logging.getLogger("uvicorn.error").addHandler(_log_handler)
 logging.getLogger().setLevel(logging.INFO)
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks, group_settings, agent_metrics
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks, group_settings, agent_metrics, delegation, kpi_scoreboard, agent_personality, data_feeds
 
 
 app = FastAPI(
@@ -64,6 +64,10 @@ app.include_router(briefing.router)       # 그룹 주간 브리핑
 app.include_router(webhooks.router)       # 외부 웹훅 수신 API
 app.include_router(group_settings.router) # 그룹 설정 (이름, 슬로건 등)
 app.include_router(agent_metrics.router)  # AI 에이전트 성과 분석
+app.include_router(delegation.router)     # 에이전트 자동 위임 체인
+app.include_router(kpi_scoreboard.router) # KPI 스코어보드 (게이미피케이션)
+app.include_router(agent_personality.router) # 에이전트 성격 커스터마이징
+app.include_router(data_feeds.router)     # 외부 데이터 소스 통합 허브
 
 
 @app.get("/health")

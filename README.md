@@ -30,6 +30,10 @@
 | **결재 워크플로우 + AI 사전 검토** | 요청 → AI 위험도 분석 → 승인/반려 파이프라인 |
 | **시장 분석 + 경쟁사 트렌드** | 산업별 기회/위협 리포트, 경쟁사 주간 뉴스량 차트 |
 | **전략 트래킹 + AI 진단** | 목표·이니셔티브·마일스톤·KPI 관리, AI 건강 진단 |
+| **자동 위임 체인** | CEO→전문가 자동 위임 + 병렬 분석 + 종합 보고 체인 워크플로우 |
+| **KPI 스코어보드** | 계열사별 KPI 랭킹, Gold/Silver/Bronze 트로피, 게이미피케이션 대시보드 |
+| **에이전트 성격 설정** | 프리셋(보수적/공격적/창의적) + 말투/전문분야 커스터마이징 |
+| **외부 데이터 허브** | RSS/뉴스/환율/주가 자동 수집 파이프라인 + 에이전트 컨텍스트 주입 |
 | **멀티 AI 프로바이더** | Claude, GPT-4o, Gemini, Ollama (무료 로컬), Mock |
 
 ---
@@ -84,6 +88,35 @@
 - `GET /api/agent-metrics/pricing` — 현재 단가표 조회 API
 - 월 예상 비용 자동 산출 (일 평균 × 30일)
 - 사이드바 조직 그룹에 "비용 분석" 메뉴 추가, ko/en/ja i18n 대응
+
+### 9. 에이전트 자동 위임 체인
+- CEO → CTO/CFO/CMO/COO/CPO 전문가 자동 위임 워크플로우
+- 키워드 기반 위임 대상 자동 감지 (`detect_delegation_targets`)
+- 전문가 병렬 응답 후 CEO 종합 보고 생성
+- `/delegation` 페이지: 위임 미리보기 + 실행 + 결과 시각화
+- `POST /api/delegation/run`, `POST /api/delegation/detect` API
+
+### 10. KPI 스코어보드 (게이미피케이션)
+- 계열사별 종합 점수 자동 산출 (KPI 달성률 + AI 활용도 + 품질 + 속도)
+- Gold/Silver/Bronze 트로피 자동 부여 + 랭킹 차트
+- 수동 KPI 등록/업데이트 + AI 메트릭 기반 자동 점수 계산
+- `/kpi-scoreboard` 페이지: 상위 3 트로피 카드 + 바 차트 + 상세 테이블
+- `GET /api/kpi-scoreboard/ranking`, `POST /api/kpi-scoreboard/kpi` API
+
+### 11. AI 에이전트 성격 커스터마이징
+- 에이전트별 프리셋(보수적/공격적/창의적/균형), 말투, 응답 길이, 전문분야 설정
+- 관리자 UI에서 편집 모달로 에이전트 성격 직접 커스터마이징
+- `get_personality_instruction()` — 채팅 시스템 프롬프트에 성격 지시문 자동 주입
+- `/agent-personality` 페이지 + `AgentPersonality` DB 모델
+- `GET/PUT /api/agent-personality/node/{id}`, `GET /api/agent-personality/presets` API
+
+### 12. 외부 데이터 소스 통합 허브
+- RSS/뉴스API/환율/주가 외부 데이터 자동 수집 파이프라인
+- 피드 등록/관리/즉시 수집/삭제 + 수집 데이터 캐시 뷰어
+- `inject_to_context` 설정으로 에이전트 컨텍스트에 최신 데이터 자동 주입
+- RSS 2.0/Atom 파싱, NewsAPI, frankfurter.app 환율 지원
+- `/data-feeds` 페이지 + `ExternalDataFeed`/`ExternalDataCache` DB 모델
+- `GET/POST/PUT/DELETE /api/data-feeds`, `GET /api/data-feeds/context-data` API
 
 ---
 
@@ -297,6 +330,10 @@ HanGroupOS/
 | `GET /api/agent-metrics/recent` | 최근 AI 호출 이력 |
 | `GET /api/agent-metrics/cost-summary` | 프로바이더별 비용 추적 요약 |
 | `GET /api/agent-metrics/pricing` | 토큰 단가표 조회 |
+| `POST /api/delegation/run` | 자동 위임 체인 실행 |
+| `GET /api/kpi-scoreboard/ranking` | 계열사 KPI 랭킹 |
+| `GET/PUT /api/agent-personality/node/{id}` | 에이전트 성격 조회/수정 |
+| `GET/POST /api/data-feeds` | 외부 데이터 피드 관리 |
 
 ---
 

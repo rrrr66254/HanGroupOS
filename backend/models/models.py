@@ -677,3 +677,57 @@ class AiProviderFallbackLog(Base):
     to_provider = Column(String(50), default="")
     reason = Column(String(500), default="")
     user_id = Column(Integer, nullable=True)
+
+
+class CompanyKpi(Base):
+    """계열사 KPI 스코어보드 (게이미피케이션)."""
+    __tablename__ = "company_kpis"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    metric_name = Column(String(100), nullable=False)   # revenue, growth, ai_usage, quality, speed
+    metric_label = Column(String(200), default="")       # 표시명
+    value = Column(Float, default=0.0)
+    target = Column(Float, default=100.0)
+    unit = Column(String(30), default="")                # %, 원, 건, 점
+    period = Column(String(20), default="monthly")       # monthly, weekly, quarterly
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AgentPersonality(Base):
+    """AI 에이전트 성격 커스터마이징."""
+    __tablename__ = "agent_personalities"
+    id = Column(Integer, primary_key=True, index=True)
+    org_node_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=False, unique=True, index=True)
+    preset = Column(String(50), default="balanced")     # conservative, aggressive, creative, balanced
+    tone = Column(String(50), default="professional")    # professional, casual, formal, friendly
+    expertise = Column(Text, default="")                 # 쉼표 구분 전문분야
+    custom_instruction = Column(Text, default="")        # 사용자 지정 추가 지시
+    response_length = Column(String(20), default="medium")  # short, medium, long
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ExternalDataFeed(Base):
+    """외부 데이터 소스 피드 설정."""
+    __tablename__ = "external_data_feeds"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    feed_type = Column(String(50), nullable=False)       # rss, news_api, exchange_rate, stock
+    url = Column(String(500), default="")
+    config = Column(Text, default="{}")                  # JSON: api_key, params 등
+    interval_minutes = Column(Integer, default=360)      # 수집 주기
+    is_active = Column(Boolean, default=True)
+    last_collected_at = Column(DateTime, nullable=True)
+    inject_to_context = Column(Boolean, default=True)    # 에이전트 컨텍스트 주입 여부
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ExternalDataCache(Base):
+    """수집된 외부 데이터 캐시."""
+    __tablename__ = "external_data_cache"
+    id = Column(Integer, primary_key=True, index=True)
+    feed_id = Column(Integer, ForeignKey("external_data_feeds.id"), nullable=False, index=True)
+    title = Column(String(500), default="")
+    content = Column(Text, default="")
+    source_url = Column(String(500), default="")
+    collected_at = Column(DateTime, default=datetime.utcnow, index=True)

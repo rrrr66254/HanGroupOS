@@ -36,6 +36,10 @@ import InsightsDashboard from './pages/InsightsDashboard'
 import Competitors from './pages/Competitors'
 import AgentPerformance from './pages/AgentPerformance'
 import CostAnalytics from './pages/CostAnalytics'
+import DelegationChain from './pages/DelegationChain'
+import KpiScoreboard from './pages/KpiScoreboard'
+import AgentPersonalityPage from './pages/AgentPersonalityPage'
+import DataFeedsPage from './pages/DataFeedsPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -109,6 +113,10 @@ export default function App() {
           <Route path="competitors" element={<Competitors />} />
           <Route path="agent-performance" element={<AgentPerformance />} />
           <Route path="cost-analytics" element={<CostAnalytics />} />
+          <Route path="delegation" element={<DelegationChain />} />
+          <Route path="kpi-scoreboard" element={<KpiScoreboard />} />
+          <Route path="agent-personality" element={<AgentPersonalityPage />} />
+          <Route path="data-feeds" element={<DataFeedsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>
