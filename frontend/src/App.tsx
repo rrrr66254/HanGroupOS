@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import { useAuthStore, useAppStore } from './store/useStore'
 import Layout from './components/Layout'
+import ErrorBoundary from './components/ErrorBoundary'
 import OllamaSetupNotice from './components/OllamaSetupNotice'
 import { startHealthPoller } from './components/ProviderStatusBanner'
 import Login from './pages/Login'
@@ -57,6 +58,7 @@ export default function App() {
   }, [theme])
 
   return (
+    <ErrorBoundary>
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -100,5 +102,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>
     </BrowserRouter>
+    </ErrorBoundary>
   )
 }

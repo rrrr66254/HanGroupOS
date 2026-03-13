@@ -12,7 +12,10 @@ from schemas.schemas import (
 )
 from services.ai_provider import get_provider_from_db, CEO_SYSTEM
 from services.team_agent import run_team_discussion, format_team_discussion
+from core.logging import get_logger
 import json, re, asyncio
+
+logger = get_logger("router.strategy")
 
 router = APIRouter(prefix="/api/strategy", tags=["strategy"])
 
@@ -87,8 +90,8 @@ JSON 배열만 출력하고 다른 텍스트는 포함하지 마세요."""
             db.commit()
             for it in saved_items:
                 db.refresh(it)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("전략 AI 응답 파싱 실패 (기본값 사용): %s", e)
 
     # Fallback defaults if AI parse failed
     if not saved_items:
@@ -275,22 +278,23 @@ def list_ceo_performance(
 
 @router.get("/ceo/leaderboard")
 def ceo_leaderboard(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    performances = (
-        db.query(CEOPerformance)
+    # JOIN으로 N+1 쿼리 해결
+    rows = (
+        db.query(CEOPerformance, Company.name)
+        .outerjoin(Company, Company.id == CEOPerformance.company_id)
         .order_by(CEOPerformance.overall_score.desc())
         .limit(10)
         .all()
     )
-    result = []
-    for p in performances:
-        company = db.query(Company).filter(Company.id == p.company_id).first()
-        result.append({
+    return [
+        {
             "company_id": p.company_id,
-            "company_name": company.name if company else "Unknown",
+            "company_name": name or "Unknown",
             "period": p.period,
             "overall_score": p.overall_score,
-        })
-    return result
+        }
+        for p, name in rows
+    ]
 
 
 # ── Collaborations ────────────────────────────────────────────────────────────
@@ -372,7 +376,8 @@ def analyze_synergy(
             result = __import__("json").loads(m.group())
         else:
             result = default
-    except Exception:
+    except Exception as e:
+        logger.warning("시너지 분석 JSON 파싱 실패: %s", e)
         result = default
 
     return result
@@ -398,13 +403,18 @@ def talent_match(
     if not nodes:
         return {"recommendations": [], "summary": "분석할 조직원이 없습니다."}
 
-    # Build per-company member list
+    # Build per-company member list (회사 이름을 미리 조회하여 N+1 방지)
+    company_ids_set = {n.company_id for n in nodes if n.company_id}
+    companies_by_id = {
+        c.id: c.name
+        for c in db.query(Company).filter(Company.id.in_(company_ids_set)).all()
+    } if company_ids_set else {}
+
     company_map: dict = {}
     for n in nodes:
         cid = str(n.company_id)
         if cid not in company_map:
-            c = db.query(Company).filter(Company.id == n.company_id).first()
-            company_map[cid] = {"name": c.name if c else f"회사{cid}", "members": []}
+            company_map[cid] = {"name": companies_by_id.get(n.company_id, f"회사{cid}"), "members": []}
         company_map[cid]["members"].append(
             f"{n.name}({n.role}, {n.level}, {n.description or ''})"
         )
@@ -445,7 +455,8 @@ def talent_match(
     try:
         m = _re.search(r"\{[\s\S]*\}", raw)
         result = json.loads(m.group()) if m else default
-    except Exception:
+    except Exception as e:
+        logger.warning("인재 추천 JSON 파싱 실패: %s", e)
         result = default
 
     return result
@@ -535,7 +546,8 @@ def team_strategy_discussion(
             session_type="general",
             max_tokens=400,
         )
-    except Exception:
+    except Exception as e:
+        logger.warning("팀 토론 요약 생성 실패: %s", e)
         summary = "요약 생성 실패"
 
     return {
@@ -662,7 +674,8 @@ score는 0-100 종합 전략 건강 점수입니다."""
     try:
         jm = re.search(r'\{[\s\S]*\}', response)
         diag = json.loads(jm.group()) if jm else {"error": "파싱 실패", "raw": response[:300]}
-    except Exception:
+    except Exception as e:
+        logger.warning("전략 진단 JSON 파싱 실패: %s", e)
         diag = {"error": "파싱 실패", "raw": response[:300]}
 
     return diag

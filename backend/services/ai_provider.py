@@ -11,6 +11,9 @@ Ollama is the default local provider (no API key required).
 import json
 from typing import Optional, List, Dict, Any
 from core.config import settings
+from core.logging import get_logger
+
+logger = get_logger("ai_provider")
 
 # ── 폴백 이벤트 인메모리 버퍼 (최근 50건) ────────────────────────────────────
 _FALLBACK_LOG: list = []   # [{occurred_at, from, to, reason, user_id}]
@@ -43,8 +46,8 @@ def _record_fallback(from_provider: str, to_provider: str, reason: str, user_id:
         ))
         db.commit()
         db.close()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("폴백 이벤트 DB 기록 실패: %s", e)
 
 # ── KTransformers 헬스체크 캐시 (30초) ────────────────────────────────────────
 _KT_HEALTH_CACHE: dict = {"ok": None, "ts": 0.0}
@@ -65,7 +68,8 @@ def _is_ktransformers_alive(base_url: str) -> bool:
             health_url = health_url[:-3]
         r = httpx.get(f"{health_url}/health", timeout=2.0)
         ok = r.status_code == 200
-    except Exception:
+    except Exception as e:
+        logger.debug("KTransformers 헬스체크 실패: %s", e)
         ok = False
     _KT_HEALTH_CACHE.update({"ok": ok, "ts": now})
     return ok
@@ -127,7 +131,7 @@ class AIProvider:
                 messages, system, max_ctx, max_tokens
             )
         except Exception as _ce_err:
-            pass  # CE 실패해도 원본으로 계속 진행
+            logger.warning("Context Engineering 실패 (원본 사용): %s", _ce_err)
         # ─────────────────────────────────────────────────────────────────────
 
         # ── 이미지가 포함된 메시지는 무조건 gpt-4o-mini (Vision) 사용 ──────────
@@ -164,7 +168,7 @@ class AIProvider:
                     )
                 else:
                     _record_fallback("ktransformers", "ollama", "KTransformers 서버 미실행")
-                    print("[AIProvider] KTransformers 미실행 → Ollama 자동 폴백")
+                    logger.info("KTransformers 미실행 → Ollama 자동 폴백")
                     return self._call_ollama(messages, system, max_tokens)
             else:
                 # Default: ollama
@@ -210,7 +214,8 @@ class AIProvider:
                 _record_fallback("ollama", prov, "Ollama 연결 실패")
                 # 폴백 알림 접두어 추가
                 return f"> ⚡ **[자동 폴백]** Ollama 미응답 → {prov} ({model}) 로 대신 응답했습니다.\n\n{result}"
-            except Exception:
+            except Exception as e:
+                logger.warning("Cloud 폴백 %s 실패: %s", prov, e)
                 self.provider, self.model, self.api_key = saved
                 continue
         return None

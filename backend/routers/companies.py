@@ -13,13 +13,15 @@ router = APIRouter(prefix="/api/companies", tags=["companies"])
 @router.get("", response_model=List[CompanyOut])
 def list_companies(
     status: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     q = db.query(Company)
     if status:
         q = q.filter(Company.status == status)
-    return q.order_by(Company.created_at.desc()).all()
+    return q.order_by(Company.created_at.desc()).offset(offset).limit(min(limit, 500)).all()
 
 
 @router.post("", response_model=CompanyOut)

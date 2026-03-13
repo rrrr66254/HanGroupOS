@@ -11,6 +11,9 @@ from typing import Optional, List, Dict
 from datetime import datetime
 from pathlib import Path
 import os
+from core.logging import get_logger
+
+logger = get_logger("router.video_gen")
 
 # ── 공유 리소스 잠금 ──────────────────────────────────────────────────────────
 # 영상 생성(diffusers)과 Ollama pull이 동시에 실행되지 않도록 직렬화합니다.
@@ -39,8 +42,8 @@ def _broadcast_pull(model: str, data: dict) -> None:
     for q in list(_PULL_SUBSCRIBERS.get(model, [])):
         try:
             asyncio.run_coroutine_threadsafe(q.put(data), loop)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("WS broadcast 실패: %s", e)
 
 
 def _pull_worker(model: str) -> None:
@@ -106,7 +109,8 @@ def _pull_worker(model: str) -> None:
                     continue
                 try:
                     data = _json.loads(line)
-                except Exception:
+                except Exception as e:
+                    logger.debug("Pull JSON 파싱 실패: %s", e)
                     continue
                 status_str = data.get("status", "")
                 completed = data.get("completed", 0)
@@ -144,8 +148,8 @@ def _ollama_unload(base_url: str = "http://localhost:11434") -> None:
             json={"model": model, "keep_alive": 0},
             timeout=5.0,
         )
-    except Exception:
-        pass  # Ollama 미실행 시 무시
+    except Exception as e:
+        logger.debug("Ollama 미실행: %s", e)
 
 
 def _ollama_warmup(base_url: str = "http://localhost:11434") -> None:
@@ -162,8 +166,8 @@ def _ollama_warmup(base_url: str = "http://localhost:11434") -> None:
             json={"model": model, "keep_alive": 300, "prompt": ""},
             timeout=30.0,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Ollama warmup 실패: %s", e)
 
 
 def _get_free_vram_gb() -> float:
@@ -175,7 +179,8 @@ def _get_free_vram_gb() -> float:
             timeout=5,
         ).decode().strip().splitlines()[0]
         return int(out.strip()) / 1024
-    except Exception:
+    except Exception as e:
+        logger.debug("VRAM 조회 실패: %s", e)
         return 0.0
 
 from core.database import get_db
@@ -212,7 +217,8 @@ class VideoProgressManager:
         for ws in list(self.connections.get(job_id, [])):
             try:
                 await ws.send_json(data)
-            except Exception:
+            except Exception as e:
+                logger.debug("WS dead connection: %s", e)
                 dead.append(ws)
         for ws in dead:
             self.disconnect(job_id, ws)
@@ -225,8 +231,8 @@ class VideoProgressManager:
             return
         try:
             asyncio.run_coroutine_threadsafe(self._broadcast(job_id, data), self._loop)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("WS notify_sync 실패: %s", e)
 
     def done_sync(self, job_id: int, status: str):
         """완료/실패 알림 전송."""
@@ -236,8 +242,8 @@ class VideoProgressManager:
             return
         try:
             asyncio.run_coroutine_threadsafe(self._broadcast(job_id, data), self._loop)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("WS done_sync 실패: %s", e)
 
 
 video_progress = VideoProgressManager()
@@ -335,31 +341,22 @@ SUPPORTED_MODELS = [
 
 def _get_hf_token(db: Session) -> Optional[str]:
     """ExternalApiKey에서 HuggingFace 토큰 조회."""
-    row = (
-        db.query(ExternalApiKey)
-        .filter(ExternalApiKey.service == "huggingface", ExternalApiKey.is_active == True)
-        .first()
-    )
+    from core.utils import get_active_api_key
+    row = get_active_api_key(db, "huggingface")
     return row.api_key if row else None
 
 
 def _get_fal_key(db: Session) -> Optional[str]:
     """ExternalApiKey에서 FAL-AI API 키 조회."""
-    row = (
-        db.query(ExternalApiKey)
-        .filter(ExternalApiKey.service == "fal-ai", ExternalApiKey.is_active == True)
-        .first()
-    )
+    from core.utils import get_active_api_key
+    row = get_active_api_key(db, "fal-ai")
     return row.api_key if row else None
 
 
 def _get_json2video_key(db: Session) -> Optional[str]:
     """ExternalApiKey에서 JSON2Video API 키 조회."""
-    row = (
-        db.query(ExternalApiKey)
-        .filter(ExternalApiKey.service == "json2video", ExternalApiKey.is_active == True)
-        .first()
-    )
+    from core.utils import get_active_api_key
+    row = get_active_api_key(db, "json2video")
     return row.api_key if row else None
 
 
@@ -1023,7 +1020,7 @@ def _notify_chat(db, job):
             db.add(msg)
             db.commit()
     except Exception as e:
-        print(f"[video_gen] 채팅 알림 실패 (무시): {e}")
+        logger.warning("채팅 알림 실패: %s", e)
 
     # DB 알림 생성 (NotificationPoller가 감지)
     try:
@@ -1048,7 +1045,7 @@ def _notify_chat(db, job):
                 company_id=job.company_id,
             )
     except Exception as e:
-        print(f"[video_gen] DB 알림 생성 실패 (무시): {e}")
+        logger.warning("DB 알림 생성 실패: %s", e)
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -1156,8 +1153,8 @@ def ollama_list_models(current_user: User = Depends(get_current_user)):
             ps_models = ps.json().get("models", [])
             if ps_models:
                 loaded = ps_models[0].get("name", "")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Ollama ps 조회 실패: %s", e)
         return {
             "models": models,
             "default_model": default_model,
@@ -1282,12 +1279,13 @@ async def ws_ollama_pull(websocket: WebSocket, model: str = Query(""), token: st
             except asyncio.TimeoutError:
                 try:
                     await websocket.send_json({"type": "ping"})
-                except Exception:
+                except Exception as e:
+                    logger.debug("Pull WS ping 실패: %s", e)
                     break
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Pull WS 연결 오류: %s", e)
     finally:
         subs = _PULL_SUBSCRIBERS.get(model, [])
         if q in subs:
@@ -1406,8 +1404,8 @@ async def ws_gpu_setup_log(websocket: WebSocket, token: str = Query("")):
                 await websocket.send_json({"type": "ping"})
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("로그 WS 연결 오류: %s", e)
 
 
 def _record_gpu_history():
@@ -1422,8 +1420,9 @@ def _record_gpu_history():
         ).decode().strip().splitlines()[0]
         parts = [p.strip() for p in out.split(",")]
         used, total, temp, util = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
-    except Exception:
-        return  # nvidia-smi 없으면 조용히 종료
+    except Exception as e:
+        logger.debug("nvidia-smi 조회 실패: %s", e)
+        return
 
     try:
         from core.database import SessionLocal
@@ -1436,8 +1435,8 @@ def _record_gpu_history():
         db.query(GpuHistory).filter(GpuHistory.recorded_at < cutoff).delete()
         db.commit()
         db.close()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("GPU 기록 저장 실패: %s", e)
 
 
 @router.get("/gpu-status")
@@ -1467,8 +1466,8 @@ def gpu_status():
                 "temp_c": int(parts[4]) if len(parts) > 4 else 0,
                 "util_pct": int(parts[5]) if len(parts) > 5 else 0,
             }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("GPU 상태 조회 실패: %s", e)
 
     # VRAM 경고: 총 VRAM 대비 사용량 90% 초과 시
     vram_pct = 0
@@ -1486,8 +1485,8 @@ def gpu_status():
             models_list = r.json().get("models", [])
             if models_list:
                 ollama_loaded_model = models_list[0].get("name", "")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Ollama 로드 상태 확인 실패: %s", e)
 
     # 활성 pull 작업 수 (대기 중 + 실행 중)
     active_pulls = [

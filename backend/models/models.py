@@ -61,12 +61,12 @@ class Company(Base):
 class OrgNode(Base):
     __tablename__ = "org_nodes"
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     name = Column(String(100), nullable=False)
     role = Column(String(100), nullable=False)
     level = Column(String(50), nullable=False)
     # chairman | committee | ceo | chief | team_lead | specialist
-    parent_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=True)
+    parent_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=True, index=True)
     ai_provider = Column(String(50), default="mock")
     ai_model = Column(String(100), default="")
     description = Column(Text, default="")
@@ -102,7 +102,7 @@ class Meeting(Base):
 class MeetingMessage(Base):
     __tablename__ = "meeting_messages"
     id = Column(Integer, primary_key=True, index=True)
-    meeting_id = Column(Integer, ForeignKey("meetings.id"), nullable=False)
+    meeting_id = Column(Integer, ForeignKey("meetings.id"), nullable=False, index=True)
     sender = Column(String(100), nullable=False)
     sender_role = Column(String(100), default="")
     content = Column(Text, nullable=False)
@@ -132,7 +132,7 @@ class ApprovalRequest(Base):
     # company_create | org_change | strategy | general
     status = Column(String(20), default="pending")  # pending | approved | rejected
     requester = Column(String(100), nullable=False)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     meta = Column(JSON, default={})
     reviewer_note = Column(Text, default="")
     reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -143,7 +143,7 @@ class ApprovalRequest(Base):
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     session_type = Column(String(50), default="chairman")
     # chairman | ceo | committee | general
     title = Column(String(200), default="New Session")
@@ -155,7 +155,7 @@ class ChatSession(Base):
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False, index=True)
     role = Column(String(20), nullable=False)  # user | assistant | system
     content = Column(Text, nullable=False)
     sender_name = Column(String(100), default="")
@@ -299,7 +299,7 @@ class CorporateMemory(Base):
 class StrategyItem(Base):
     __tablename__ = "strategy_items"
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     title = Column(String(200), nullable=False)
     description = Column(Text, default="")
     item_type = Column(String(50), default="objective")
@@ -343,7 +343,7 @@ class AgentActivity(Base):
 class WorkLog(Base):
     __tablename__ = "work_logs"
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     org_node_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=True)
     agent_name = Column(String(100), nullable=False)
     agent_role = Column(String(100), nullable=False)
@@ -449,7 +449,7 @@ class CollectedData(Base):
     """인터넷에서 수집한 데이터 저장."""
     __tablename__ = "collected_data"
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     data_type = Column(String(50), nullable=False, index=True)
     # web_search | news | rss | scraped | trade | custom
     source = Column(String(200), default="")         # URL or API name
@@ -462,7 +462,7 @@ class CollectedData(Base):
     content_hash = Column(String(64), nullable=True, index=True)  # SHA256 중복 감지
     relevance_score = Column(Float, nullable=True)   # 0.0~1.0 관련성 점수
     quality_flag = Column(String(20), nullable=True) # ok | short | duplicate | low_quality
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 # ── Media Posts ───────────────────────────────────────────────────────────────
@@ -518,7 +518,7 @@ class Notification(Base):
     """시스템 알림 — DB 영속화."""
     __tablename__ = "notifications"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # None = 전체
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # None = 전체
     title = Column(String(200), nullable=False)
     body = Column(Text, default="")
     notif_type = Column(String(50), default="info")

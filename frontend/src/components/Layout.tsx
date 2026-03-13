@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Header from './Header'
+import ErrorBoundary from './ErrorBoundary'
 import NotificationPoller from './NotificationPoller'
 import PullWatcher from './PullWatcher'
 import Toast from './Toast'
@@ -21,7 +22,9 @@ export default function Layout() {
       >
         <Header />
         <main className="flex-1 overflow-auto p-6">
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>
