@@ -22,7 +22,7 @@
 | **역할별 AI 자동 배정** | 계열사 설립 시 직급·역할에 맞는 AI 모델 자동 배정 |
 | **실시간 대시보드** | WebSocket 기반 실시간 KPI 변동, 승인 알림, 이벤트 반영 |
 | **다국어 지원 (i18n)** | 한국어·영어·일본어 UI 전환 (사이드바, 대시보드, 로그인 전체 적용) |
-| **CI/CD 파이프라인** | GitHub Actions — pytest + TypeScript 빌드 + Docker 빌드 자동화 |
+| **CI/CD 파이프라인** | GitHub Actions — pytest + TypeScript 빌드 + Playwright E2E + Docker 빌드 |
 | **Docker Compose 배포** | 백엔드+프론트엔드+Ollama 원클릭 컨테이너 배포 |
 | **E2E 테스트 (Playwright)** | 로그인·대시보드·회장·계열사 시나리오별 브라우저 테스트 |
 | **pytest 테스트** | 인증·회사·승인·그룹설정 API 테스트 코드 |
@@ -65,6 +65,17 @@
 - `_record_metric()` 호출 시 `quality_score` 자동 계산 후 DB 저장
 - `AiAgentMetrics.quality_score` 컬럼 활용 (기존 nullable Float)
 - 성과 대시보드에서 품질 추이 확인 가능
+
+### 6. 성과 대시보드 품질 점수 시각화
+- 일별 품질 추이 라인 차트 추가 (0~100% 범위, 녹색 라인)
+- 에이전트 품질 랭킹 수평 바 차트 추가 (상위 8개 에이전트)
+- 백엔드 `by_day` API 응답에 `avg_quality` 필드 추가
+- Award 아이콘 활용, 기존 요청 추이·프로바이더 차트와 동일 스타일
+
+### 7. E2E 테스트 CI 통합
+- GitHub Actions `ci.yml`에 `frontend-e2e` 잡 추가
+- `frontend-build` 성공 후 Playwright Chromium 헤드리스 실행
+- 테스트 실패 시 `test-results/` 아티팩트 자동 업로드 (7일 보관)
 
 ---
 

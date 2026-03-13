@@ -75,15 +75,21 @@ def metrics_summary(
         provider_map[key]["total_tokens"] += m.total_tokens
     by_provider = sorted(provider_map.values(), key=lambda x: x["requests"], reverse=True)
 
-    # 일별 트렌드
+    # 일별 트렌드 (품질 추이 포함)
     day_map: dict = {}
     for m in metrics:
         day = m.created_at.strftime("%Y-%m-%d")
         if day not in day_map:
-            day_map[day] = {"date": day, "requests": 0, "tokens": 0}
+            day_map[day] = {"date": day, "requests": 0, "tokens": 0, "_quality_scores": []}
         day_map[day]["requests"] += 1
         day_map[day]["tokens"] += m.total_tokens
-    by_day = sorted(day_map.values(), key=lambda x: x["date"])
+        if m.quality_score is not None:
+            day_map[day]["_quality_scores"].append(m.quality_score)
+    by_day = []
+    for d in sorted(day_map.values(), key=lambda x: x["date"]):
+        qs = d.pop("_quality_scores")
+        d["avg_quality"] = round(sum(qs) / len(qs), 3) if qs else None
+        by_day.append(d)
 
     return {
         "total_requests": total_requests,

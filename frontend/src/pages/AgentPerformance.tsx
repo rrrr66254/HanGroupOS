@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Activity, Zap, Clock, BarChart2, Cpu, TrendingUp,
-  RefreshCw, ChevronDown,
+  RefreshCw, ChevronDown, Award,
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -29,6 +29,7 @@ interface DayTrend {
   date: string
   requests: number
   tokens: number
+  avg_quality: number | null
 }
 
 interface MetricRow {
@@ -180,6 +181,61 @@ export default function AgentPerformance() {
                   ))}
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* 품질 추이 + 에이전트 품질 랭킹 */}
+          <div className="grid grid-cols-2 gap-6">
+            {/* 일별 품질 추이 */}
+            <div className="card p-4">
+              <h3 className="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-2">
+                <Award size={13} /> 일별 품질 추이
+              </h3>
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart
+                  data={summary.by_day.filter((d) => d.avg_quality != null)}
+                  margin={{ top: 4, right: 8, left: -20, bottom: 0 }}
+                >
+                  <XAxis dataKey="date" tick={{ fontSize: 9, fill: '#475569' }} tickLine={false} axisLine={false}
+                    tickFormatter={(v) => v.slice(5)} />
+                  <YAxis domain={[0, 1]} tick={{ fontSize: 9, fill: '#475569' }} tickLine={false} axisLine={false}
+                    tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`} />
+                  <Tooltip
+                    contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
+                    formatter={(v: number) => [`${(v * 100).toFixed(1)}%`, '품질']}
+                  />
+                  <Line type="monotone" dataKey="avg_quality" stroke="#34d399" strokeWidth={2} dot={{ r: 2 }} name="품질" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* 에이전트 품질 랭킹 */}
+            <div className="card p-4">
+              <h3 className="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-2">
+                <Award size={13} /> 에이전트 품질 랭킹
+              </h3>
+              {(() => {
+                const ranked = summary.by_agent
+                  .filter((a) => a.avg_quality != null)
+                  .map((a) => ({ ...a, quality_pct: Math.round((a.avg_quality ?? 0) * 100) }))
+                  .sort((a, b) => b.quality_pct - a.quality_pct)
+                  .slice(0, 8)
+                return ranked.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={180}>
+                    <BarChart data={ranked} layout="vertical"
+                      margin={{ top: 0, right: 20, left: 80, bottom: 0 }}>
+                      <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 9, fill: '#475569' }}
+                        tickFormatter={(v: number) => `${v}%`} />
+                      <YAxis type="category" dataKey="agent_name" tick={{ fontSize: 10, fill: '#94a3b8' }} width={80} />
+                      <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
+                        formatter={(v: number) => [`${v}%`, '품질']} />
+                      <Bar dataKey="quality_pct" fill="#34d399" radius={[0, 4, 4, 0]} name="품질" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center py-8 text-xs text-slate-600">품질 데이터가 없습니다</div>
+                )
+              })()}
             </div>
           </div>
 
