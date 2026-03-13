@@ -35,6 +35,7 @@ import DataAnalytics from './pages/DataAnalytics'
 import InsightsDashboard from './pages/InsightsDashboard'
 import Competitors from './pages/Competitors'
 import AgentPerformance from './pages/AgentPerformance'
+import CostAnalytics from './pages/CostAnalytics'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -107,6 +108,7 @@ export default function App() {
           <Route path="insights" element={<InsightsDashboard />} />
           <Route path="competitors" element={<Competitors />} />
           <Route path="agent-performance" element={<AgentPerformance />} />
+          <Route path="cost-analytics" element={<CostAnalytics />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>

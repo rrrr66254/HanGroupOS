@@ -77,6 +77,14 @@
 - `frontend-build` 성공 후 Playwright Chromium 헤드리스 실행
 - 테스트 실패 시 `test-results/` 아티팩트 자동 업로드 (7일 보관)
 
+### 8. 프로바이더별 비용 추적 대시보드
+- `/cost-analytics` 페이지 신규 생성 — 일별 비용 추이, 프로바이더 비율 파이, 모델별 바 차트
+- Anthropic/OpenAI/Gemini 최신 토큰 단가표 내장 (Ollama/로컬은 무료 처리)
+- `GET /api/agent-metrics/cost-summary` — 기간별 비용 집계 API
+- `GET /api/agent-metrics/pricing` — 현재 단가표 조회 API
+- 월 예상 비용 자동 산출 (일 평균 × 30일)
+- 사이드바 조직 그룹에 "비용 분석" 메뉴 추가, ko/en/ja i18n 대응
+
 ---
 
 ## v32 업데이트 내역
@@ -287,6 +295,8 @@ HanGroupOS/
 | `PATCH /api/group-settings` | 그룹 설정 변경 (이름, 슬로건) |
 | `GET /api/agent-metrics/summary` | AI 에이전트 성과 요약 (자동 수집 데이터) |
 | `GET /api/agent-metrics/recent` | 최근 AI 호출 이력 |
+| `GET /api/agent-metrics/cost-summary` | 프로바이더별 비용 추적 요약 |
+| `GET /api/agent-metrics/pricing` | 토큰 단가표 조회 |
 
 ---
 

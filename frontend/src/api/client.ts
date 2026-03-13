@@ -468,6 +468,9 @@ export const agentMetricsApi = {
     api.get('/agent-metrics/summary', { params: { days, company_id: companyId } }),
   recent: (limit = 50, companyId?: number) =>
     api.get('/agent-metrics/recent', { params: { limit, company_id: companyId } }),
+  costSummary: (days = 30, companyId?: number) =>
+    api.get('/agent-metrics/cost-summary', { params: { days, company_id: companyId } }),
+  pricing: () => api.get('/agent-metrics/pricing'),
 }
 
 // ── Document Generator ────────────────────────────────────────────────────────

@@ -48,6 +48,7 @@ const ja = {
     memory: '企業記憶',
     talentMatch: '人材マッチング',
     agentPerformance: 'AI成果分析',
+    costAnalytics: 'コスト分析',
     docGenerator: 'AI文書生成',
     weeklyReport: '週次レポート',
     irReport: 'IRレポート',

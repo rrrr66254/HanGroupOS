@@ -48,6 +48,7 @@ const en = {
     memory: 'Corporate Memory',
     talentMatch: 'Talent Match',
     agentPerformance: 'AI Performance',
+    costAnalytics: 'Cost Analytics',
     docGenerator: 'AI Doc Generator',
     weeklyReport: 'Weekly Report',
     irReport: 'IR Report',

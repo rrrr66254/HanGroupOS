@@ -6,7 +6,7 @@ import {
   Brain, Settings, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Zap, Home, Bell, FileText, Globe, Star, GitMerge, BarChart2, UserCheck,
   Terminal, Gamepad2, Shield, Briefcase, Users, Film, ListVideo,
-  DatabaseZap, ScrollText, Lightbulb, Crosshair, Activity,
+  DatabaseZap, ScrollText, Lightbulb, Crosshair, Activity, DollarSign,
 } from 'lucide-react'
 import { useAppStore, useGroupStore } from '../store/useStore'
 import { approvalsApi, terminalApi } from '../api/client'
@@ -55,6 +55,7 @@ const NAV_GROUPS = [
       { to: '/memory', icon: Brain, labelKey: 'nav.memory' },
       { to: '/talent-match', icon: UserCheck, labelKey: 'nav.talentMatch' },
       { to: '/agent-performance', icon: Activity, labelKey: 'nav.agentPerformance' },
+      { to: '/cost-analytics', icon: DollarSign, labelKey: 'nav.costAnalytics' },
     ],
   },
   {

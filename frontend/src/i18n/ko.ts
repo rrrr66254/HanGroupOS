@@ -48,6 +48,7 @@ const ko = {
     memory: '기업기억',
     talentMatch: '인재추천',
     agentPerformance: 'AI 성과 분석',
+    costAnalytics: '비용 분석',
     docGenerator: 'AI 문서 생성기',
     weeklyReport: '주간보고서',
     irReport: 'IR 보고서',
