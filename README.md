@@ -1,4 +1,4 @@
-# Group OS v33
+# Group OS v34
 **AI 기반 기업 운영 시스템 (AI Corporate Operating System)**
 
 <p align="center">
@@ -34,7 +34,50 @@
 | **KPI 스코어보드** | 계열사별 KPI 랭킹, Gold/Silver/Bronze 트로피, 게이미피케이션 대시보드 |
 | **에이전트 성격 설정** | 프리셋(보수적/공격적/창의적) + 말투/전문분야 커스터마이징 |
 | **외부 데이터 허브** | RSS/뉴스/환율/주가 자동 수집 파이프라인 + 에이전트 컨텍스트 주입 |
+| **Slack/Discord 웹훅 알림** | 승인 요청·품질 알림·KPI 변동 등 실시간 웹훅 발송 |
+| **AI 대화 요약 자동 생성** | 긴 세션 자동 요약 → 기업 기억 저장 |
+| **계열사 시너지 매칭** | 키워드 + AI 분석으로 계열사 간 협업 기회 자동 발굴 |
+| **대시보드 위젯 커스터마이징** | 사용자별 대시보드 위젯 표시/숨김/순서 설정 |
+| **AI 피드백 루프** | 좋아요/싫어요 피드백 + 에이전트별 만족도 통계 |
 | **멀티 AI 프로바이더** | Claude, GPT-4o, Gemini, Ollama (무료 로컬), Mock |
+
+---
+
+## v34 업데이트 내역
+
+### 1. Slack/Discord 웹훅 알림 연동
+- 승인 요청, 품질 알림, KPI 변동 등 이벤트별 웹훅 자동 발송
+- Slack Incoming Webhooks / Discord Webhooks 동시 지원
+- GroupSettings 기반 설정 저장 + 알림 타입별 필터링
+- `/webhook-settings` 페이지: URL 등록, 필터 설정, 테스트 발송
+- `PUT /api/webhook-notify/config`, `POST /api/webhook-notify/test` API
+- 시스템 어디서든 `send_webhook_alert()` 호출로 알림 발송 가능
+
+### 2. AI 에이전트 대화 요약 자동 생성
+- 7일 이내 10건 이상 메시지가 있는 세션 자동 요약
+- AI 기반 핵심 요약 생성 → CorporateMemory에 자동 저장
+- 중복 요약 방지 (세션별 1회)
+- `POST /api/chat-summary/auto` (일괄), `GET /api/chat-summary/session/{id}` (개별)
+
+### 3. 계열사 간 시너지 매칭 AI
+- 키워드 매칭 규칙: 기술-데이터, 콘텐츠-플랫폼, 재무-운영, 고객-교차
+- AI 심층 분석: 2개 회사 간 시너지 기회를 AI가 상세 분석
+- `/synergy-match` 페이지: 기회 목록 + AI 분석 결과 시각화
+- `GET /api/synergy-match/opportunities`, `POST /api/synergy-match/ai-analyze` API
+
+### 4. 관리자 대시보드 위젯 커스터마이징
+- 11종 기본 위젯: 계열사 수, AI 조직원, 승인 대기, 기업 기억 등
+- 사용자별 위젯 표시/숨김 토글 + 순서 드래그 앤 드롭
+- DashboardLayout DB 모델로 사용자별 레이아웃 영구 저장
+- `/dashboard-customize` 페이지 + 초기화 기능
+- `GET/PUT/DELETE /api/dashboard-layout` API
+
+### 5. AI 에이전트 학습 피드백 루프
+- 메시지별 좋아요(+1) / 싫어요(-1) 피드백 제출
+- 에이전트별 만족도 통계 (긍정률, 부정률, 총 피드백 수)
+- 싫어요 피드백 시 자동 웹훅 알림 (품질 경고)
+- `/ai-feedback` 페이지: 최근 피드백 이력 + 에이전트별 만족도 차트
+- `POST /api/ai-feedback`, `GET /api/ai-feedback/stats` API
 
 ---
 
@@ -320,7 +363,7 @@ HanGroupOS/
 
 서버 실행 후: `http://localhost:8000/docs`
 
-### 신규 API (v31-33)
+### 신규 API (v31-34)
 
 | 경로 | 설명 |
 |------|------|
@@ -334,6 +377,13 @@ HanGroupOS/
 | `GET /api/kpi-scoreboard/ranking` | 계열사 KPI 랭킹 |
 | `GET/PUT /api/agent-personality/node/{id}` | 에이전트 성격 조회/수정 |
 | `GET/POST /api/data-feeds` | 외부 데이터 피드 관리 |
+| `PUT /api/webhook-notify/config` | 웹훅 알림 설정 |
+| `POST /api/webhook-notify/test` | 웹훅 테스트 발송 |
+| `POST /api/chat-summary/auto` | 대화 요약 일괄 생성 |
+| `GET /api/synergy-match/opportunities` | 시너지 매칭 기회 조회 |
+| `GET/PUT /api/dashboard-layout` | 대시보드 위젯 레이아웃 |
+| `POST /api/ai-feedback` | AI 피드백 제출 |
+| `GET /api/ai-feedback/stats` | 에이전트별 만족도 통계 |
 
 ---
 

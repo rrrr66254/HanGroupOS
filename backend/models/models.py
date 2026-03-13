@@ -731,3 +731,25 @@ class ExternalDataCache(Base):
     content = Column(Text, default="")
     source_url = Column(String(500), default="")
     collected_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class DashboardLayout(Base):
+    """사용자별 대시보드 위젯 레이아웃 설정."""
+    __tablename__ = "dashboard_layouts"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    layout = Column(JSON, default=[])  # [{widget_id, x, y, w, h, visible}]
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AiFeedback(Base):
+    """AI 응답 피드백 (좋아요/싫어요)."""
+    __tablename__ = "ai_feedbacks"
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, ForeignKey("chat_messages.id"), nullable=False, index=True)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    rating = Column(Integer, nullable=False)  # 1=좋아요, -1=싫어요
+    comment = Column(Text, default="")
+    agent_name = Column(String(100), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)

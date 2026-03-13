@@ -7,6 +7,7 @@ import {
   Zap, Home, Bell, FileText, Globe, Star, GitMerge, BarChart2, UserCheck,
   Terminal, Gamepad2, Shield, Briefcase, Users, Film, ListVideo,
   DatabaseZap, ScrollText, Lightbulb, Crosshair, Activity, DollarSign, Sparkles, Rss,
+  LayoutGrid,
 } from 'lucide-react'
 import { useAppStore, useGroupStore } from '../store/useStore'
 import { approvalsApi, terminalApi } from '../api/client'
@@ -45,6 +46,7 @@ const NAV_GROUPS = [
       { to: '/competitors', icon: Crosshair, labelKey: 'nav.competitors' },
       { to: '/delegation', icon: GitMerge, labelKey: 'nav.delegation' },
       { to: '/kpi-scoreboard', icon: BarChart2, labelKey: 'nav.kpiScoreboard' },
+      { to: '/synergy-match', icon: Zap, labelKey: 'nav.synergyMatch' },
     ],
   },
   {
@@ -59,6 +61,7 @@ const NAV_GROUPS = [
       { to: '/agent-performance', icon: Activity, labelKey: 'nav.agentPerformance' },
       { to: '/cost-analytics', icon: DollarSign, labelKey: 'nav.costAnalytics' },
       { to: '/agent-personality', icon: Sparkles, labelKey: 'nav.agentPersonality' },
+      { to: '/ai-feedback', icon: Star, labelKey: 'nav.aiFeedback' },
     ],
   },
   {
@@ -86,6 +89,8 @@ const NAV_GROUPS = [
       { to: '/terminal', icon: Terminal, labelKey: 'nav.terminal' },
       { to: '/audit', icon: Shield, labelKey: 'nav.audit' },
       { to: '/data-feeds', icon: Rss, labelKey: 'nav.dataFeeds' },
+      { to: '/webhook-settings', icon: Bell, labelKey: 'nav.webhookSettings' },
+      { to: '/dashboard-customize', icon: LayoutGrid, labelKey: 'nav.dashboardCustomize' },
       { to: '/admin', icon: Settings, labelKey: 'nav.admin' },
     ],
   },

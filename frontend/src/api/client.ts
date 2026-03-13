@@ -510,6 +510,42 @@ export const dataFeedsApi = {
   contextData: () => api.get('/data-feeds/context-data'),
 }
 
+// ── Webhook Notify ───────────────────────────────────────────────────────────
+export const webhookNotifyApi = {
+  getConfig: () => api.get('/webhook-notify/config'),
+  updateConfig: (data: Record<string, unknown>) => api.put('/webhook-notify/config', data),
+  test: (target: string) => api.post('/webhook-notify/test', { target }),
+}
+
+// ── Chat Summary ─────────────────────────────────────────────────────────────
+export const chatSummaryApi = {
+  auto: (days?: number) => api.post('/chat-summary/auto', null, { params: { days } }),
+  session: (sessionId: number) => api.get(`/chat-summary/session/${sessionId}`),
+}
+
+// ── Synergy Match ────────────────────────────────────────────────────────────
+export const synergyMatchApi = {
+  opportunities: () => api.get('/synergy-match/opportunities'),
+  aiAnalyze: () => api.post('/synergy-match/ai-analyze'),
+}
+
+// ── Dashboard Layout ─────────────────────────────────────────────────────────
+export const dashboardLayoutApi = {
+  get: () => api.get('/dashboard-layout'),
+  save: (layout: unknown[]) => api.put('/dashboard-layout', { layout }),
+  reset: () => api.delete('/dashboard-layout'),
+  widgets: () => api.get('/dashboard-layout/widgets'),
+}
+
+// ── AI Feedback ──────────────────────────────────────────────────────────────
+export const aiFeedbackApi = {
+  submit: (data: { message_id: number; session_id?: number; rating: number; comment?: string; agent_name?: string }) =>
+    api.post('/ai-feedback', data),
+  stats: (agentName?: string) => api.get('/ai-feedback/stats', { params: { agent_name: agentName } }),
+  message: (messageId: number) => api.get(`/ai-feedback/message/${messageId}`),
+  recent: (limit?: number) => api.get('/ai-feedback/recent', { params: { limit } }),
+}
+
 // ── Document Generator ────────────────────────────────────────────────────────
 export const docsApi = {
   businessPlan: (companyId: number) => api.post(`/docs/business-plan/${companyId}`),

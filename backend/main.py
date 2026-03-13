@@ -15,7 +15,7 @@ logging.getLogger().addHandler(_log_handler)
 logging.getLogger("uvicorn.access").addHandler(_log_handler)
 logging.getLogger("uvicorn.error").addHandler(_log_handler)
 logging.getLogger().setLevel(logging.INFO)
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks, group_settings, agent_metrics, delegation, kpi_scoreboard, agent_personality, data_feeds
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks, group_settings, agent_metrics, delegation, kpi_scoreboard, agent_personality, data_feeds, webhook_notify, chat_summary, synergy_match, dashboard_layout, ai_feedback
 
 
 app = FastAPI(
@@ -68,6 +68,11 @@ app.include_router(delegation.router)     # 에이전트 자동 위임 체인
 app.include_router(kpi_scoreboard.router) # KPI 스코어보드 (게이미피케이션)
 app.include_router(agent_personality.router) # 에이전트 성격 커스터마이징
 app.include_router(data_feeds.router)     # 외부 데이터 소스 통합 허브
+app.include_router(webhook_notify.router) # Slack/Discord 웹훅 알림
+app.include_router(chat_summary.router)   # AI 대화 요약 자동 생성
+app.include_router(synergy_match.router)  # 계열사 시너지 매칭
+app.include_router(dashboard_layout.router) # 대시보드 위젯 레이아웃
+app.include_router(ai_feedback.router)    # AI 피드백 루프
 
 
 @app.get("/health")

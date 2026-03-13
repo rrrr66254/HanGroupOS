@@ -40,6 +40,10 @@ import DelegationChain from './pages/DelegationChain'
 import KpiScoreboard from './pages/KpiScoreboard'
 import AgentPersonalityPage from './pages/AgentPersonalityPage'
 import DataFeedsPage from './pages/DataFeedsPage'
+import WebhookSettings from './pages/WebhookSettings'
+import SynergyMatch from './pages/SynergyMatch'
+import DashboardCustomize from './pages/DashboardCustomize'
+import AiFeedbackPage from './pages/AiFeedbackPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -117,6 +121,10 @@ export default function App() {
           <Route path="kpi-scoreboard" element={<KpiScoreboard />} />
           <Route path="agent-personality" element={<AgentPersonalityPage />} />
           <Route path="data-feeds" element={<DataFeedsPage />} />
+          <Route path="webhook-settings" element={<WebhookSettings />} />
+          <Route path="synergy-match" element={<SynergyMatch />} />
+          <Route path="dashboard-customize" element={<DashboardCustomize />} />
+          <Route path="ai-feedback" element={<AiFeedbackPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>
