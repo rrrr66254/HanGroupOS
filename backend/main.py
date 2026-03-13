@@ -15,7 +15,7 @@ logging.getLogger().addHandler(_log_handler)
 logging.getLogger("uvicorn.access").addHandler(_log_handler)
 logging.getLogger("uvicorn.error").addHandler(_log_handler)
 logging.getLogger().setLevel(logging.INFO)
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks, group_settings, agent_metrics, delegation, kpi_scoreboard, agent_personality, data_feeds, webhook_notify, chat_summary, synergy_match, dashboard_layout, ai_feedback, workflow, financial, permissions
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks, group_settings, agent_metrics, delegation, kpi_scoreboard, agent_personality, data_feeds, webhook_notify, chat_summary, synergy_match, dashboard_layout, ai_feedback, workflow, financial, permissions, news
 
 
 app = FastAPI(
@@ -76,6 +76,7 @@ app.include_router(ai_feedback.router)    # AI 피드백 루프
 app.include_router(workflow.router)       # AI 워크플로우 빌더
 app.include_router(financial.router)      # 계열사 재무제표 자동 생성
 app.include_router(permissions.router)    # 멀티테넌트 권한 관리
+app.include_router(news.router)           # 뉴스 수집 + AI 브리핑 (NewsAPI/RSS)
 
 
 @app.get("/health")

@@ -1,4 +1,4 @@
-# Group OS v35
+# Group OS v36
 **AI 기반 기업 운영 시스템 (AI Corporate Operating System)**
 
 <p align="center">
@@ -40,6 +40,28 @@
 | **대시보드 위젯 커스터마이징** | 사용자별 대시보드 위젯 표시/숨김/순서 설정 |
 | **AI 피드백 루프** | 좋아요/싫어요 피드백 + 에이전트별 만족도 통계 |
 | **멀티 AI 프로바이더** | Claude, GPT-4o, Gemini, Ollama (무료 로컬), Mock |
+| **뉴스 수집 + AI 브리핑** | NewsAPI/RSS 기반 산업별 뉴스 자동 수집, AI 경영진 브리핑 생성, 구독 관리 |
+
+---
+
+## v36 업데이트 내역
+
+### 1. 뉴스 수집 + AI 브리핑 시스템 (NewsAPI 연동)
+- **NewsAPI** 연동: 키워드/카테고리/국가별 뉴스 실시간 검색
+- API 키 없을 시 **Google News RSS** 자동 폴백 (무료 사용 가능)
+- **산업별 뉴스 피드**: IT, 게임, 금융, 제조, 미디어, 바이오, 에너지 등 9개 산업 + 키워드 자동 매핑
+- **AI 뉴스 브리핑**: 수집된 뉴스를 AI가 분석 → 요약/트렌드/기회/리스크/조치사항 보고서 자동 생성
+- **뉴스 구독 관리**: 회사별 뉴스 구독 생성/삭제/즉시 수집 기능
+- 수집된 뉴스 → `CollectedData` 테이블 자동 저장 (중복 방지, SHA256 해시)
+- `NewsFeedSubscription` DB 모델
+- API 엔드포인트:
+  - `GET /api/news/search` — 키워드/카테고리 뉴스 검색
+  - `GET /api/news/industry/{industry}` — 산업별 뉴스 조회
+  - `POST /api/news/briefing` — AI 뉴스 브리핑 생성
+  - `GET /api/news/categories` — 지원 카테고리 목록
+  - `GET /api/news/industries` — 지원 산업 + 키워드 목록
+  - `POST/GET/DELETE /api/news/subscriptions` — 구독 CRUD
+  - `POST /api/news/subscriptions/{id}/fetch` — 구독 기반 뉴스 즉시 수집
 
 ---
 

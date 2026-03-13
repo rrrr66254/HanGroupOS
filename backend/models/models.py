@@ -820,3 +820,21 @@ class UserCompanyRole(Base):
     granted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── News Feed Subscriptions ─────────────────────────────────────────────────
+class NewsFeedSubscription(Base):
+    """회사별 뉴스 피드 구독 설정."""
+    __tablename__ = "news_feed_subscriptions"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)           # 구독 이름 (예: "AI 산업 동향")
+    industry = Column(String(100), default="")           # 산업 분류
+    keywords = Column(JSON, default=[])                  # 검색 키워드 리스트
+    category = Column(String(50), default="")            # NewsAPI 카테고리
+    country = Column(String(10), default="kr")
+    language = Column(String(10), default="ko")
+    is_active = Column(Boolean, default=True)
+    last_fetched_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
