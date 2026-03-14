@@ -1,9 +1,11 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect } from 'react'
-import { useAuthStore, useAppStore } from './store/useStore'
+import { useAuthStore, useAppStore, useGroupStore } from './store/useStore'
 import Layout from './components/Layout'
+import ErrorBoundary from './components/ErrorBoundary'
 import OllamaSetupNotice from './components/OllamaSetupNotice'
 import { startHealthPoller } from './components/ProviderStatusBanner'
+import { groupSettingsApi } from './api/client'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Chairman from './pages/Chairman'
@@ -32,6 +34,21 @@ import DocGenerator from './pages/DocGenerator'
 import DataAnalytics from './pages/DataAnalytics'
 import InsightsDashboard from './pages/InsightsDashboard'
 import Competitors from './pages/Competitors'
+import AgentPerformance from './pages/AgentPerformance'
+import CostAnalytics from './pages/CostAnalytics'
+import DelegationChain from './pages/DelegationChain'
+import KpiScoreboard from './pages/KpiScoreboard'
+import AgentPersonalityPage from './pages/AgentPersonalityPage'
+import DataFeedsPage from './pages/DataFeedsPage'
+import WebhookSettings from './pages/WebhookSettings'
+import SynergyMatch from './pages/SynergyMatch'
+import DashboardCustomize from './pages/DashboardCustomize'
+import AiFeedbackPage from './pages/AiFeedbackPage'
+import WorkflowBuilder from './pages/WorkflowBuilder'
+import FinancialStatements from './pages/FinancialStatements'
+import Permissions from './pages/Permissions'
+import Messenger from './pages/Messenger'
+import NotificationCenterPage from './pages/NotificationCenterPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -47,7 +64,13 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 export default function App() {
   const theme = useAppStore((s) => s.theme)
   const token = useAuthStore((s) => s.token)
+  const setGroupConfig = useGroupStore((s) => s.setConfig)
   useEffect(() => { if (token) startHealthPoller() }, [token])
+  useEffect(() => {
+    if (token) {
+      groupSettingsApi.get().then((r) => setGroupConfig(r.data)).catch(() => {})
+    }
+  }, [token])
   useEffect(() => {
     if (theme === 'light') {
       document.documentElement.classList.add('light')
@@ -57,6 +80,7 @@ export default function App() {
   }, [theme])
 
   return (
+    <ErrorBoundary>
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -96,9 +120,25 @@ export default function App() {
           <Route path="data-analytics" element={<DataAnalytics />} />
           <Route path="insights" element={<InsightsDashboard />} />
           <Route path="competitors" element={<Competitors />} />
+          <Route path="agent-performance" element={<AgentPerformance />} />
+          <Route path="cost-analytics" element={<CostAnalytics />} />
+          <Route path="delegation" element={<DelegationChain />} />
+          <Route path="kpi-scoreboard" element={<KpiScoreboard />} />
+          <Route path="agent-personality" element={<AgentPersonalityPage />} />
+          <Route path="data-feeds" element={<DataFeedsPage />} />
+          <Route path="webhook-settings" element={<WebhookSettings />} />
+          <Route path="synergy-match" element={<SynergyMatch />} />
+          <Route path="dashboard-customize" element={<DashboardCustomize />} />
+          <Route path="ai-feedback" element={<AiFeedbackPage />} />
+          <Route path="workflow-builder" element={<WorkflowBuilder />} />
+          <Route path="financial" element={<FinancialStatements />} />
+          <Route path="permissions" element={<Permissions />} />
+          <Route path="messenger" element={<Messenger />} />
+          <Route path="notifications" element={<NotificationCenterPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>
     </BrowserRouter>
+    </ErrorBoundary>
   )
 }

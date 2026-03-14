@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { chatApi, companiesApi } from '../api/client'
 import WorkFeed from '../components/WorkFeed'
-import { useAppStore, useAuthStore } from '../store/useStore'
+import { useAppStore, useAuthStore, useGroupStore } from '../store/useStore'
 import { format } from 'date-fns'
 
 const POLL_INTERVAL = 30 // seconds
@@ -170,6 +170,7 @@ export default function GroupHome() {
     navigate('/chairman', { state: { prefillInput: action.action } })
   }
 
+  const groupNameKo = useGroupStore((s) => s.config.group_name_ko)
   const now = new Date()
 
   return (
@@ -181,7 +182,7 @@ export default function GroupHome() {
             {format(now, 'yyyy년 MM월 dd일 (EEE)')}
           </div>
           <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-            <span>👔</span> 한그룹 회장실
+            <span>👔</span> {groupNameKo} 회장실
           </h1>
           <p className="text-xs text-slate-500 mt-1">그룹 전체 현황을 한눈에 확인하세요</p>
         </div>

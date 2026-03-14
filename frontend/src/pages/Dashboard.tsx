@@ -3,12 +3,14 @@ import { Link } from 'react-router-dom'
 import {
   Building2, Users, CheckSquare, Brain, FlaskConical,
   Map, TrendingUp, MessageSquare, ArrowRight, Zap, Activity,
-  Cpu, Thermometer, AlertTriangle, X, RefreshCw,
+  Cpu, Thermometer, AlertTriangle, X, RefreshCw, Radio,
 } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts'
 import { dashboardApi, approvalsApi, companiesApi, healthApi, videoApi } from '../api/client'
+import { useGroupStore, useAuthStore } from '../store/useStore'
+import { useT } from '../i18n'
 import type { DashboardStats, ApprovalRequest, Company } from '../types'
 
 interface GpuStatus {
@@ -59,6 +61,9 @@ const HEALTH_CONFIG = {
 }
 
 export default function Dashboard() {
+  const groupName = useGroupStore((s) => s.config.group_name)
+  const token = useAuthStore((s) => s.token)
+  const t = useT()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [pending, setPending] = useState<ApprovalRequest[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
@@ -67,14 +72,39 @@ export default function Dashboard() {
   const [gpuHistory, setGpuHistory] = useState<GpuPoint[]>([])
   const [fallbackEvents, setFallbackEvents] = useState<FallbackEvent[]>([])
   const [dismissedFallbacks, setDismissedFallbacks] = useState<Set<string>>(new Set())
+  const [wsEvents, setWsEvents] = useState<Array<{ type: string; title?: string; count?: number; ts: string }>>([])
+  const [wsConnected, setWsConnected] = useState(false)
   const gpuPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const fallbackPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+
+  const refreshData = () => {
+    dashboardApi.stats().then((r) => setStats(r.data)).catch(() => {})
+    approvalsApi.inbox().then((r) => setPending(r.data.slice(0, 5))).catch(() => {})
+    companiesApi.list().then((r) => setCompanies(r.data.slice(0, 6))).catch(() => {})
+    healthApi.scores().then((r) => setHealthScores(r.data.slice(0, 6))).catch(() => {})
+  }
 
   useEffect(() => {
-    dashboardApi.stats().then((r) => setStats(r.data))
-    approvalsApi.inbox().then((r) => setPending(r.data.slice(0, 5)))
-    companiesApi.list().then((r) => setCompanies(r.data.slice(0, 6)))
-    healthApi.scores().then((r) => setHealthScores(r.data.slice(0, 6))).catch(() => {})
+    refreshData()
+
+    // WebSocket 실시간 알림 연결
+    const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = `${wsProto}//${window.location.host}/ws/notifications?token=${token || ''}`
+    const ws = new WebSocket(wsUrl)
+    wsRef.current = ws
+    ws.onopen = () => setWsConnected(true)
+    ws.onclose = () => setWsConnected(false)
+    ws.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data)
+        setWsEvents((prev) => [{ ...data, ts: new Date().toISOString() }, ...prev].slice(0, 20))
+        // 승인/알림 이벤트 시 자동 갱신
+        if (data.type === 'notification' || data.type === 'unread_count') {
+          refreshData()
+        }
+      } catch { /* ignore */ }
+    }
 
     // GPU 상태 폴링 (5초)
     const fetchGpu = () => videoApi.gpuStatus().then((r) => setGpuStatus(r.data)).catch(() => {})
@@ -97,6 +127,7 @@ export default function Dashboard() {
       if (gpuPollRef.current) clearInterval(gpuPollRef.current)
       if (fallbackPollRef.current) clearInterval(fallbackPollRef.current)
       clearInterval(historyIv)
+      ws.close()
     }
   }, [])
 
@@ -107,7 +138,16 @@ export default function Dashboard() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Zap size={16} className="text-brand-light" />
-            <span className="text-xs text-brand-light font-medium">HAN Group OS v27</span>
+            <span className="text-xs text-brand-light font-medium">{groupName} OS v30</span>
+            <span
+              className="text-[9px] px-1.5 py-0.5 rounded-full flex items-center gap-1"
+              style={wsConnected
+                ? { background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.3)' }
+                : { background: 'rgba(148,163,184,0.1)', color: '#94a3b8' }}
+            >
+              <Radio size={8} />
+              {wsConnected ? 'LIVE' : 'OFFLINE'}
+            </span>
           </div>
           <h2 className="text-xl font-bold text-slate-100">AI 기업 생태계에 오신 것을 환영합니다</h2>
           <p className="text-slate-400 text-sm mt-1">
@@ -123,14 +163,14 @@ export default function Dashboard() {
       {/* Stats */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard icon={Building2} label="전체 계열사" value={stats.total_companies} color="bg-brand/15 text-brand-light" to="/companies" />
-          <StatCard icon={Users} label="AI 조직원" value={stats.total_org_nodes} color="bg-accent/15 text-accent" to="/live-office" />
-          <StatCard icon={CheckSquare} label="승인 대기" value={stats.pending_approvals} color="bg-warning/15 text-warning" to="/approvals" />
-          <StatCard icon={Brain} label="기업 기억" value={stats.total_memories} color="bg-purple-400/15 text-purple-400" to="/memory" />
-          <StatCard icon={FlaskConical} label="시뮬레이션" value={stats.recent_simulations} color="bg-pink-400/15 text-pink-400" to="/simulation" />
-          <StatCard icon={Map} label="전략 항목" value={stats.total_strategies} color="bg-success/15 text-success" to="/strategy" />
-          <StatCard icon={Users} label="오픈 회의" value={stats.open_meetings} color="bg-orange-400/15 text-orange-400" to="/meetings" />
-          <StatCard icon={Building2} label="활성 계열사" value={stats.active_companies} color="bg-teal-400/15 text-teal-400" to="/companies" />
+          <StatCard icon={Building2} label={t('dashboard.totalCompanies')} value={stats.total_companies} color="bg-brand/15 text-brand-light" to="/companies" />
+          <StatCard icon={Users} label={t('dashboard.aiMembers')} value={stats.total_org_nodes} color="bg-accent/15 text-accent" to="/live-office" />
+          <StatCard icon={CheckSquare} label={t('dashboard.pendingApprovals')} value={stats.pending_approvals} color="bg-warning/15 text-warning" to="/approvals" />
+          <StatCard icon={Brain} label={t('dashboard.corporateMemory')} value={stats.total_memories} color="bg-purple-400/15 text-purple-400" to="/memory" />
+          <StatCard icon={FlaskConical} label={t('dashboard.simulations')} value={stats.recent_simulations} color="bg-pink-400/15 text-pink-400" to="/simulation" />
+          <StatCard icon={Map} label={t('dashboard.strategyItems')} value={stats.total_strategies} color="bg-success/15 text-success" to="/strategy" />
+          <StatCard icon={Users} label={t('dashboard.openMeetings')} value={stats.open_meetings} color="bg-orange-400/15 text-orange-400" to="/meetings" />
+          <StatCard icon={Building2} label={t('dashboard.activeCompanies')} value={stats.active_companies} color="bg-teal-400/15 text-teal-400" to="/companies" />
         </div>
       )}
 

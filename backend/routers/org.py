@@ -23,13 +23,15 @@ router = APIRouter(prefix="/api/org", tags=["org"])
 @router.get("/nodes", response_model=List[OrgNodeOut])
 def list_nodes(
     company_id: Optional[int] = None,
+    limit: int = 500,
+    offset: int = 0,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     q = db.query(OrgNode)
     if company_id is not None:
         q = q.filter(OrgNode.company_id == company_id)
-    return q.all()
+    return q.offset(offset).limit(min(limit, 1000)).all()
 
 
 @router.post("/nodes", response_model=OrgNodeOut)

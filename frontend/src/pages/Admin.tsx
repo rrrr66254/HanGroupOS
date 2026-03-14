@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Settings, Key, Cpu, Check, X, Trash2, Plus, Globe, FlaskConical, Loader2, Webhook, Copy, HardDrive, Download, Star, Zap, XCircle, Terminal } from 'lucide-react'
-import { modelsApi, externalKeyApi, webhooksApi, videoApi } from '../api/client'
-import { useAuthStore } from '../store/useStore'
+import { modelsApi, externalKeyApi, webhooksApi, videoApi, groupSettingsApi } from '../api/client'
+import { useAuthStore, useGroupStore } from '../store/useStore'
+import { useT } from '../i18n'
 import type { ModelCatalog, ProviderConfig } from '../types'
 
 interface OllamaModel {
@@ -45,10 +46,11 @@ const PROVIDER_INFO: Record<string, { label: string; color: string; description:
   mock: { label: 'Mock AI', color: 'text-slate-400', description: 'API 없이 테스트 가능' },
 }
 
-const VALID_TABS = ['providers', 'catalog', 'external-keys', 'webhooks', 'ollama', 'gpu-log', 'system'] as const
+const VALID_TABS = ['providers', 'catalog', 'external-keys', 'webhooks', 'ollama', 'gpu-log', 'group', 'system'] as const
 type AdminTab = typeof VALID_TABS[number]
 
 export default function Admin() {
+  const t = useT()
   const [searchParams] = useSearchParams()
   const [catalog, setCatalog] = useState<ModelCatalog[]>([])
   const [providers, setProviders] = useState<ProviderConfig[]>([])
@@ -77,6 +79,13 @@ export default function Admin() {
   const [copied, setCopied] = useState(false)
 
   const token = useAuthStore((s) => s.token)
+
+  // 그룹 설정
+  const groupConfig = useGroupStore((s) => s.config)
+  const setGroupConfig = useGroupStore((s) => s.setConfig)
+  const [groupForm, setGroupForm] = useState({ group_name: '', group_name_ko: '', slogan: '', slogan_ko: '' })
+  const [groupSaving, setGroupSaving] = useState(false)
+  const [groupSaved, setGroupSaved] = useState(false)
 
   // Ollama 관리
   const [ollamaInfo, setOllamaInfo] = useState<OllamaInfo | null>(null)
@@ -325,16 +334,17 @@ export default function Admin() {
           { id: 'webhooks', label: '웹훅 토큰' },
           { id: 'ollama', label: 'Ollama 모델' },
           { id: 'gpu-log', label: 'GPU 설치 로그' },
+          { id: 'group', labelKey: 'admin.groupSettings' },
           { id: 'system', label: '시스템 정보' },
-        ].map((t) => (
+        ].map((tb) => (
           <button
-            key={t.id}
-            onClick={() => setTab(t.id as typeof tab)}
+            key={tb.id}
+            onClick={() => setTab(tb.id as typeof tab)}
             className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              tab === t.id ? 'bg-brand text-white' : 'text-slate-400 hover:text-slate-200'
+              tab === tb.id ? 'bg-brand text-white' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            {t.label}
+            {'labelKey' in tb ? t((tb as { labelKey: string }).labelKey) : (tb as { label: string }).label}
           </button>
         ))}
       </div>
@@ -727,6 +737,86 @@ export default function Admin() {
         </div>
       )}
 
+      {/* 그룹 설정 탭 */}
+      {tab === 'group' && (() => {
+        // 탭 진입 시 현재 값 로딩
+        if (!groupForm.group_name && groupConfig.group_name) {
+          setGroupForm({ ...groupConfig })
+        }
+        return (
+          <div className="space-y-4">
+            <div className="card p-4">
+              <h3 className="text-xs font-semibold text-slate-300 mb-4 flex items-center gap-2">
+                <Globe size={13} /> {t('admin.groupSettings')}
+              </h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">{t('admin.groupName')}</label>
+                  <input
+                    className="input"
+                    value={groupForm.group_name}
+                    onChange={(e) => setGroupForm((f) => ({ ...f, group_name: e.target.value }))}
+                    placeholder="예: Samsung, LG, MyCompany..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">{t('admin.groupNameKo')}</label>
+                  <input
+                    className="input"
+                    value={groupForm.group_name_ko}
+                    onChange={(e) => setGroupForm((f) => ({ ...f, group_name_ko: e.target.value }))}
+                    placeholder="예: 삼성, LG, 내회사..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">{t('admin.slogan')}</label>
+                  <input
+                    className="input"
+                    value={groupForm.slogan}
+                    onChange={(e) => setGroupForm((f) => ({ ...f, slogan: e.target.value }))}
+                    placeholder="AI Corporate Operating System"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">{t('admin.sloganKo')}</label>
+                  <input
+                    className="input"
+                    value={groupForm.slogan_ko}
+                    onChange={(e) => setGroupForm((f) => ({ ...f, slogan_ko: e.target.value }))}
+                    placeholder="AI 기업 운영 시스템"
+                  />
+                </div>
+                <button
+                  onClick={async () => {
+                    setGroupSaving(true)
+                    try {
+                      const res = await groupSettingsApi.update(groupForm)
+                      setGroupConfig(res.data)
+                      setGroupSaved(true)
+                      setTimeout(() => setGroupSaved(false), 2000)
+                    } catch { /* ignore */ }
+                    setGroupSaving(false)
+                  }}
+                  disabled={groupSaving}
+                  className="btn-primary text-xs px-4 py-2 flex items-center gap-2"
+                >
+                  {groupSaving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                  {groupSaved ? t('admin.saved') : t('save')}
+                </button>
+              </div>
+            </div>
+            <div className="card p-4">
+              <h3 className="text-xs font-semibold text-slate-300 mb-2">{t('admin.preview')}</h3>
+              <div className="bg-bg-elevated rounded-lg p-4 text-center space-y-1">
+                <div className="text-lg font-bold text-slate-100">{groupForm.group_name || 'Group'} OS</div>
+                <div className="text-xs text-slate-500">{groupForm.slogan || 'AI Corporate Operating System'}</div>
+                <div className="text-sm text-slate-400 mt-2">{groupForm.group_name_ko || '그룹'} 회장실</div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {tab === 'system' && (
         <div className="space-y-4">
           <div className="card p-4">
@@ -735,8 +825,8 @@ export default function Admin() {
             </h3>
             <div className="space-y-2">
               {[
-                { label: '버전', value: 'HAN Group OS v29.0.0' },
-                { label: '헌장', value: 'HAN Group Charter v1.0' },
+                { label: '버전', value: `${groupConfig.group_name} OS v30.0.0` },
+                { label: '헌장', value: `${groupConfig.group_name} Charter v1.0` },
                 { label: '백엔드', value: 'FastAPI + SQLite' },
                 { label: '프론트엔드', value: 'React 18 + TypeScript + Tailwind' },
                 { label: 'AI 지원', value: 'Anthropic, OpenAI, Gemini, Ollama, Mock' },

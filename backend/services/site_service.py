@@ -147,7 +147,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <button class="btn-primary" onclick="document.getElementById('contact').scrollIntoView({{behavior:'smooth'}})">무료 상담 신청</button>
       <button class="btn-outline" onclick="document.getElementById('services').scrollIntoView({{behavior:'smooth'}})">서비스 보기</button>
     </div>
-    <div class="ai-badge">⚡ Powered by HAN Group AI OS</div>
+    <div class="ai-badge">⚡ Powered by Group AI OS</div>
   </div>
 </div>
 
@@ -229,7 +229,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <div style="margin-bottom: 0.5rem;">
     <strong style="color: var(--text);">{company_name}</strong> — {industry}
   </div>
-  <div>© 2025 {company_name}. Powered by <span>HAN Group AI OS</span></div>
+  <div>© 2025 {company_name}. Powered by <span>Group AI OS</span></div>
 </footer>
 
 <script>

@@ -3,6 +3,7 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+from sqlalchemy import text as import_text
 from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import init_db, SessionLocal
@@ -15,13 +16,13 @@ logging.getLogger().addHandler(_log_handler)
 logging.getLogger("uvicorn.access").addHandler(_log_handler)
 logging.getLogger("uvicorn.error").addHandler(_log_handler)
 logging.getLogger().setLevel(logging.INFO)
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks, group_settings, agent_metrics, delegation, kpi_scoreboard, agent_personality, data_feeds, webhook_notify, chat_summary, synergy_match, dashboard_layout, ai_feedback, workflow, financial, permissions, news, messenger
 
 
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.VERSION,
-    description="HAN Group AI Corporate Operating System — V27",
+    description="AI Corporate Operating System",
 )
 
 app.add_middleware(
@@ -31,6 +32,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Rate Limiter ─────────────────────────────────────────────────────────────
+from core.rate_limit import RateLimitMiddleware
+app.add_middleware(RateLimitMiddleware)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(auth.router)
@@ -62,11 +67,106 @@ app.include_router(competitors.router)    # 경쟁사 모니터링
 app.include_router(kpi_links.router)      # KPI 데이터 연동
 app.include_router(briefing.router)       # 그룹 주간 브리핑
 app.include_router(webhooks.router)       # 외부 웹훅 수신 API
+app.include_router(group_settings.router) # 그룹 설정 (이름, 슬로건 등)
+app.include_router(agent_metrics.router)  # AI 에이전트 성과 분석
+app.include_router(delegation.router)     # 에이전트 자동 위임 체인
+app.include_router(kpi_scoreboard.router) # KPI 스코어보드 (게이미피케이션)
+app.include_router(agent_personality.router) # 에이전트 성격 커스터마이징
+app.include_router(data_feeds.router)     # 외부 데이터 소스 통합 허브
+app.include_router(webhook_notify.router) # Slack/Discord 웹훅 알림
+app.include_router(chat_summary.router)   # AI 대화 요약 자동 생성
+app.include_router(synergy_match.router)  # 계열사 시너지 매칭
+app.include_router(dashboard_layout.router) # 대시보드 위젯 레이아웃
+app.include_router(ai_feedback.router)    # AI 피드백 루프
+app.include_router(workflow.router)       # AI 워크플로우 빌더
+app.include_router(financial.router)      # 계열사 재무제표 자동 생성
+app.include_router(permissions.router)    # 멀티테넌트 권한 관리
+app.include_router(news.router)           # 뉴스 수집 + AI 브리핑 (NewsAPI/RSS)
+app.include_router(messenger.router)      # 그룹 내부 메신저 (채팅방/메시지)
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok", "version": settings.VERSION, "system": settings.APP_NAME}
+def health(detail: bool = False):
+    """헬스체크 — detail=true 시 DB/AI/외부 API/캐시/Rate Limit 상태 포함."""
+    import time as _time
+
+    result = {
+        "status": "ok",
+        "version": settings.VERSION,
+        "system": settings.APP_NAME,
+        "timestamp": _time.time(),
+    }
+    if not detail:
+        return result
+
+    checks = {}
+
+    # 1) DB 연결 확인
+    try:
+        db = SessionLocal()
+        db.execute(import_text("SELECT 1"))
+        db.close()
+        checks["database"] = {"status": "ok", "type": "sqlite"}
+    except Exception as e:
+        checks["database"] = {"status": "error", "error": str(e)}
+        result["status"] = "degraded"
+
+    # 2) Ollama 확인
+    try:
+        import httpx
+        r = httpx.get(f"{settings.OLLAMA_BASE_URL}/api/tags", timeout=3.0)
+        models = [m["name"] for m in r.json().get("models", [])]
+        checks["ollama"] = {"status": "ok", "models": models[:5], "url": settings.OLLAMA_BASE_URL}
+    except Exception:
+        checks["ollama"] = {"status": "unavailable", "url": settings.OLLAMA_BASE_URL}
+
+    # 3) KTransformers 확인
+    try:
+        import httpx
+        kt_base = settings.KTRANSFORMERS_BASE_URL.rstrip("/")
+        if kt_base.endswith("/v1"):
+            kt_base = kt_base[:-3]
+        r = httpx.get(f"{kt_base}/health", timeout=2.0)
+        checks["ktransformers"] = {"status": "ok" if r.status_code == 200 else "error"}
+    except Exception:
+        checks["ktransformers"] = {"status": "unavailable"}
+
+    # 4) 클라우드 AI 키 설정 여부
+    ai_keys = {}
+    if settings.ANTHROPIC_API_KEY:
+        ai_keys["anthropic"] = "configured"
+    if settings.OPENAI_API_KEY:
+        ai_keys["openai"] = "configured"
+    if settings.GEMINI_API_KEY:
+        ai_keys["gemini"] = "configured"
+    checks["ai_providers"] = ai_keys if ai_keys else {"status": "none_configured"}
+
+    # 5) 외부 API 키 현황 (DB)
+    try:
+        from models.models import ExternalApiKey
+        db = SessionLocal()
+        ext_keys = db.query(ExternalApiKey).filter(ExternalApiKey.is_active == True).all()
+        checks["external_api_keys"] = {k.service: {"label": k.label, "active": True} for k in ext_keys}
+        db.close()
+    except Exception:
+        checks["external_api_keys"] = {"status": "error"}
+
+    # 6) 캐시 상태
+    try:
+        from core.cache import cache_stats
+        checks["cache"] = cache_stats()
+    except Exception:
+        checks["cache"] = {"status": "unavailable"}
+
+    # 7) Rate Limit 상태
+    try:
+        from core.rate_limit import get_rate_limit_stats
+        checks["rate_limit"] = get_rate_limit_stats()
+    except Exception:
+        checks["rate_limit"] = {"status": "unavailable"}
+
+    result["checks"] = checks
+    return result
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
@@ -87,11 +187,11 @@ async def _setup_ws_loop():
     notif_manager.set_loop(asyncio.get_running_loop())
 
 
-# ── WebSocket: 실시간 알림 ─────────────────────────────────────────────────────
+# ── WebSocket: 통합 실시간 허브 ─────────────────────────────────────────────────
 @app.websocket("/ws/notifications")
 async def ws_notifications(ws: WebSocket, token: str = Query("")):
     from core.security import decode_token
-    from models.models import Notification, User as UserModel
+    from models.models import Notification, User as UserModel, ApprovalRequest, TerminalRequest
     from routers.notifications import manager as notif_manager
 
     payload = decode_token(token) if token else None
@@ -100,6 +200,7 @@ async def ws_notifications(ws: WebSocket, token: str = Query("")):
         return
 
     db = SessionLocal()
+    user = None
     try:
         user = db.query(UserModel).filter(UserModel.username == payload.get("sub")).first()
         if not user:
@@ -108,22 +209,65 @@ async def ws_notifications(ws: WebSocket, token: str = Query("")):
 
         await notif_manager.connect(user.id, ws)
 
-        # 연결 즉시 미읽음 수 전송
+        # ── 연결 즉시 초기 상태 일괄 전송 ──
+        # 1) 미읽음 알림 수
         cnt = db.query(Notification).filter(
             (Notification.user_id == user.id) | (Notification.user_id == None),
             Notification.is_read == False,
         ).count()
         await ws.send_json({"type": "unread_count", "count": cnt})
 
+        # 2) 배지 카운트 (승인/터미널)
+        try:
+            pending_approvals = db.query(ApprovalRequest).filter(ApprovalRequest.status == "pending").count()
+            pending_terminals = db.query(TerminalRequest).filter(TerminalRequest.status == "pending").count()
+            await ws.send_json({
+                "type": "badge_update",
+                "approvals": pending_approvals,
+                "terminals": pending_terminals,
+            })
+        except Exception:
+            pass
+
+        # 3) AI 프로바이더 상태
+        try:
+            import httpx
+            ollama_status = "disconnected"
+            ollama_models: list = []
+            try:
+                r = httpx.get(f"{settings.OLLAMA_BASE_URL}/api/tags", timeout=2.0)
+                if r.status_code == 200:
+                    ollama_status = "connected"
+                    ollama_models = [m["name"] for m in r.json().get("models", [])]
+            except Exception:
+                pass
+            await ws.send_json({
+                "type": "provider_status",
+                "ollama": {"status": ollama_status, "models": ollama_models[:5]},
+                "anthropic": {"status": "configured" if settings.ANTHROPIC_API_KEY else "no_api_key"},
+                "openai": {"status": "configured" if settings.OPENAI_API_KEY else "no_api_key"},
+                "gemini": {"status": "configured" if settings.GEMINI_API_KEY else "no_api_key"},
+            })
+        except Exception:
+            pass
+
+        db.close()
+        db = None
+
         try:
             while True:
-                await ws.receive_text()  # 클라이언트 ping 수신용
+                data = await ws.receive_text()
+                # 클라이언트 ping/pong 지원
+                if data == "ping":
+                    await ws.send_json({"type": "pong"})
         except WebSocketDisconnect:
             notif_manager.disconnect(user.id, ws)
     except Exception:
-        notif_manager.disconnect(user.id, ws) if user else None
+        if user:
+            notif_manager.disconnect(user.id, ws)
     finally:
-        db.close()
+        if db:
+            db.close()
 
 
 def _check_ollama():
@@ -214,7 +358,7 @@ def _check_ktransformers():
 def _seed_data():
     from core.security import get_password_hash
     from models.models import (
-        User, Company, OrgNode, ModelCatalog, CorporateMemory, StrategyItem
+        User, Company, OrgNode, ModelCatalog, CorporateMemory, StrategyItem, GroupSettings
     )
     from services.org_service import create_company_org
 
@@ -224,7 +368,7 @@ def _seed_data():
         if not db.query(User).filter(User.username == "admin").first():
             admin = User(
                 username="admin",
-                email="admin@hangroup.ai",
+                email="admin@group.ai",
                 hashed_password=get_password_hash("admin1234"),
                 role="admin",
             )
@@ -232,6 +376,15 @@ def _seed_data():
             db.flush()
 
         admin = db.query(User).filter(User.username == "admin").first()
+
+        # ── Group name helper ─────────────────────────────────────────────────
+        def _gname():
+            row = db.query(GroupSettings).filter(GroupSettings.key == "group_name").first()
+            return row.value if row else "Group"
+
+        def _gname_ko():
+            row = db.query(GroupSettings).filter(GroupSettings.key == "group_name_ko").first()
+            return row.value if row else "그룹"
 
         # ── Model Catalog ─────────────────────────────────────────────────────
         if db.query(ModelCatalog).count() == 0:
@@ -267,15 +420,17 @@ def _seed_data():
 
         # ── Group-level Org (Chairman + Committees) ───────────────────────────
         if db.query(OrgNode).filter(OrgNode.company_id == None).count() == 0:
+            gn = _gname()
+            gn_ko = _gname_ko()
             chairman = OrgNode(
                 company_id=None,
                 name="AI 회장",
-                role="HAN Group Chairman",
+                role=f"{gn} Chairman",
                 level="chairman",
                 parent_id=None,
                 ai_provider="mock",
                 ai_model="claude-opus-4-6",
-                description="한그룹 전략 총괄 AI 회장",
+                description=f"{gn_ko} 전략 총괄 AI 회장",
             )
             db.add(chairman)
             db.flush()
@@ -300,10 +455,11 @@ def _seed_data():
 
         # ── Initial Corporate Memory ──────────────────────────────────────────
         if db.query(CorporateMemory).count() == 0:
+            gn_ko = _gname_ko()
             memories = [
                 CorporateMemory(
-                    title="한그룹 창립 헌장",
-                    content="AI와 인간이 협력하여 새로운 기업 생태계를 만드는 것이 한그룹의 핵심 목표다.",
+                    title=f"{gn_ko} 창립 헌장",
+                    content=f"AI와 인간이 협력하여 새로운 기업 생태계를 만드는 것이 {gn_ko}의 핵심 목표다.",
                     memory_type="fact",
                     importance="critical",
                     tags=["창립", "헌장", "비전"],
@@ -336,7 +492,7 @@ def _seed_data():
                 db.add(s)
 
         db.commit()
-        print(f"✓ HAN Group OS v{settings.VERSION} started. DB seeded.")
+        print(f"✓ Group OS v{settings.VERSION} started. DB seeded.")
 
     except Exception as e:
         db.rollback()
@@ -872,8 +1028,11 @@ def _start_scheduler():
         # 1분마다 GPU 상태 수집 (nvidia-smi 있을 때만 실제 동작)
         from routers.video_gen import _record_gpu_history
         scheduler.add_job(_record_gpu_history, "interval", minutes=1, id="gpu_history")
+        # 10분마다 캐시 만료 항목 정리
+        from core.cache import cache_cleanup
+        scheduler.add_job(cache_cleanup, "interval", minutes=10, id="cache_cleanup")
         scheduler.start()
-        print("✓ 데이터 수집 스케줄러 시작 (뉴스 6h · 경쟁사 주1회 · KPI 6h · GPU 1min)")
+        print("✓ 데이터 수집 스케줄러 시작 (뉴스 6h · 경쟁사 주1회 · KPI 6h · GPU 1min · 캐시정리 10min)")
     except Exception as e:
         print(f"⚠️  스케줄러 시작 실패 (무시): {e}")
 

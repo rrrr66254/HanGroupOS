@@ -1,7 +1,10 @@
 import { useLocation, useNavigate } from 'react-router-dom'
-import { LogOut, User, Bell, Sun, Moon } from 'lucide-react'
-import { useAuthStore, useAppStore } from '../store/useStore'
+import { LogOut, User, Sun, Moon, Globe, Menu, Wifi, WifiOff, RefreshCw } from 'lucide-react'
+import { useState } from 'react'
+import { useAuthStore, useAppStore, useGroupStore } from '../store/useStore'
+import { useI18nStore, LOCALE_LABELS, type Locale } from '../i18n'
 import ProviderStatusBanner from './ProviderStatusBanner'
+import NotificationCenter from './NotificationCenter'
 
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard': '대시보드',
@@ -15,31 +18,128 @@ const PAGE_TITLES: Record<string, string> = {
   '/live-office': 'AI 라이브 오피스',
   '/memory': '기업 기억',
   '/admin': '관리자',
+  '/agent-performance': 'AI 에이전트 성과',
+  '/workflow-builder': 'AI 워크플로우 빌더',
+  '/financial': '재무제표 관리',
+  '/permissions': '권한 관리',
+  '/messenger': '그룹 메신저',
+  '/notifications': '알림 센터',
+}
+
+function WsStatusIndicator() {
+  const wsStatus = useAppStore((s) => s.wsStatus)
+  const wsRetryCount = useAppStore((s) => s.wsRetryCount)
+
+  const handleReconnect = () => {
+    const fn = (window as unknown as Record<string, unknown>).__wsReconnect as (() => void) | undefined
+    if (fn) fn()
+  }
+
+  if (wsStatus === 'connected') {
+    return (
+      <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-400" title="WebSocket 연결됨">
+        <Wifi size={12} />
+        <span className="text-[10px] font-medium">실시간</span>
+      </div>
+    )
+  }
+  if (wsStatus === 'connecting') {
+    return (
+      <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500/10 text-amber-400" title="연결 중...">
+        <RefreshCw size={12} className="animate-spin" />
+        <span className="text-[10px] font-medium">연결 중</span>
+      </div>
+    )
+  }
+  if (wsStatus === 'failed') {
+    return (
+      <button
+        onClick={handleReconnect}
+        className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+        title={`연결 실패 (${wsRetryCount}회 시도) — 클릭하여 재연결`}
+      >
+        <WifiOff size={12} />
+        <span className="text-[10px] font-medium">연결 실패</span>
+      </button>
+    )
+  }
+  // disconnected — reconnecting
+  return (
+    <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500/10 text-amber-400"
+      title={`재연결 중 (${wsRetryCount}/${10})`}>
+      <RefreshCw size={12} className="animate-spin" />
+      <span className="text-[10px] font-medium">재연결 {wsRetryCount}</span>
+    </div>
+  )
 }
 
 export default function Header() {
   const { pathname } = useLocation()
   const { user, logout } = useAuthStore()
   const { theme, toggleTheme } = useAppStore()
+  const groupName = useGroupStore((s) => s.config.group_name)
   const navigate = useNavigate()
+  const { locale, setLocale } = useI18nStore()
+  const [langOpen, setLangOpen] = useState(false)
 
-  const title = PAGE_TITLES[pathname] || 'HAN Group OS'
+  const title = PAGE_TITLES[pathname] || `${groupName} OS`
 
   const handleLogout = () => {
     logout()
     navigate('/login')
   }
 
+  const setMobileSidebarOpen = useAppStore((s) => s.setMobileSidebarOpen)
+
   return (
-    <header className="h-16 flex items-center justify-between px-6 bg-bg-card border-b border-bg-border flex-shrink-0">
-      <div>
-        <h1 className="text-base font-semibold text-slate-100">{title}</h1>
-        <p className="text-xs text-slate-500 font-mono">HAN Group OS v27</p>
+    <header className="h-14 sm:h-16 flex items-center justify-between px-3 sm:px-6 bg-bg-card border-b border-bg-border flex-shrink-0">
+      <div className="flex items-center gap-2">
+        {/* Mobile hamburger */}
+        <button
+          onClick={() => setMobileSidebarOpen(true)}
+          className="md:hidden p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-bg-elevated transition-colors"
+        >
+          <Menu size={20} />
+        </button>
+        <div>
+          <h1 className="text-sm sm:text-base font-semibold text-slate-100">{title}</h1>
+          <p className="text-[10px] sm:text-xs text-slate-500 font-mono hidden sm:block">{groupName} OS v30</p>
+        </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <ProviderStatusBanner />
-        <div className="h-4 w-px bg-bg-border" />
+      <div className="flex items-center gap-1.5 sm:gap-3">
+        {/* WebSocket 연결 상태 표시 */}
+        <WsStatusIndicator />
+        <div className="hidden lg:block"><ProviderStatusBanner /></div>
+        <div className="h-4 w-px bg-bg-border hidden sm:block" />
+
+        {/* 언어 선택 — 작은 화면에서 숨김 */}
+        <div className="relative hidden sm:block">
+          <button
+            onClick={() => setLangOpen(!langOpen)}
+            className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-bg-elevated transition-colors flex items-center gap-1"
+            title="언어 변경"
+          >
+            <Globe size={16} />
+            <span className="text-[10px] font-mono">{locale.toUpperCase()}</span>
+          </button>
+          {langOpen && (
+            <div className="absolute right-0 top-10 bg-bg-card border border-bg-border rounded-lg shadow-xl z-50 py-1 min-w-[100px]">
+              {(Object.keys(LOCALE_LABELS) as Locale[]).map((l) => (
+                <button
+                  key={l}
+                  onClick={() => { setLocale(l); setLangOpen(false) }}
+                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-bg-elevated transition-colors ${
+                    locale === l ? 'text-brand-light font-semibold' : 'text-slate-400'
+                  }`}
+                >
+                  {LOCALE_LABELS[l]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <button
           onClick={toggleTheme}
           className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-bg-elevated transition-colors"
@@ -47,9 +147,7 @@ export default function Header() {
         >
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
         </button>
-        <button className="relative p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-bg-elevated transition-colors">
-          <Bell size={16} />
-        </button>
+        <NotificationCenter />
 
         <div className="flex items-center gap-2 pl-3 border-l border-bg-border">
           <div className="w-8 h-8 bg-brand/20 rounded-full flex items-center justify-center">

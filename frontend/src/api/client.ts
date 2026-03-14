@@ -335,6 +335,9 @@ export const videoApi = {
   deleteJob: (id: number) => api.delete(`/video/jobs/${id}`),
   batchDelete: (ids: number[]) => api.post('/video/jobs/batch-delete', { ids }),
   retryJob: (id: number) => api.post(`/video/jobs/${id}/retry`),
+  cancelJob: (id: number) => api.post(`/video/jobs/${id}/cancel`),
+  localGpuTest: () => api.post('/video/local-gpu/test'),
+  localGpuDownload: (modelId: string) => api.post('/video/local-gpu/download', { model_id: modelId }),
   modelStatus: (modelId: string) => api.get('/video/models/status', { params: { model_id: modelId } }),
   uploadImage: (file: File) => {
     const form = new FormData()
@@ -455,6 +458,97 @@ export const policyApi = {
   sourceStatus: () => api.get('/data/source-status'),
 }
 
+// ── Group Settings ───────────────────────────────────────────────────────────
+export const groupSettingsApi = {
+  get: () => api.get('/group-settings'),
+  update: (data: { group_name?: string; group_name_ko?: string; slogan?: string; slogan_ko?: string }) =>
+    api.patch('/group-settings', data),
+}
+
+// ── Agent Metrics ────────────────────────────────────────────────────────────
+export const agentMetricsApi = {
+  summary: (days = 7, companyId?: number) =>
+    api.get('/agent-metrics/summary', { params: { days, company_id: companyId } }),
+  recent: (limit = 50, companyId?: number) =>
+    api.get('/agent-metrics/recent', { params: { limit, company_id: companyId } }),
+  costSummary: (days = 30, companyId?: number) =>
+    api.get('/agent-metrics/cost-summary', { params: { days, company_id: companyId } }),
+  pricing: () => api.get('/agent-metrics/pricing'),
+}
+
+// ── Delegation Chain ──────────────────────────────────────────────────────────
+export const delegationApi = {
+  run: (question: string, companyId: number) =>
+    api.post('/delegation/run', { question, company_id: companyId }),
+  detect: (question: string, companyId: number) =>
+    api.post('/delegation/detect', { question, company_id: companyId }),
+}
+
+// ── KPI Scoreboard ───────────────────────────────────────────────────────────
+export const kpiScoreboardApi = {
+  ranking: () => api.get('/kpi-scoreboard/ranking'),
+  companyKpis: (companyId: number) => api.get(`/kpi-scoreboard/company/${companyId}`),
+  upsertKpi: (data: { company_id: number; metric_name: string; metric_label?: string; value: number; target?: number; unit?: string }) =>
+    api.post('/kpi-scoreboard/kpi', data),
+}
+
+// ── Agent Personality ────────────────────────────────────────────────────────
+export const agentPersonalityApi = {
+  presets: () => api.get('/agent-personality/presets'),
+  get: (nodeId: number) => api.get(`/agent-personality/node/${nodeId}`),
+  update: (nodeId: number, data: Record<string, unknown>) => api.put(`/agent-personality/node/${nodeId}`, data),
+  company: (companyId: number) => api.get(`/agent-personality/company/${companyId}`),
+}
+
+// ── Data Feeds ───────────────────────────────────────────────────────────────
+export const dataFeedsApi = {
+  types: () => api.get('/data-feeds/types'),
+  list: () => api.get('/data-feeds'),
+  create: (data: { name: string; feed_type: string; url?: string; config?: string; interval_minutes?: number }) =>
+    api.post('/data-feeds', data),
+  update: (id: number, data: Record<string, unknown>) => api.put(`/data-feeds/${id}`, data),
+  delete: (id: number) => api.delete(`/data-feeds/${id}`),
+  collect: (id: number) => api.post(`/data-feeds/${id}/collect`),
+  data: (id: number, limit?: number) => api.get(`/data-feeds/${id}/data`, { params: { limit } }),
+  contextData: () => api.get('/data-feeds/context-data'),
+}
+
+// ── Webhook Notify ───────────────────────────────────────────────────────────
+export const webhookNotifyApi = {
+  getConfig: () => api.get('/webhook-notify/config'),
+  updateConfig: (data: Record<string, unknown>) => api.put('/webhook-notify/config', data),
+  test: (target: string) => api.post('/webhook-notify/test', { target }),
+}
+
+// ── Chat Summary ─────────────────────────────────────────────────────────────
+export const chatSummaryApi = {
+  auto: (days?: number) => api.post('/chat-summary/auto', null, { params: { days } }),
+  session: (sessionId: number) => api.get(`/chat-summary/session/${sessionId}`),
+}
+
+// ── Synergy Match ────────────────────────────────────────────────────────────
+export const synergyMatchApi = {
+  opportunities: () => api.get('/synergy-match/opportunities'),
+  aiAnalyze: () => api.post('/synergy-match/ai-analyze'),
+}
+
+// ── Dashboard Layout ─────────────────────────────────────────────────────────
+export const dashboardLayoutApi = {
+  get: () => api.get('/dashboard-layout'),
+  save: (layout: unknown[]) => api.put('/dashboard-layout', { layout }),
+  reset: () => api.delete('/dashboard-layout'),
+  widgets: () => api.get('/dashboard-layout/widgets'),
+}
+
+// ── AI Feedback ──────────────────────────────────────────────────────────────
+export const aiFeedbackApi = {
+  submit: (data: { message_id: number; session_id?: number; rating: number; comment?: string; agent_name?: string }) =>
+    api.post('/ai-feedback', data),
+  stats: (agentName?: string) => api.get('/ai-feedback/stats', { params: { agent_name: agentName } }),
+  message: (messageId: number) => api.get(`/ai-feedback/message/${messageId}`),
+  recent: (limit?: number) => api.get('/ai-feedback/recent', { params: { limit } }),
+}
+
 // ── Document Generator ────────────────────────────────────────────────────────
 export const docsApi = {
   businessPlan: (companyId: number) => api.post(`/docs/business-plan/${companyId}`),
@@ -462,4 +556,71 @@ export const docsApi = {
   ir: (companyId: number) => api.get(`/docs/ir/${companyId}`),
   weeklyReport: (companyId: number) => api.post(`/work/weekly-report/${companyId}`),
   types: () => api.get('/docs/types'),
+}
+
+// ── Workflow Builder ─────────────────────────────────────────────────────────
+export const workflowApi = {
+  list: (companyId?: number, status?: string) =>
+    api.get('/workflows', { params: { company_id: companyId, status } }),
+  get: (id: number) => api.get(`/workflows/${id}`),
+  create: (data: object) => api.post('/workflows', data),
+  update: (id: number, data: object) => api.patch(`/workflows/${id}`, data),
+  delete: (id: number) => api.delete(`/workflows/${id}`),
+  execute: (id: number, inputData?: object) =>
+    api.post(`/workflows/${id}/execute`, { input_data: inputData || {} }),
+  history: (id: number, limit?: number) =>
+    api.get(`/workflows/${id}/history`, { params: { limit } }),
+  nodeTypes: () => api.get('/workflows/node-types'),
+}
+
+// ── Financial Statements ─────────────────────────────────────────────────────
+export const financialApi = {
+  list: (companyId?: number, statementType?: string) =>
+    api.get('/financial', { params: { company_id: companyId, statement_type: statementType } }),
+  get: (id: number) => api.get(`/financial/${id}`),
+  create: (data: object) => api.post('/financial', data),
+  update: (id: number, data: object) => api.patch(`/financial/${id}`, data),
+  delete: (id: number) => api.delete(`/financial/${id}`),
+  analyze: (id: number) => api.post(`/financial/${id}/analyze`),
+  companyReport: (companyId: number) => api.post(`/financial/company/${companyId}/report`),
+  companySummary: (companyId: number) => api.get(`/financial/company/${companyId}/summary`),
+  exchangeRates: (base?: string, symbols?: string) =>
+    api.get('/financial/exchange-rates', { params: { base, symbols } }),
+  exchangeHistory: (base?: string, symbols?: string, days?: number) =>
+    api.get('/financial/exchange-history', { params: { base, symbols, days } }),
+  convert: (amount: number, from: string, to: string) =>
+    api.post('/financial/convert', { amount, from, to }),
+}
+
+// ── Permissions (Multi-tenant) ───────────────────────────────────────────────
+export const permissionsApi = {
+  list: () => api.get('/permissions'),
+  my: () => api.get('/permissions/my'),
+  grant: (data: { user_id: number; company_id: number; role: string }) =>
+    api.post('/permissions/grant', data),
+  revoke: (id: number) => api.delete(`/permissions/${id}`),
+  update: (id: number, data: { role: string }) => api.patch(`/permissions/${id}`, data),
+  company: (companyId: number) => api.get(`/permissions/company/${companyId}`),
+  check: (companyId: number) => api.get(`/permissions/company/${companyId}/check`),
+  users: () => api.get('/permissions/users'),
+}
+
+// ── Messenger ────────────────────────────────────────────────────────────────
+export const messengerApi = {
+  listRooms: () => api.get('/messenger/rooms'),
+  createRoom: (data: { name: string; description?: string; room_type?: string; company_id?: number; member_ids?: number[] }) =>
+    api.post('/messenger/rooms', data),
+  getRoom: (roomId: number) => api.get(`/messenger/rooms/${roomId}`),
+  deleteRoom: (roomId: number) => api.delete(`/messenger/rooms/${roomId}`),
+  addMember: (roomId: number, data: { user_id: number; role?: string }) =>
+    api.post(`/messenger/rooms/${roomId}/members`, data),
+  removeMember: (roomId: number, userId: number) =>
+    api.delete(`/messenger/rooms/${roomId}/members/${userId}`),
+  listMessages: (roomId: number, limit?: number, beforeId?: number) =>
+    api.get(`/messenger/rooms/${roomId}/messages`, { params: { limit, before_id: beforeId } }),
+  sendMessage: (roomId: number, data: { content: string; message_type?: string; reply_to?: number }) =>
+    api.post(`/messenger/rooms/${roomId}/messages`, data),
+  listUsers: () => api.get('/messenger/users'),
+  markRead: (roomId: number) => api.post(`/messenger/rooms/${roomId}/read`),
+  readStatus: (roomId: number) => api.get(`/messenger/rooms/${roomId}/read-status`),
 }

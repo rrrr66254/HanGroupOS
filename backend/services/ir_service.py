@@ -221,7 +221,7 @@ JSON 형식:
         "investment_points": [
             {"title": "AI 퍼스트", "desc": "전 조직원이 AI로 운영"},
             {"title": "빠른 성장", "desc": "30일 업무 사이클 " + str(cycles) + "회 달성"},
-            {"title": "검증된 팀", "desc": "한그룹 계열사 네트워크"},
+            {"title": "검증된 팀", "desc": "그룹 계열사 네트워크"},
         ],
         "contact": f"{company.name} 투자 문의: ir@{company.name.lower().replace(' ', '')}.ai",
         "ai_features": ["24시간 자율 업무 실행", "AI CEO 전략 지휘", "실시간 성과 분석", "계열사 시너지 연동"],
@@ -275,5 +275,5 @@ JSON 형식:
         short_term=short_term_html,
         long_term=long_term_html,
         investment_points=invest_html,
-        contact=content.get("contact", "ir@hangroup.ai"),
+        contact=content.get("contact", "ir@group.ai"),
     )

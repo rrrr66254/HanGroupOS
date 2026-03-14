@@ -11,6 +11,9 @@ from typing import Optional, List, Dict
 from datetime import datetime
 from pathlib import Path
 import os
+from core.logging import get_logger
+
+logger = get_logger("router.video_gen")
 
 # ── 공유 리소스 잠금 ──────────────────────────────────────────────────────────
 # 영상 생성(diffusers)과 Ollama pull이 동시에 실행되지 않도록 직렬화합니다.
@@ -29,6 +32,36 @@ _PULL_SUBSCRIBERS: Dict[str, list] = {}  # model → [asyncio.Queue, ...] (WS �
 _PULL_EVENT_LOOP = None                  # pull 워커 스레드에서 asyncio 전송용
 _PULL_CANCEL_FLAGS: Dict[str, bool] = {} # model → True이면 취소 요청됨
 
+# ── 영상 생성 취소 플래그 ────────────────────────────────────────────────────
+_VIDEO_CANCEL_FLAGS: Dict[int, bool] = {}  # job_id → True이면 취소 요청됨
+
+
+def _check_video_cancel(job_id: int) -> bool:
+    """영상 생성 취소 플래그 확인."""
+    return _VIDEO_CANCEL_FLAGS.get(job_id, False)
+
+
+def _cancel_video_job(job_id: int, db_session=None):
+    """영상 생성 취소 처리 — DB 상태 업데이트 + 알림."""
+    if db_session is None:
+        from core.database import SessionLocal
+        db_session = SessionLocal()
+        should_close = True
+    else:
+        should_close = False
+    try:
+        job = db_session.query(VideoJob).filter(VideoJob.id == job_id).first()
+        if job and job.status in ("pending", "running"):
+            job.status = "failed"
+            job.error_msg = "사용자에 의해 취소되었습니다."
+            job.finished_at = datetime.utcnow()
+            db_session.commit()
+        video_progress.done_sync(job_id, "cancelled")
+    finally:
+        _VIDEO_CANCEL_FLAGS.pop(job_id, None)
+        if should_close:
+            db_session.close()
+
 
 def _broadcast_pull(model: str, data: dict) -> None:
     """Pull 진행 상태를 _PULL_PROGRESS에 저장하고 모든 WS 구독자에게 전송."""
@@ -39,8 +72,8 @@ def _broadcast_pull(model: str, data: dict) -> None:
     for q in list(_PULL_SUBSCRIBERS.get(model, [])):
         try:
             asyncio.run_coroutine_threadsafe(q.put(data), loop)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("WS broadcast 실패: %s", e)
 
 
 def _pull_worker(model: str) -> None:
@@ -106,7 +139,8 @@ def _pull_worker(model: str) -> None:
                     continue
                 try:
                     data = _json.loads(line)
-                except Exception:
+                except Exception as e:
+                    logger.debug("Pull JSON 파싱 실패: %s", e)
                     continue
                 status_str = data.get("status", "")
                 completed = data.get("completed", 0)
@@ -144,8 +178,8 @@ def _ollama_unload(base_url: str = "http://localhost:11434") -> None:
             json={"model": model, "keep_alive": 0},
             timeout=5.0,
         )
-    except Exception:
-        pass  # Ollama 미실행 시 무시
+    except Exception as e:
+        logger.debug("Ollama 미실행: %s", e)
 
 
 def _ollama_warmup(base_url: str = "http://localhost:11434") -> None:
@@ -162,8 +196,8 @@ def _ollama_warmup(base_url: str = "http://localhost:11434") -> None:
             json={"model": model, "keep_alive": 300, "prompt": ""},
             timeout=30.0,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Ollama warmup 실패: %s", e)
 
 
 def _get_free_vram_gb() -> float:
@@ -175,7 +209,8 @@ def _get_free_vram_gb() -> float:
             timeout=5,
         ).decode().strip().splitlines()[0]
         return int(out.strip()) / 1024
-    except Exception:
+    except Exception as e:
+        logger.debug("VRAM 조회 실패: %s", e)
         return 0.0
 
 from core.database import get_db
@@ -206,13 +241,18 @@ class VideoProgressManager:
         conns = self.connections.get(job_id, [])
         if ws in conns:
             conns.remove(ws)
+        # 모든 클라이언트가 떠나면 자동 취소 (진행 중인 경우만)
+        if not conns and job_id in _VIDEO_CANCEL_FLAGS and not _VIDEO_CANCEL_FLAGS.get(job_id, True):
+            logger.info("모든 WS 클라이언트 연결 끊김 — 영상 생성 자동 취소: job_id=%d", job_id)
+            _VIDEO_CANCEL_FLAGS[job_id] = True
 
     async def _broadcast(self, job_id: int, data: dict):
         dead = []
         for ws in list(self.connections.get(job_id, [])):
             try:
                 await ws.send_json(data)
-            except Exception:
+            except Exception as e:
+                logger.debug("WS dead connection: %s", e)
                 dead.append(ws)
         for ws in dead:
             self.disconnect(job_id, ws)
@@ -225,8 +265,8 @@ class VideoProgressManager:
             return
         try:
             asyncio.run_coroutine_threadsafe(self._broadcast(job_id, data), self._loop)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("WS notify_sync 실패: %s", e)
 
     def done_sync(self, job_id: int, status: str):
         """완료/실패 알림 전송."""
@@ -236,8 +276,8 @@ class VideoProgressManager:
             return
         try:
             asyncio.run_coroutine_threadsafe(self._broadcast(job_id, data), self._loop)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("WS done_sync 실패: %s", e)
 
 
 video_progress = VideoProgressManager()
@@ -335,31 +375,22 @@ SUPPORTED_MODELS = [
 
 def _get_hf_token(db: Session) -> Optional[str]:
     """ExternalApiKey에서 HuggingFace 토큰 조회."""
-    row = (
-        db.query(ExternalApiKey)
-        .filter(ExternalApiKey.service == "huggingface", ExternalApiKey.is_active == True)
-        .first()
-    )
+    from core.utils import get_active_api_key
+    row = get_active_api_key(db, "huggingface")
     return row.api_key if row else None
 
 
 def _get_fal_key(db: Session) -> Optional[str]:
     """ExternalApiKey에서 FAL-AI API 키 조회."""
-    row = (
-        db.query(ExternalApiKey)
-        .filter(ExternalApiKey.service == "fal-ai", ExternalApiKey.is_active == True)
-        .first()
-    )
+    from core.utils import get_active_api_key
+    row = get_active_api_key(db, "fal-ai")
     return row.api_key if row else None
 
 
 def _get_json2video_key(db: Session) -> Optional[str]:
     """ExternalApiKey에서 JSON2Video API 키 조회."""
-    row = (
-        db.query(ExternalApiKey)
-        .filter(ExternalApiKey.service == "json2video", ExternalApiKey.is_active == True)
-        .first()
-    )
+    from core.utils import get_active_api_key
+    row = get_active_api_key(db, "json2video")
     return row.api_key if row else None
 
 
@@ -418,10 +449,16 @@ def _run_fal_generation(job_id: int, fal_key: str):
     import os
     from core.database import SessionLocal
 
+    _VIDEO_CANCEL_FLAGS[job_id] = False
+
     db = SessionLocal()
     try:
         job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
         if not job:
+            return
+
+        if _check_video_cancel(job_id):
+            _cancel_video_job(job_id, db)
             return
 
         job.status = "running"
@@ -440,8 +477,12 @@ def _run_fal_generation(job_id: int, fal_key: str):
             os.environ["FAL_KEY"] = fal_key
 
             _progress_step = [10]  # mutable counter for closure
+            _fal_cancelled = [False]
 
             def on_queue_update(update):
+                if _check_video_cancel(job_id):
+                    _fal_cancelled[0] = True
+                    return
                 if isinstance(update, fal_client.InProgress):
                     logs = getattr(update, "logs", []) or []
                     if logs:
@@ -465,6 +506,10 @@ def _run_fal_generation(job_id: int, fal_key: str):
                 with_logs=True,
                 on_queue_update=on_queue_update,
             )
+
+            if _fal_cancelled[0] or _check_video_cancel(job_id):
+                _cancel_video_job(job_id, db)
+                return
 
             video_progress.notify_sync(job_id, 90, "영상 URL 확인 중...")
 
@@ -516,10 +561,16 @@ def _run_generation(job_id: int, token: str):
     """백그라운드 영상 생성 실행."""
     from core.database import SessionLocal
 
+    _VIDEO_CANCEL_FLAGS[job_id] = False
+
     db = SessionLocal()
     try:
         job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
         if not job:
+            return
+
+        if _check_video_cancel(job_id):
+            _cancel_video_job(job_id, db)
             return
 
         job.status = "running"
@@ -540,6 +591,11 @@ def _run_generation(job_id: int, token: str):
 
             video_progress.notify_sync(job_id, 20, "영상 생성 중 (콜드 스타트 시 최대 3~5분)...")
             video_bytes = client.text_to_video(job.prompt, model=job.model_id, **kwargs)
+
+            if _check_video_cancel(job_id):
+                _cancel_video_job(job_id, db)
+                return
+
             video_progress.notify_sync(job_id, 85, "영상 저장 중...")
 
             # 파일 저장 (bytes 또는 file-like 모두 처리)
@@ -594,6 +650,8 @@ def _run_local_gpu_generation(job_id: int):
     """로컬 GPU (diffusers)로 영상 생성 — RTX 5070 Ti / CUDA."""
     from core.database import SessionLocal
 
+    _VIDEO_CANCEL_FLAGS[job_id] = False
+
     # ── GPU 직렬 큐잉: 다른 GPU 작업이 끝날 때까지 대기 ─────────────────────
     with _GPU_LOCK_MUTEX:
         _GPU_JOB_QUEUE.append(job_id)
@@ -608,8 +666,18 @@ def _run_local_gpu_generation(job_id: int):
         finally:
             db_q.close()
 
-    # 이전 GPU 작업이 완료될 때까지 블로킹
-    _GPU_LOCK.acquire()
+    # 이전 GPU 작업이 완료될 때까지 블로킹 (취소 확인 포함)
+    while True:
+        if _check_video_cancel(job_id):
+            with _GPU_LOCK_MUTEX:
+                if job_id in _GPU_JOB_QUEUE:
+                    _GPU_JOB_QUEUE.remove(job_id)
+            _cancel_video_job(job_id)
+            return
+        acquired = _GPU_LOCK.acquire(timeout=1.0)
+        if acquired:
+            break
+
     with _GPU_LOCK_MUTEX:
         if job_id in _GPU_JOB_QUEUE:
             _GPU_JOB_QUEUE.remove(job_id)
@@ -619,6 +687,11 @@ def _run_local_gpu_generation(job_id: int):
     try:
         job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
         if not job:
+            _GPU_LOCK.release()
+            return
+
+        if _check_video_cancel(job_id):
+            _cancel_video_job(job_id, db)
             _GPU_LOCK.release()
             return
 
@@ -715,6 +788,8 @@ def _run_local_gpu_generation(job_id: int):
             step_total = [num_steps]
 
             def progress_cb(pipe_obj, step_idx, timestep, callback_kwargs):
+                if _check_video_cancel(job_id):
+                    raise RuntimeError("__VIDEO_CANCELLED__")
                 pct = 20 + int((step_idx / step_total[0]) * 65)
                 video_progress.notify_sync(job_id, pct, f"추론 중... {step_idx}/{step_total[0]} 스텝")
                 return callback_kwargs
@@ -758,6 +833,16 @@ def _run_local_gpu_generation(job_id: int):
             )
             video_progress.done_sync(job_id, "failed")
         except Exception as e:
+            if "__VIDEO_CANCELLED__" in str(e):
+                _cancel_video_job(job_id, db)
+                try:
+                    import torch
+                    del pipe
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                threading.Thread(target=_ollama_warmup, daemon=True).start()
+                return
             job.status = "failed"
             job.error_msg = str(e)[:500]
             job.finished_at = datetime.utcnow()
@@ -767,6 +852,7 @@ def _run_local_gpu_generation(job_id: int):
         _notify_chat(db, job)
 
     finally:
+        _VIDEO_CANCEL_FLAGS.pop(job_id, None)
         _GPU_LOCK.release()  # 다음 GPU 작업 허용
         db.close()
 
@@ -777,10 +863,16 @@ def _run_json2video_generation(job_id: int, api_key: str):
     import time
     from core.database import SessionLocal
 
+    _VIDEO_CANCEL_FLAGS[job_id] = False
+
     db = SessionLocal()
     try:
         job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
         if not job:
+            return
+
+        if _check_video_cancel(job_id):
+            _cancel_video_job(job_id, db)
             return
 
         job.status = "running"
@@ -900,6 +992,9 @@ def _run_json2video_generation(job_id: int, api_key: str):
             # 완료 폴링 — 최대 5분 (60회 × 5초)
             for poll_idx in range(60):
                 time.sleep(5)
+                if _check_video_cancel(job_id):
+                    _cancel_video_job(job_id, db)
+                    return
                 sr = requests.get(
                     f"https://api.json2video.com/v2/movies?project={project_id}",
                     headers={"x-api-key": api_key},
@@ -1023,7 +1118,7 @@ def _notify_chat(db, job):
             db.add(msg)
             db.commit()
     except Exception as e:
-        print(f"[video_gen] 채팅 알림 실패 (무시): {e}")
+        logger.warning("채팅 알림 실패: %s", e)
 
     # DB 알림 생성 (NotificationPoller가 감지)
     try:
@@ -1048,7 +1143,7 @@ def _notify_chat(db, job):
                 company_id=job.company_id,
             )
     except Exception as e:
-        print(f"[video_gen] DB 알림 생성 실패 (무시): {e}")
+        logger.warning("DB 알림 생성 실패: %s", e)
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -1073,6 +1168,116 @@ async def video_progress_ws(
         pass
     finally:
         video_progress.disconnect(job_id, websocket)
+
+
+@router.post("/jobs/{job_id}/cancel")
+def cancel_video_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """영상 생성 취소 요청."""
+    job = db.query(VideoJob).filter(VideoJob.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job.status not in ("pending", "running"):
+        raise HTTPException(400, f"취소 불가 상태: {job.status}")
+
+    _VIDEO_CANCEL_FLAGS[job_id] = True
+    return {"ok": True, "cancelled": job_id}
+
+
+@router.post("/local-gpu/test")
+def test_local_gpu(
+    _: User = Depends(get_current_user),
+):
+    """로컬 GPU (CUDA) 사용 가능 여부 테스트."""
+    result: dict = {
+        "cuda_available": False,
+        "gpu_name": "",
+        "vram_total_gb": 0,
+        "vram_free_gb": 0,
+        "torch_version": "",
+        "cuda_version": "",
+        "diffusers_installed": False,
+        "models": [],
+    }
+
+    try:
+        import torch
+        result["torch_version"] = torch.__version__
+        result["cuda_available"] = torch.cuda.is_available()
+        if result["cuda_available"]:
+            result["gpu_name"] = torch.cuda.get_device_name(0)
+            props = torch.cuda.get_device_properties(0)
+            result["vram_total_gb"] = round(props.total_memory / (1024 ** 3), 1)
+            result["vram_free_gb"] = round(_get_free_vram_gb(), 1)
+            result["cuda_version"] = torch.version.cuda or ""
+    except ImportError:
+        result["torch_version"] = "미설치"
+
+    try:
+        import diffusers
+        result["diffusers_installed"] = True
+    except ImportError:
+        pass
+
+    # 모델별 다운로드 상태 확인
+    for m in SUPPORTED_MODELS:
+        if m["provider"] != "local-gpu":
+            continue
+        hf_id = m.get("hf_id", "")
+        downloaded = False
+        try:
+            from huggingface_hub import scan_cache_dir
+            cache = scan_cache_dir()
+            for repo in cache.repos:
+                if repo.repo_id == hf_id:
+                    downloaded = True
+                    break
+        except Exception:
+            pass
+        result["models"].append({
+            "id": m["id"],
+            "label": m["label"],
+            "hf_id": hf_id,
+            "vram_gb": m.get("vram_gb", 0),
+            "downloaded": downloaded,
+        })
+
+    return result
+
+
+@router.post("/local-gpu/download")
+def download_local_model(
+    body: dict,
+    _: User = Depends(get_current_user),
+):
+    """로컬 GPU 모델 사전 다운로드 (diffusers 모델을 HuggingFace 캐시에 다운로드)."""
+    model_id = body.get("model_id", "").strip()
+    model_cfg = next((m for m in SUPPORTED_MODELS if m["id"] == model_id and m["provider"] == "local-gpu"), None)
+    if not model_cfg:
+        raise HTTPException(400, f"알 수 없는 로컬 모델: {model_id}")
+
+    hf_id = model_cfg.get("hf_id", "")
+    if not hf_id:
+        raise HTTPException(400, "HuggingFace 모델 ID가 없습니다.")
+
+    def _download():
+        try:
+            from huggingface_hub import snapshot_download
+            video_progress.notify_sync(-1, 10, f"모델 다운로드 시작: {hf_id}")
+            snapshot_download(hf_id, repo_type="model")
+            video_progress.notify_sync(-1, 100, f"모델 다운로드 완료: {hf_id}")
+            video_progress.done_sync(-1, "done")
+        except Exception as e:
+            logger.error("모델 다운로드 실패: %s", e)
+            video_progress.notify_sync(-1, 0, f"다운로드 실패: {str(e)[:200]}")
+            video_progress.done_sync(-1, "failed")
+
+    t = threading.Thread(target=_download, daemon=True)
+    t.start()
+    return {"ok": True, "downloading": hf_id, "model_id": model_id}
 
 
 @router.get("/stats")
@@ -1156,8 +1361,8 @@ def ollama_list_models(current_user: User = Depends(get_current_user)):
             ps_models = ps.json().get("models", [])
             if ps_models:
                 loaded = ps_models[0].get("name", "")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Ollama ps 조회 실패: %s", e)
         return {
             "models": models,
             "default_model": default_model,
@@ -1282,12 +1487,13 @@ async def ws_ollama_pull(websocket: WebSocket, model: str = Query(""), token: st
             except asyncio.TimeoutError:
                 try:
                     await websocket.send_json({"type": "ping"})
-                except Exception:
+                except Exception as e:
+                    logger.debug("Pull WS ping 실패: %s", e)
                     break
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Pull WS 연결 오류: %s", e)
     finally:
         subs = _PULL_SUBSCRIBERS.get(model, [])
         if q in subs:
@@ -1406,8 +1612,8 @@ async def ws_gpu_setup_log(websocket: WebSocket, token: str = Query("")):
                 await websocket.send_json({"type": "ping"})
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("로그 WS 연결 오류: %s", e)
 
 
 def _record_gpu_history():
@@ -1422,8 +1628,9 @@ def _record_gpu_history():
         ).decode().strip().splitlines()[0]
         parts = [p.strip() for p in out.split(",")]
         used, total, temp, util = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
-    except Exception:
-        return  # nvidia-smi 없으면 조용히 종료
+    except Exception as e:
+        logger.debug("nvidia-smi 조회 실패: %s", e)
+        return
 
     try:
         from core.database import SessionLocal
@@ -1436,8 +1643,8 @@ def _record_gpu_history():
         db.query(GpuHistory).filter(GpuHistory.recorded_at < cutoff).delete()
         db.commit()
         db.close()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("GPU 기록 저장 실패: %s", e)
 
 
 @router.get("/gpu-status")
@@ -1467,8 +1674,8 @@ def gpu_status():
                 "temp_c": int(parts[4]) if len(parts) > 4 else 0,
                 "util_pct": int(parts[5]) if len(parts) > 5 else 0,
             }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("GPU 상태 조회 실패: %s", e)
 
     # VRAM 경고: 총 VRAM 대비 사용량 90% 초과 시
     vram_pct = 0
@@ -1486,8 +1693,8 @@ def gpu_status():
             models_list = r.json().get("models", [])
             if models_list:
                 ollama_loaded_model = models_list[0].get("name", "")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Ollama 로드 상태 확인 실패: %s", e)
 
     # 활성 pull 작업 수 (대기 중 + 실행 중)
     active_pulls = [

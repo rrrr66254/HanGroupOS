@@ -6,10 +6,12 @@ import {
   Brain, Settings, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   Zap, Home, Bell, FileText, Globe, Star, GitMerge, BarChart2, UserCheck,
   Terminal, Gamepad2, Shield, Briefcase, Users, Film, ListVideo,
-  DatabaseZap, ScrollText, Lightbulb, Crosshair,
+  DatabaseZap, ScrollText, Lightbulb, Crosshair, Activity, DollarSign, Sparkles, Rss,
+  LayoutGrid,
 } from 'lucide-react'
-import { useAppStore } from '../store/useStore'
+import { useAppStore, useGroupStore } from '../store/useStore'
 import { approvalsApi, terminalApi } from '../api/client'
+import { useT } from '../i18n'
 
 // Badge metadata: which items get which badge count
 const ITEM_BADGES: Record<string, 'approvals' | 'terminals'> = {
@@ -20,73 +22,88 @@ const ITEM_BADGES: Record<string, 'approvals' | 'terminals'> = {
 const NAV_GROUPS = [
   {
     id: 'management',
-    label: '경영',
+    labelKey: 'groups.management',
     icon: Briefcase,
     badge: 'approvals' as const,
     items: [
-      { to: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
-      { to: '/companies', icon: Building2, label: '계열사' },
-      { to: '/approvals', icon: CheckSquare, label: '승인함' },
+      { to: '/dashboard', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
+      { to: '/companies', icon: Building2, labelKey: 'nav.companies' },
+      { to: '/approvals', icon: CheckSquare, labelKey: 'nav.approvals' },
     ],
   },
   {
     id: 'strategy',
-    label: '분석/전략',
+    labelKey: 'groups.strategy',
     icon: TrendingUp,
     badge: null,
     items: [
-      { to: '/market', icon: TrendingUp, label: '시장분석' },
-      { to: '/strategy', icon: Map, label: '전략맵' },
-      { to: '/synergy', icon: GitMerge, label: '시너지분석' },
-      { to: '/simulation', icon: FlaskConical, label: '시뮬레이션' },
-      { to: '/data-analytics', icon: DatabaseZap, label: '데이터 분석' },
-      { to: '/insights', icon: Lightbulb, label: '인사이트' },
-      { to: '/competitors', icon: Crosshair, label: '경쟁사 모니터링' },
+      { to: '/market', icon: TrendingUp, labelKey: 'nav.market' },
+      { to: '/strategy', icon: Map, labelKey: 'nav.strategy' },
+      { to: '/synergy', icon: GitMerge, labelKey: 'nav.synergy' },
+      { to: '/simulation', icon: FlaskConical, labelKey: 'nav.simulation' },
+      { to: '/data-analytics', icon: DatabaseZap, labelKey: 'nav.dataAnalytics' },
+      { to: '/insights', icon: Lightbulb, labelKey: 'nav.insights' },
+      { to: '/competitors', icon: Crosshair, labelKey: 'nav.competitors' },
+      { to: '/delegation', icon: GitMerge, labelKey: 'nav.delegation' },
+      { to: '/financial', icon: DollarSign, labelKey: 'nav.financial' },
+      { to: '/kpi-scoreboard', icon: BarChart2, labelKey: 'nav.kpiScoreboard' },
+      { to: '/synergy-match', icon: Zap, labelKey: 'nav.synergyMatch' },
     ],
   },
   {
     id: 'org',
-    label: '조직/AI',
+    labelKey: 'groups.org',
     icon: Users,
     badge: null,
     items: [
-      { to: '/live-office', icon: Monitor, label: 'AI 오피스' },
-      { to: '/memory', icon: Brain, label: '기업기억' },
-      { to: '/talent-match', icon: UserCheck, label: '인재추천' },
+      { to: '/live-office', icon: Monitor, labelKey: 'nav.liveOffice' },
+      { to: '/memory', icon: Brain, labelKey: 'nav.memory' },
+      { to: '/talent-match', icon: UserCheck, labelKey: 'nav.talentMatch' },
+      { to: '/agent-performance', icon: Activity, labelKey: 'nav.agentPerformance' },
+      { to: '/cost-analytics', icon: DollarSign, labelKey: 'nav.costAnalytics' },
+      { to: '/agent-personality', icon: Sparkles, labelKey: 'nav.agentPersonality' },
+      { to: '/ai-feedback', icon: Star, labelKey: 'nav.aiFeedback' },
+      { to: '/workflow-builder', icon: Zap, labelKey: 'nav.workflowBuilder' },
     ],
   },
   {
     id: 'content',
-    label: '보고/콘텐츠',
+    labelKey: 'groups.content',
     icon: FileText,
     badge: null,
     items: [
-      { to: '/doc-generator', icon: ScrollText, label: 'AI 문서 생성기' },
-      { to: '/weekly-report', icon: FileText, label: '주간보고서' },
-      { to: '/ir-report', icon: BarChart2, label: 'IR 보고서' },
-      { to: '/site-builder', icon: Globe, label: '웹사이트' },
-      { to: '/site-evaluator', icon: Star, label: '사이트평가' },
-      { to: '/game', icon: Gamepad2, label: '게임 플랫폼' },
-      { to: '/video-studio', icon: Film, label: '영상 스튜디오' },
-      { to: '/video-jobs', icon: ListVideo, label: '영상 잡 관리' },
+      { to: '/doc-generator', icon: ScrollText, labelKey: 'nav.docGenerator' },
+      { to: '/weekly-report', icon: FileText, labelKey: 'nav.weeklyReport' },
+      { to: '/ir-report', icon: BarChart2, labelKey: 'nav.irReport' },
+      { to: '/site-builder', icon: Globe, labelKey: 'nav.siteBuilder' },
+      { to: '/site-evaluator', icon: Star, labelKey: 'nav.siteEvaluator' },
+      { to: '/game', icon: Gamepad2, labelKey: 'nav.game' },
+      { to: '/video-studio', icon: Film, labelKey: 'nav.videoStudio' },
+      { to: '/video-jobs', icon: ListVideo, labelKey: 'nav.videoJobs' },
     ],
   },
   {
     id: 'system',
-    label: '시스템',
+    labelKey: 'groups.system',
     icon: Settings,
     badge: 'terminals' as const,
     items: [
-      { to: '/terminal', icon: Terminal, label: '터미널' },
-      { to: '/audit', icon: Shield, label: '감사 로그' },
-      { to: '/admin', icon: Settings, label: '관리자' },
+      { to: '/terminal', icon: Terminal, labelKey: 'nav.terminal' },
+      { to: '/audit', icon: Shield, labelKey: 'nav.audit' },
+      { to: '/data-feeds', icon: Rss, labelKey: 'nav.dataFeeds' },
+      { to: '/webhook-settings', icon: Bell, labelKey: 'nav.webhookSettings' },
+      { to: '/dashboard-customize', icon: LayoutGrid, labelKey: 'nav.dashboardCustomize' },
+      { to: '/permissions', icon: Shield, labelKey: 'nav.permissions' },
+      { to: '/admin', icon: Settings, labelKey: 'nav.admin' },
     ],
   },
 ]
 
 const TOP_ITEMS = [
-  { to: '/group-home', icon: Home, label: '그룹 홈', highlight: true },
-  { to: '/chairman', icon: MessageSquare, label: 'AI 회장' },
+  { to: '/group-home', icon: Home, labelKey: 'nav.groupHome', highlight: true },
+  { to: '/chairman', icon: MessageSquare, labelKey: 'nav.chairman' },
+  { to: '/messenger', icon: MessageSquare, labelKey: 'nav.messenger' },
+  { to: '/notifications', icon: Bell, labelKey: 'nav.notifications' },
 ]
 
 function Badge({ count, color = 'red' }: { count: number; color?: 'red' | 'orange' | 'yellow' }) {
@@ -112,12 +129,15 @@ export default function Sidebar() {
     pendingApprovals, pendingTerminals,
     setPendingApprovals, setPendingTerminals,
     badgeTick,
+    mobileSidebarOpen, setMobileSidebarOpen,
   } = useAppStore()
+  const groupName = useGroupStore((s) => s.config.group_name)
+  const t = useT()
   const [approvalsByType, setApprovalsByType] = useState<Record<string, number>>({})
   const [logoError, setLogoError] = useState(false)
   const location = useLocation()
 
-  // Poll pending counts every 30 seconds; also refreshes when badgeTick changes
+  // 배지 카운트: WebSocket badge_update 이벤트로 실시간 수신 + 초기 fetch
   useEffect(() => {
     const fetchCounts = async () => {
       try {
@@ -138,8 +158,14 @@ export default function Sidebar() {
       } catch { /* silent */ }
     }
     fetchCounts()
-    const iv = setInterval(fetchCounts, 30_000)
-    return () => clearInterval(iv)
+
+    // WebSocket으로 실시간 수신 (badge_update 이벤트)
+    const { subscribeWsEvent } = require('./NotificationPoller')
+    const unsub = subscribeWsEvent('badge_update', (data: Record<string, unknown>) => {
+      setPendingApprovals((data.approvals as number) ?? 0)
+      setPendingTerminals((data.terminals as number) ?? 0)
+    })
+    return () => unsub()
   }, [badgeTick])
 
   // Open groups: auto-open the group that contains the active route
@@ -194,14 +220,16 @@ export default function Sidebar() {
   }
 
   const NavItem = ({
-    to, icon: Icon, label, highlight,
-  }: { to: string; icon: React.ElementType; label: string; highlight?: boolean }) => {
+    to, icon: Icon, labelKey, highlight,
+  }: { to: string; icon: React.ElementType; labelKey: string; highlight?: boolean }) => {
+    const label = t(labelKey)
     const showHomeBadge = to === '/group-home' && newEventCount > 0
     const itemBadge = getItemBadge(to)
 
     return (
       <NavLink
         to={to}
+        onClick={handleNavClick}
         className={({ isActive }) =>
           `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150 group relative
           ${isActive
@@ -251,9 +279,15 @@ export default function Sidebar() {
     )
   }
 
+  const handleNavClick = () => {
+    // 모바일에서 네비게이션 클릭 시 사이드바 자동 닫기
+    if (window.innerWidth < 768) setMobileSidebarOpen(false)
+  }
+
   return (
     <aside
-      className="fixed top-0 left-0 h-full bg-bg-card border-r border-bg-border flex flex-col z-40 transition-all duration-200"
+      className={`fixed top-0 left-0 h-full bg-bg-card border-r border-bg-border flex flex-col z-40 transition-all duration-200
+        ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}
       style={{ width: sidebarOpen ? 240 : 64 }}
     >
       {/* Logo */}
@@ -261,7 +295,7 @@ export default function Sidebar() {
         <div className="flex items-center gap-3 overflow-hidden">
           <div className="w-8 h-8 flex items-center justify-center flex-shrink-0">
             {!logoError ? (
-              <img src="/logo.png" alt="HAN Group" className="w-8 h-8 object-contain" onError={() => setLogoError(true)} />
+              <img src="/logo.png" alt={groupName} className="w-8 h-8 object-contain" onError={() => setLogoError(true)} />
             ) : (
               <div className="w-8 h-8 bg-brand rounded-lg flex items-center justify-center">
                 <Zap size={16} className="text-white" />
@@ -270,7 +304,7 @@ export default function Sidebar() {
           </div>
           {sidebarOpen && (
             <div className="animate-fade-in">
-              <div className="text-sm font-bold text-slate-100">HAN Group</div>
+              <div className="text-sm font-bold text-slate-100">{groupName}</div>
               <div className="text-[10px] text-slate-500 font-mono">OS v29</div>
             </div>
           )}
@@ -304,7 +338,7 @@ export default function Sidebar() {
                 >
                   <GroupIcon size={15} className={hasActive ? 'text-brand-light' : ''} />
                   <span className="flex-1 text-left animate-fade-in uppercase tracking-wider">
-                    {group.label}
+                    {t(group.labelKey)}
                   </span>
                   {groupBadge > 0 && <Badge count={groupBadge} color="orange" />}
                   {hasActive && !isOpen && groupBadge === 0 && (
@@ -373,7 +407,7 @@ export default function Sidebar() {
           >
             <div className="px-3 py-1.5 flex items-center justify-between border-b border-bg-border mb-1">
               <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
-                {group.label}
+                {t(group.labelKey)}
               </span>
               {getBadgeCount(group.badge) > 0 && (
                 <Badge count={getBadgeCount(group.badge)} color="orange" />
@@ -393,7 +427,7 @@ export default function Sidebar() {
                   }`}
                 >
                   <ItemIcon size={14} />
-                  <span className="flex-1">{item.label}</span>
+                  <span className="flex-1">{t(item.labelKey)}</span>
                   {badge > 0 && <Badge count={badge} color="orange" />}
                 </NavLink>
               )

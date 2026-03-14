@@ -8,6 +8,9 @@
 """
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
+from core.logging import get_logger
+
+logger = get_logger("service.game_platform")
 
 
 def search_trending_games(
@@ -19,12 +22,16 @@ def search_trending_games(
     SerpAPI로 Steam/Itch.io 트렌딩 게임 검색.
     SerpAPI 키가 없으면 Google News RSS로 폴백.
     """
-    from models.models import ExternalApiKey
+    from core.utils import get_active_api_key
+    from core.cache import cache_get, cache_set
 
-    serpapi_key_row = db.query(ExternalApiKey).filter(
-        ExternalApiKey.service == "serpapi",
-        ExternalApiKey.is_active == True,
-    ).first()
+    cache_key = f"trending:{query}:{platform}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        cached["_cached"] = True
+        return cached
+
+    serpapi_key_row = get_active_api_key(db, "serpapi")
 
     platform_queries = {
         "steam": f"site:store.steampowered.com top selling games 2026 {query}".strip(),
@@ -62,7 +69,7 @@ def search_trending_games(
             ]
             source_used = "serpapi"
         except Exception as e:
-            print(f"[GamePlatform] SerpAPI 실패, RSS 폴백: {e}")
+            logger.warning("[GamePlatform] SerpAPI 실패, RSS 폴백: {e}")
 
     if not results:
         # 무료 대체: Google News RSS
@@ -86,27 +93,27 @@ def search_trending_games(
             ]
             source_used = "google_news_rss"
         except Exception as e:
-            print(f"[GamePlatform] RSS 폴백도 실패: {e}")
+            logger.warning("[GamePlatform] RSS 폴백도 실패: {e}")
 
-    return {
+    result = {
         "query": search_query,
         "platform": platform,
         "source": source_used,
         "count": len(results),
         "results": results,
     }
+    if results:
+        cache_set(cache_key, result, ttl=600)  # 10분 캐시
+    return result
 
 
 def get_game_analytics(game_title: str, db: Session) -> Dict[str, Any]:
     """
     게임 메트릭 수집: SerpAPI로 Steam/Itch.io 리뷰·다운로드 정보 검색.
     """
-    from models.models import ExternalApiKey
+    from core.utils import get_active_api_key
 
-    serpapi_key_row = db.query(ExternalApiKey).filter(
-        ExternalApiKey.service == "serpapi",
-        ExternalApiKey.is_active == True,
-    ).first()
+    serpapi_key_row = get_active_api_key(db, "serpapi")
 
     results = {}
 
@@ -134,7 +141,7 @@ def get_game_analytics(game_title: str, db: Session) -> Dict[str, Any]:
             results["raw_data"] = all_snippets
             results["source"] = "serpapi"
         except Exception as e:
-            print(f"[GamePlatform] 게임 분석 SerpAPI 실패: {e}")
+            logger.warning("[GamePlatform] 게임 분석 SerpAPI 실패: {e}")
             results["source"] = "unavailable"
             results["error"] = str(e)
     else:
@@ -204,7 +211,7 @@ def generate_game_idea(
         if start != -1 and end != -1:
             ideas = _json.loads(raw[start:end + 1])
     except Exception as e:
-        print(f"[GamePlatform] 아이디어 JSON 파싱 실패: {e}")
+        logger.warning("[GamePlatform] 아이디어 JSON 파싱 실패: {e}")
         ideas = [{"title": "파싱 실패", "raw_response": response}]
 
     return {

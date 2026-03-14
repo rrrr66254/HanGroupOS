@@ -11,9 +11,10 @@
 set -e
 
 HAN_REPO="https://github.com/rrrr66254/HanGroupOS.git"
-HAN_VERSION="30"
+HAN_VERSION="39"
 INSTALL_DIR="$HOME/HanGroupOS"
 BIN_DIR="$HOME/.local/bin"
+GROUP_DISPLAY_NAME="${GROUP_NAME:-Group OS}"  # 환경변수로 그룹명 오버라이드 가능
 
 # ── 색상 ──────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -26,7 +27,7 @@ NC='\033[0m'
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║     HAN Group OS v${HAN_VERSION} — 설치 프로그램       ║${NC}"
+echo -e "${CYAN}║     ${GROUP_DISPLAY_NAME} v${HAN_VERSION} — 설치 프로그램       ║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -217,7 +218,7 @@ SHELL_RC="$HOME/.bashrc"
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   if ! grep -qF 'HOME/.local/bin' "$SHELL_RC" 2>/dev/null; then
     echo "" >> "$SHELL_RC"
-    echo "# HAN Group OS CLI" >> "$SHELL_RC"
+    echo "# Group OS CLI" >> "$SHELL_RC"
     echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$SHELL_RC"
     echo -e "  ${GREEN}✓ PATH 등록됨: $SHELL_RC${NC}"
   else
@@ -292,9 +293,9 @@ echo ""
 # ── 완료 메시지 ───────────────────────────────────────────────────────────────
 echo -e "${GREEN}════════════════════════════════════════════════${NC}"
 if [ "$INSTALL_MODE" = "update" ]; then
-  echo -e "${GREEN}  ✅ HAN Group OS 업데이트 완료! (v${OLD_HAN_VER} → v${HAN_VERSION})${NC}"
+  echo -e "${GREEN}  ✅ ${GROUP_DISPLAY_NAME} 업데이트 완료! (v${OLD_HAN_VER} → v${HAN_VERSION})${NC}"
 else
-  echo -e "${GREEN}  ✅ HAN Group OS v${HAN_VERSION} 설치 완료!${NC}"
+  echo -e "${GREEN}  ✅ ${GROUP_DISPLAY_NAME} v${HAN_VERSION} 설치 완료!${NC}"
 fi
 echo ""
 echo "  설치 경로: $INSTALL_DIR"

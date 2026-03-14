@@ -1,11 +1,13 @@
-# HAN Group OS v30
+# Group OS v39
 **AI 기반 기업 운영 시스템 (AI Corporate Operating System)**
 
 <p align="center">
-  <img src="frontend/public/logo.png" alt="HAN Group Logo" width="220" />
+  <img src="frontend/public/logo.png" alt="Group Logo" width="220" />
 </p>
 
 그룹사 전체를 AI 에이전트로 운영하는 통합 플랫폼입니다. 회장 AI부터 각 위원회까지 역할별 AI 에이전트를 배치하고, 경영 의사결정·승인·회의·전략·시장분석을 하나의 시스템에서 처리합니다.
+
+> **v31부터 그룹 이름을 자유롭게 설정할 수 있습니다.** 관리자 > 그룹 설정에서 영문/한국어 이름과 슬로건을 변경하면 전체 UI에 즉시 반영됩니다.
 
 ---
 
@@ -13,117 +15,384 @@
 
 | 기능 | 설명 |
 |------|------|
+| **동적 그룹 이름 설정** | 관리자 > 그룹 설정에서 그룹 이름/슬로건을 자유롭게 변경 (전체 UI 즉시 반영) |
 | **AI 허브 (다중 AI 대화)** | 회장·위원회·CEO 등 AI 구성원 각자와 1:1 대화 |
-| **픽셀 AI 오피스** | AI 캐릭터가 실시간으로 움직이는 픽셀아트 사무실, 회의 시 회의실 자동 활성화 |
-| **역할별 AI 자동 배정** | 계열사 설립 시 직급·역할에 맞는 AI 모델 자동 배정 (CEO → Claude Sonnet, 팀장 → GPT-4o-mini 등) |
+| **AI 에이전트 성과 분석** | 에이전트별 응답 품질, 토큰 사용량, 처리 시간 대시보드 (자동 수집) |
+| **픽셀 AI 오피스** | AI 캐릭터가 실시간으로 움직이는 픽셀아트 사무실 |
+| **역할별 AI 자동 배정** | 계열사 설립 시 직급·역할에 맞는 AI 모델 자동 배정 |
+| **실시간 대시보드** | WebSocket 기반 실시간 KPI 변동, 승인 알림, 이벤트 반영 |
+| **다국어 지원 (i18n)** | 한국어·영어·일본어 UI 전환 (사이드바, 대시보드, 로그인 전체 적용) |
+| **CI/CD 파이프라인** | GitHub Actions — pytest + TypeScript 빌드 + Playwright E2E + Docker 빌드 |
+| **Docker Compose 배포** | 백엔드+프론트엔드+Ollama 원클릭 컨테이너 배포 |
+| **E2E 테스트 (Playwright)** | 로그인·대시보드·회장·계열사 시나리오별 브라우저 테스트 |
+| **pytest 테스트** | 인증·회사·승인·그룹설정 API 테스트 코드 |
 | **조직도 관리** | 회장 → 위원회 → 계열사 → 직책 계층 구조 |
 | **결재 워크플로우 + AI 사전 검토** | 요청 → AI 위험도 분석 → 승인/반려 파이프라인 |
-| **회의 관리** | 일정 수립, AI 참여, 회의실 픽셀 오피스 반영 |
 | **시장 분석 + 경쟁사 트렌드** | 산업별 기회/위협 리포트, 경쟁사 주간 뉴스량 차트 |
-| **전략 트래킹 + AI 진단** | 목표·이니셔티브·마일스톤·KPI 관리, 항목별 AI 건강 진단 |
-| **KPI 이력 + 스파크라인** | KPI 동기화 이력 추적, SVG 스파크라인 시각화 |
-| **계열사 건강 스코어카드** | 진척률·KPI·데이터 종합 건강 점수 (양호/주의/위험) |
-| **그룹 주간 브리핑** | 최근 7일 데이터 기반 AI 자동 마크다운 브리핑 생성 |
-| **수집 데이터 AI 자동 태깅** | 수집 데이터 AI 분석 → 산업·감성·토픽 태그 자동 부여 |
-| **인사이트 격상 계보 뷰** | 인사이트→전략 격상 이력 트리 시각화 |
-| **외부 웹훅 수신 API** | 토큰 인증으로 외부 시스템에서 데이터 수집 트리거 |
-| **비즈니스 시뮬레이션** | What-if 시나리오 분석 |
-| **기업 메모리** | 의사결정·사실·교훈 등 기관 지식 축적 |
-| **멀티 AI 프로바이더** | Claude, GPT-4o, Gemini, **Ollama (무료 로컬)**, Mock 전환 가능 |
+| **전략 트래킹 + AI 진단** | 목표·이니셔티브·마일스톤·KPI 관리, AI 건강 진단 |
+| **자동 위임 체인** | CEO→전문가 자동 위임 + 병렬 분석 + 종합 보고 체인 워크플로우 |
+| **KPI 스코어보드** | 계열사별 KPI 랭킹, Gold/Silver/Bronze 트로피, 게이미피케이션 대시보드 |
+| **에이전트 성격 설정** | 프리셋(보수적/공격적/창의적) + 말투/전문분야 커스터마이징 |
+| **외부 데이터 허브** | RSS/뉴스/환율/주가 자동 수집 파이프라인 + 에이전트 컨텍스트 주입 |
+| **Slack/Discord 웹훅 알림** | 승인 요청·품질 알림·KPI 변동 등 실시간 웹훅 발송 |
+| **AI 대화 요약 자동 생성** | 긴 세션 자동 요약 → 기업 기억 저장 |
+| **계열사 시너지 매칭** | 키워드 + AI 분석으로 계열사 간 협업 기회 자동 발굴 |
+| **대시보드 위젯 커스터마이징** | 사용자별 대시보드 위젯 표시/숨김/순서 설정 |
+| **AI 피드백 루프** | 좋아요/싫어요 피드백 + 에이전트별 만족도 통계 |
+| **멀티 AI 프로바이더** | Claude, GPT-4o, Gemini, Ollama (무료 로컬), Mock |
+| **뉴스 수집 + AI 브리핑** | NewsAPI/RSS 기반 산업별 뉴스 자동 수집, AI 경영진 브리핑 생성, 구독 관리 |
+| **API Rate Limiter** | 경로별 분당 요청 제한, 슬라이딩 윈도우, Rate Limit 헤더 자동 부여 |
+| **인메모리 캐싱** | 외부 API 호출 결과 TTL 기반 캐시, 뉴스/트렌딩 10분 캐시 |
+| **고급 헬스체크** | DB/Ollama/KTransformers/AI키/캐시/Rate Limit 상태 통합 진단 |
+| **그룹 메신저** | 프로젝트/팀별 채팅방, 실시간 메시지, 멤버 관리, WebSocket 알림 |
+| **모바일 반응형** | 햄버거 메뉴, 오버레이 사이드바, 반응형 그리드, 터치 최적화 |
+| **통합 WebSocket 허브** | 알림/배지/메신저/터미널/프로바이더 상태 단일 WS 실시간 수신 |
+| **파일 첨부 메신저** | 이미지/문서 업로드 + 인라인 프리뷰 + 전체화면 뷰어 |
+| **실시간 환율** | Frankfurter API 기반 환율 조회 + 금액 변환기 (10분 캐시) |
+| **E2E 테스트** | Playwright 기반 메신저/헬스체크/Rate Limit/환율 시나리오 |
+| **WS 지수 백오프 재연결** | 지수 백오프(1s→30s) + 최대 10회 재시도 + 연결 상태 UI 표시 |
+| **메신저 읽음 확인** | 메시지별 ✓(전송)/✓✓(읽음) 체크 아이콘, 멤버별 마지막 읽은 위치 추적 |
+| **재무 차트 시각화** | Recharts 매출/영업이익/순이익 바 차트 + 30일 환율 변동 에어리어 차트 |
+| **파일 드래그&드롭** | 메신저 채팅 영역에 파일 드래그 → 자동 업로드 (다중 파일 지원) |
+| **알림 센터 페이지** | 전체 알림 목록 + 날짜별 그룹 + 유형/읽음 필터 + 일괄 작업 + 알림 설정 |
 
 ---
 
-## v30 업데이트 내역
+## v39 업데이트 내역
 
-### AI 자동화 & 데이터 인텔리전스 10종 기능 추가
+### 1. WebSocket 재연결 전략 강화
+- 지수 백오프 재연결: 1s → 2s → 4s → 8s ... → 최대 30s (+ 지터)
+- 최대 10회 재시도 후 `failed` 상태 전환
+- Header에 실시간 연결 상태 UI 표시 (실시간/연결 중/재연결/연결 실패)
+- 연결 실패 시 클릭으로 수동 재연결 트리거
+- zustand 스토어에 `wsStatus`, `wsRetryCount` 상태 추가
 
-#### 1. KPI 이력 추적 + 스파크라인
-- KPI 값 동기화 시마다 `KpiSyncHistory` 테이블에 이력 저장
-- 전략 페이지에서 KPI 링크별 순수 SVG 스파크라인 차트 표시
-- `GET /kpi-links/{id}/history` 엔드포인트로 이력 조회
+### 2. 메신저 읽음 확인
+- `MessageReadStatus` 모델: 멤버별 마지막 읽은 메시지 ID 추적
+- `POST /api/messenger/rooms/{id}/read` — 읽음 위치 갱신
+- `GET /api/messenger/rooms/{id}/read-status` — 멤버별 읽음 상태 조회
+- `messenger_read` WebSocket 이벤트로 실시간 읽음 상태 브로드캐스트
+- 내 메시지에 ✓(전송됨) / ✓✓(읽음, 파란색) 체크 아이콘 표시
+- 채팅방 진입 시 자동 읽음 처리 + 새 메시지 수신 시 자동 갱신
 
-#### 2. 경쟁사 트렌드 차트
-- 경쟁사별 주간 뉴스 수집량을 SVG 바 차트로 시각화
-- `GET /competitors/trend?weeks=N` 엔드포인트
-- Competitors 페이지에 "트렌드 분석" 버튼 추가
+### 3. 재무 차트 시각화 (Recharts)
+- 기간별 매출/영업이익/순이익 그룹 바 차트
+- KRW 기준 30일 환율 변동 에어리어 차트 (그라데이션 영역)
+- `GET /api/financial/exchange-history` — Frankfurter 시계열 API
+- 통화 선택 드롭다운 (USD/EUR/JPY/CNY/GBP)
+- 30분 캐시 적용
 
-#### 3. 수집 데이터 AI 자동 태깅
-- CollectedData 항목 자동 분석 → `industry:*`, `sentiment:*`, 토픽 태그 부여
-- `POST /data/auto-tag` (limit, data_type, source, force 파라미터)
-- DataAnalytics 페이지에 "AI 자동 태깅" 버튼 추가
+### 4. 파일 드래그 & 드롭
+- 메신저 채팅 영역에 직접 파일 드래그 가능
+- 드래그 오버 시 파란색 점선 오버레이 + Upload 아이콘 표시
+- 다중 파일 순차 업로드 지원
+- `dragenter`/`dragleave` 카운터로 중첩 이벤트 처리
 
-#### 4. 전략 아이템 AI 진단
-- 전략 항목 클릭 → AI 건강도 진단 (health, risks, improvements, next_actions, score 0-100)
-- `POST /strategy/items/{id}/diagnose`
-- Strategy 페이지 카드에 "AI 진단" 버튼 + 결과 패널
-
-#### 5. 계열사 건강 스코어카드
-- 계열사별 종합 건강 점수 자동 산출 (양호/주의/위험)
-- 공식: `score = avg_progress×0.5 + kpi_rate×0.3 + data_score×0.2`
-- `GET /companies/health-scores` 엔드포인트
-- Dashboard 메인 화면에 진행바 + 상태 배지 표시
-
-#### 6. 그룹 주간 브리핑 자동 생성
-- 최근 7일 데이터·전략·KPI를 종합 분석해 마크다운 브리핑 AI 생성
-- `POST /briefing/generate`
-- WeeklyReport 페이지에 "그룹 브리핑" 탭 추가
-
-#### 7. 결재 요청 AI 사전 검토
-- 결재 상세 모달에서 AI 위험도 분석 요청 가능
-- risk_level(low/medium/high/critical), 위험 요소, 권고 사항, 핵심 질문 반환
-- `POST /approvals/{id}/ai-review` + 결과 `approval.meta["ai_review"]` 저장
-
-#### 8. 전략 맵 PDF 내보내기
-- Strategy 페이지 상단 "PDF 저장" 버튼 → `window.print()` 기반 인쇄/저장
-- 인쇄용 CSS 자동 적용 (배경색 보존, 불필요 UI 숨김)
-
-#### 9. 격상 이력 배지 + 계보 뷰
-- 인사이트 → 전략 항목으로 격상 시 `source_insight_id` 연결 체인 추적
-- `GET /strategy/items/{id}/genealogy` 재귀 트리 반환
-- InsightsDashboard에 "계보 보기" 버튼 + 트리 모달
-
-#### 10. 외부 웹훅 수신 API
-- `X-Webhook-Token` 헤더 인증으로 외부 시스템에서 데이터 수집 트리거 가능
-- `POST /webhooks/collect` (hackernews/worldbank/reddit/custom)
-- `WebhookToken` 테이블: 토큰 생성·조회·활성화/비활성화·삭제
-- Admin 관리자 페이지에 "웹훅 토큰" 탭 추가
-
-#### 기타 버그 수정
-- APScheduler `No module named 'apscheduler'` 오류 수정 (`apscheduler>=3.10.0` 추가)
-- 무료 데이터 수집 UI: 수집량 표시 개선 (실제 아이템 수), "방금 수집됨" 피드백 추가
+### 5. 알림 센터 UI 페이지
+- `/notifications` 라우트로 전체 알림 목록 페이지 추가
+- 날짜별 그룹핑으로 알림 시각적 정리
+- 읽음/안읽음/전체 필터 탭 + 유형별 필터 드롭다운
+- 텍스트 검색으로 알림 제목/본문 검색
+- 체크박스 다중 선택 → 일괄 읽음 처리 / 일괄 삭제
+- 유형별 통계 칩 (클릭 시 필터 토글)
+- 알림 설정 모달 (유형별 수신 토글 + 브라우저 푸시 권한 요청)
+- 사이드바 TOP_ITEMS에 알림 센터 내비게이션 추가
 
 ---
 
-## v29 업데이트 내역
+## v38 업데이트 내역
 
-### 계열사 설립 시 역할별 특화 AI 자동 배정
-- **직급 기반 모델 티어** — CEO는 고성능 모델, 팀장은 경량 모델 자동 배정
-- **AI 예산 설정** — 설립 모달에서 무료 / 절약 / 최고 성능 3단계 선택
-- **배정 미리보기** — 설립 전 직급별 배정될 모델 미리 확인
-- **역할 전문성 설명** — 각 직위에 맞는 특화 설명 자동 생성 (예: "데이터 총괄 — 수치 분석 특화")
-- **AI 편집 탭** — 계열사 조직도 옆에 "AI 편집" 탭 추가, 조직원별 모델 개별 변경 가능
+### 1. 폴링→WebSocket 전환 (통합 허브)
+- 기존 30+ 초 REST 폴링을 단일 WebSocket 연결로 전환
+- 알림(`unread_count`), 배지(`badge_update`), 메신저(`messenger_message`), 터미널(`terminal_update`), AI 프로바이더(`provider_status`) 통합
+- 연결 시 초기 상태 일괄 전송 (배지 카운트, AI 프로바이더 상태, 미읽음 수)
+- `subscribeWsEvent()` 구독 시스템으로 컴포넌트별 이벤트 수신
+- 사이드바 배지: 30초 폴링 → WS 즉시 업데이트
+- 터미널 실행 현황: 5초 폴링 → WS + 30초 폴백
+- 프로바이더 상태: 30초 폴링 제거 → WS 초기 전송
+- 핑/퐁 연결 유지 (25초 간격)
 
-| 직급 | 무료 | 절약 | 최고 성능 |
-|------|------|------|---------|
-| CEO | llama3.2 (ollama) | gpt-4o-mini | claude-sonnet-4-6 |
-| Chief | llama3.2 (ollama) | gpt-4o-mini | claude-haiku-4-5 |
-| 팀장 | mock-model | llama3.2 | gpt-4o-mini |
-| 전문가 | mock-model | mock-model | llama3.2 |
+### 2. 메신저 파일 첨부
+- `POST /api/messenger/rooms/{id}/upload` — 파일 업로드 (10MB 제한)
+- 이미지: 인라인 프리뷰 + 클릭 시 전체화면 뷰어 (모달)
+- 문서: 파일명 링크 + 아이콘 표시
+- 허용 확장자: jpg/png/gif/webp/svg/pdf/doc/xlsx/pptx/txt/csv/zip
+- `GET /api/messenger/files/{filename}` — 파일 서빙
+- 프론트엔드: 클립 버튼 + 드래그&드롭 지원
 
-### HAN Group 공식 로고 적용
-- 사이드바 상단에 HAN Group 3D 로고 표시 (투명 배경 PNG)
-- 브라우저 파비콘도 로고로 변경
-- 로고 로드 실패 시 Zap 아이콘으로 자동 폴백
+### 3. 환율 API (Frankfurter)
+- `GET /api/financial/exchange-rates?base=KRW&symbols=USD,EUR,JPY,CNY,GBP`
+- `POST /api/financial/convert` — 금액 환율 변환
+- 10분 캐시 (인메모리) + 폴백 고정 환율
+- 재무제표 페이지에 환율 패널 + 변환기 UI 추가
+
+### 4. 다크/라이트 모드 점검
+- ProviderStatusBanner 모달: 하드코딩 배경 → CSS 변수 기반
+- 라이트 모드 input/select/scrollbar 색상 보정
+- 채팅 버블, 브랜드 색상, 배경 오버레이 라이트 모드 최적화
+
+### 5. E2E 테스트 (Playwright)
+- `e2e/health.spec.ts` — 기본/상세 헬스체크 API 검증
+- `e2e/rate-limit.spec.ts` — Rate Limit 헤더, 감소 검증
+- `e2e/messenger.spec.ts` — 채팅방 생성, 메시지 전송, 파일 첨부 UI
+- `e2e/exchange-rate.spec.ts` — 환율 조회, 변환, 제로 처리
 
 ---
 
-## v28 업데이트 내역
+## v37 업데이트 내역
 
-- **Ollama 로컬 LLM 지원 강화** — API 키 없이 Ollama 설정 가능, 무료로 LLM 활용
-- **픽셀 AI 오피스** — AI 캐릭터가 실시간 애니메이션으로 근무 현황 표시, 회의 시 회의실 활성화
-- **AI 허브** — AI 회장 전용 채팅 → 회장·위원회 각자와 개별 대화 가능한 멀티 AI 허브로 개편
-- **대시보드 카드 클릭** — 모든 통계 카드 클릭 시 해당 페이지로 이동
-- **계열사 초기 데이터 제거** — 빈 상태에서 시작, 필요에 따라 계열사 직접 설립
+### 1. API Rate Limiter
+- 인메모리 슬라이딩 윈도우 기반 요청 제한 (Redis 불필요)
+- 경로별 커스텀 제한: AI 호출 20req/min, 영상 생성 5req/min, 일반 60req/min
+- `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset` 헤더 자동 부여
+- 인증 사용자는 username 기반, 미인증은 IP 기반 식별
+- 429 Too Many Requests 응답 + `Retry-After` 헤더
+
+### 2. 헬스체크 고도화
+- `GET /health?detail=true` 시 전체 시스템 상태 진단:
+  - Database (SQLite 연결), Ollama (모델 목록), KTransformers
+  - AI Provider 키 설정 여부 (Anthropic/OpenAI/Gemini)
+  - 외부 API 키 현황 (ExternalApiKey 테이블)
+  - 캐시 통계, Rate Limit 통계
+
+### 3. API 응답 캐싱 레이어
+- 인메모리 TTL 캐시 (`core/cache.py`) — 스레드 세이프
+- 뉴스 검색, 트렌딩 게임 검색 결과 10분 캐시
+- `@cached(ttl=600)` 데코레이터 제공
+- APScheduler 10분마다 만료 항목 자동 정리
+- `cache_stats()` / `cache_cleanup()` 유틸리티
+
+### 4. 그룹 내부 메신저
+- 채팅방 생성/삭제/멤버 관리 (admin/member 역할)
+- 실시간 메시지 전송 + 5초 폴링 갱신
+- 시스템 메시지 (입장/퇴장/초대)
+- WebSocket 실시간 알림 (채팅방 멤버에게)
+- `ChatRoom`, `ChatRoomMember`, `ChatRoomMessage` DB 모델
+- 메신저 UI: 카카오톡 스타일 채팅 버블, 검색, 모달
+- API: `POST/GET/DELETE /api/messenger/rooms`, `/messages`
+
+### 5. 모바일 반응형 UI 개선
+- **햄버거 메뉴**: md 이하에서 사이드바 → 오버레이 드로어 (backdrop 터치 닫기)
+- **컴팩트 헤더**: 모바일에서 높이 축소, 언어선택 숨김, 프로바이더 배너 숨김
+- **반응형 그리드**: grid-cols-2/3/4 → 모바일 단일 컬럼 자동 변환
+- **축소 패딩**: p-6 → p-3(모바일) / p-4(태블릿) / p-6(데스크톱)
+- **메신저 모바일**: 채팅방 목록 ↔ 대화 화면 전환 (뒤로가기 버튼)
+
+---
+
+## v36 업데이트 내역
+
+### 1. 뉴스 수집 + AI 브리핑 시스템 (NewsAPI 연동)
+- **NewsAPI** 연동: 키워드/카테고리/국가별 뉴스 실시간 검색
+- API 키 없을 시 **Google News RSS** 자동 폴백 (무료 사용 가능)
+- **산업별 뉴스 피드**: IT, 게임, 금융, 제조, 미디어, 바이오, 에너지 등 9개 산업 + 키워드 자동 매핑
+- **AI 뉴스 브리핑**: 수집된 뉴스를 AI가 분석 → 요약/트렌드/기회/리스크/조치사항 보고서 자동 생성
+- **뉴스 구독 관리**: 회사별 뉴스 구독 생성/삭제/즉시 수집 기능
+- 수집된 뉴스 → `CollectedData` 테이블 자동 저장 (중복 방지, SHA256 해시)
+- `NewsFeedSubscription` DB 모델
+- API 엔드포인트:
+  - `GET /api/news/search` — 키워드/카테고리 뉴스 검색
+  - `GET /api/news/industry/{industry}` — 산업별 뉴스 조회
+  - `POST /api/news/briefing` — AI 뉴스 브리핑 생성
+  - `GET /api/news/categories` — 지원 카테고리 목록
+  - `GET /api/news/industries` — 지원 산업 + 키워드 목록
+  - `POST/GET/DELETE /api/news/subscriptions` — 구독 CRUD
+  - `POST /api/news/subscriptions/{id}/fetch` — 구독 기반 뉴스 즉시 수집
+
+---
+
+## v35 업데이트 내역
+
+### 1. 실시간 알림 센터 (인앱)
+- Header 알림 벨 클릭 시 슬라이드 드로어로 알림 목록 표시
+- WebSocket 기반 실시간 알림 수신 + 자동 목록 갱신
+- 전체/미읽음 필터, 개별 읽음 처리, 전체 읽음, 삭제 지원
+- 알림 타입별 컬러 배지 (info/success/warning/error/approval/video/work/form)
+- 클릭 시 해당 페이지로 자동 이동 (link 필드 기반)
+
+### 2. AI 에이전트 워크플로우 빌더
+- 노드 기반 비주얼 편집기로 AI 처리 파이프라인 설계
+- 10종 노드 타입: AI 대화, AI 분석, 데이터 조회, 필터, 변환, 알림, 승인, 웹훅, 대기, 병합
+- 토폴로지 정렬 기반 자동 실행 순서 결정
+- 노드 드래그, 연결선, 설정 패널, 실행 이력 UI
+- `WorkflowDefinition` + `WorkflowExecution` DB 모델
+- `GET/POST/PATCH/DELETE /api/workflows`, `POST /api/workflows/{id}/execute` API
+
+### 3. 계열사 재무제표 자동 생성
+- 매출/비용/손익/자산/부채 데이터 입력 → AI 경영 분석 리포트 자동 생성
+- 수익성 분석 (영업이익률, 순이익률), 안정성 분석 (부채비율), A~F 등급 평가
+- 계열사별 종합 재무 리포트 (성장 추이, 리스크, 추천사항)
+- `FinancialStatement` DB 모델
+- `GET/POST /api/financial`, `POST /api/financial/{id}/analyze`, `POST /api/financial/company/{id}/report` API
+
+### 4. 멀티테넌트 권한 관리 시스템
+- 사용자별 역할 기반 접근 제어: 회장/CEO/관리자/뷰어 4단계
+- 계열사별 데이터 격리 (company_id 기반)
+- 사용자별 보기 / 계열사별 보기 UI
+- 권한 부여/변경/제거 + admin 또는 해당 계열사 chairman/ceo만 관리 가능
+- `UserCompanyRole` DB 모델 + `check_permission()` 유틸리티
+- `GET/POST/PATCH/DELETE /api/permissions`, `GET /api/permissions/company/{id}/check` API
+
+---
+
+## v34 업데이트 내역
+
+### 1. Slack/Discord 웹훅 알림 연동
+- 승인 요청, 품질 알림, KPI 변동 등 이벤트별 웹훅 자동 발송
+- Slack Incoming Webhooks / Discord Webhooks 동시 지원
+- GroupSettings 기반 설정 저장 + 알림 타입별 필터링
+- `/webhook-settings` 페이지: URL 등록, 필터 설정, 테스트 발송
+- `PUT /api/webhook-notify/config`, `POST /api/webhook-notify/test` API
+- 시스템 어디서든 `send_webhook_alert()` 호출로 알림 발송 가능
+
+### 2. AI 에이전트 대화 요약 자동 생성
+- 7일 이내 10건 이상 메시지가 있는 세션 자동 요약
+- AI 기반 핵심 요약 생성 → CorporateMemory에 자동 저장
+- 중복 요약 방지 (세션별 1회)
+- `POST /api/chat-summary/auto` (일괄), `GET /api/chat-summary/session/{id}` (개별)
+
+### 3. 계열사 간 시너지 매칭 AI
+- 키워드 매칭 규칙: 기술-데이터, 콘텐츠-플랫폼, 재무-운영, 고객-교차
+- AI 심층 분석: 2개 회사 간 시너지 기회를 AI가 상세 분석
+- `/synergy-match` 페이지: 기회 목록 + AI 분석 결과 시각화
+- `GET /api/synergy-match/opportunities`, `POST /api/synergy-match/ai-analyze` API
+
+### 4. 관리자 대시보드 위젯 커스터마이징
+- 11종 기본 위젯: 계열사 수, AI 조직원, 승인 대기, 기업 기억 등
+- 사용자별 위젯 표시/숨김 토글 + 순서 드래그 앤 드롭
+- DashboardLayout DB 모델로 사용자별 레이아웃 영구 저장
+- `/dashboard-customize` 페이지 + 초기화 기능
+- `GET/PUT/DELETE /api/dashboard-layout` API
+
+### 5. AI 에이전트 학습 피드백 루프
+- 메시지별 좋아요(+1) / 싫어요(-1) 피드백 제출
+- 에이전트별 만족도 통계 (긍정률, 부정률, 총 피드백 수)
+- 싫어요 피드백 시 자동 웹훅 알림 (품질 경고)
+- `/ai-feedback` 페이지: 최근 피드백 이력 + 에이전트별 만족도 차트
+- `POST /api/ai-feedback`, `GET /api/ai-feedback/stats` API
+
+---
+
+## v33 업데이트 내역
+
+### 1. 스트리밍 채팅 메트릭 수집
+- `/api/chat/stream` SSE 스트리밍 엔드포인트에 `_record_metric()` 자동 호출 추가
+- 스트리밍 응답 시간(ms), 토큰 수(추정), 세션 타입 자동 기록
+- DB 세션 닫힌 후에도 안전하게 동작하도록 로컬 변수 캡처 적용
+
+### 2. E2E 테스트 (Playwright)
+- `frontend/playwright.config.ts` — Vite 연동 + 스크린샷/트레이스 자동 수집
+- `frontend/e2e/auth.spec.ts` — 로그인 페이지, 성공 로그인, 잘못된 자격증명 테스트
+- `frontend/e2e/dashboard.spec.ts` — 통계 카드, 사이드바 네비게이션 테스트
+- `frontend/e2e/chairman.spec.ts` — 임원 목록, 채팅 UI 테스트
+- `frontend/e2e/companies.spec.ts` — 계열사 목록, 신규 생성 버튼 테스트
+- `npm run test:e2e` / `npm run test:e2e:ui` 스크립트 추가
+
+### 3. i18n 나머지 페이지 확장
+- `Chairman.tsx`, `Companies.tsx`, `Approvals.tsx`, `Admin.tsx`에 `useT()` 적용
+- ko/en/ja 번역 파일에 chairman, admin, companies, approvals 섹션 대폭 추가
+- Admin 페이지 탭 렌더링 변수 충돌 해결 (`t` → `tb`)
+
+### 4. 셸 스크립트 동적화 (완전 탈 하드코딩)
+- `han`, `install.sh`, `start.sh`, `start.ps1`, `install.ps1` 모든 사용자 문자열 동적화
+- `GROUP_DISPLAY_NAME="${GROUP_NAME:-Group OS}"` 환경변수 기반 설정
+- PowerShell: `$GroupDisplayName = if ($env:GROUP_NAME) { $env:GROUP_NAME } else { "Group OS" }`
+- "HAN Group OS" 하드코딩 0건 달성
+
+### 5. AI 메트릭 품질 점수 자동 평가
+- `_calc_quality_score()` 함수 추가 — 응답 길이·속도·입출력 비율 기반 0.0~1.0 자동 점수
+- `_record_metric()` 호출 시 `quality_score` 자동 계산 후 DB 저장
+- `AiAgentMetrics.quality_score` 컬럼 활용 (기존 nullable Float)
+- 성과 대시보드에서 품질 추이 확인 가능
+
+### 6. 성과 대시보드 품질 점수 시각화
+- 일별 품질 추이 라인 차트 추가 (0~100% 범위, 녹색 라인)
+- 에이전트 품질 랭킹 수평 바 차트 추가 (상위 8개 에이전트)
+- 백엔드 `by_day` API 응답에 `avg_quality` 필드 추가
+- Award 아이콘 활용, 기존 요청 추이·프로바이더 차트와 동일 스타일
+
+### 7. E2E 테스트 CI 통합
+- GitHub Actions `ci.yml`에 `frontend-e2e` 잡 추가
+- `frontend-build` 성공 후 Playwright Chromium 헤드리스 실행
+- 테스트 실패 시 `test-results/` 아티팩트 자동 업로드 (7일 보관)
+
+### 8. 프로바이더별 비용 추적 대시보드
+- `/cost-analytics` 페이지 신규 생성 — 일별 비용 추이, 프로바이더 비율 파이, 모델별 바 차트
+- Anthropic/OpenAI/Gemini 최신 토큰 단가표 내장 (Ollama/로컬은 무료 처리)
+- `GET /api/agent-metrics/cost-summary` — 기간별 비용 집계 API
+- `GET /api/agent-metrics/pricing` — 현재 단가표 조회 API
+- 월 예상 비용 자동 산출 (일 평균 × 30일)
+- 사이드바 조직 그룹에 "비용 분석" 메뉴 추가, ko/en/ja i18n 대응
+
+### 9. 에이전트 자동 위임 체인
+- CEO → CTO/CFO/CMO/COO/CPO 전문가 자동 위임 워크플로우
+- 키워드 기반 위임 대상 자동 감지 (`detect_delegation_targets`)
+- 전문가 병렬 응답 후 CEO 종합 보고 생성
+- `/delegation` 페이지: 위임 미리보기 + 실행 + 결과 시각화
+- `POST /api/delegation/run`, `POST /api/delegation/detect` API
+
+### 10. KPI 스코어보드 (게이미피케이션)
+- 계열사별 종합 점수 자동 산출 (KPI 달성률 + AI 활용도 + 품질 + 속도)
+- Gold/Silver/Bronze 트로피 자동 부여 + 랭킹 차트
+- 수동 KPI 등록/업데이트 + AI 메트릭 기반 자동 점수 계산
+- `/kpi-scoreboard` 페이지: 상위 3 트로피 카드 + 바 차트 + 상세 테이블
+- `GET /api/kpi-scoreboard/ranking`, `POST /api/kpi-scoreboard/kpi` API
+
+### 11. AI 에이전트 성격 커스터마이징
+- 에이전트별 프리셋(보수적/공격적/창의적/균형), 말투, 응답 길이, 전문분야 설정
+- 관리자 UI에서 편집 모달로 에이전트 성격 직접 커스터마이징
+- `get_personality_instruction()` — 채팅 시스템 프롬프트에 성격 지시문 자동 주입
+- `/agent-personality` 페이지 + `AgentPersonality` DB 모델
+- `GET/PUT /api/agent-personality/node/{id}`, `GET /api/agent-personality/presets` API
+
+### 12. 외부 데이터 소스 통합 허브
+- RSS/뉴스API/환율/주가 외부 데이터 자동 수집 파이프라인
+- 피드 등록/관리/즉시 수집/삭제 + 수집 데이터 캐시 뷰어
+- `inject_to_context` 설정으로 에이전트 컨텍스트에 최신 데이터 자동 주입
+- RSS 2.0/Atom 파싱, NewsAPI, frankfurter.app 환율 지원
+- `/data-feeds` 페이지 + `ExternalDataFeed`/`ExternalDataCache` DB 모델
+- `GET/POST/PUT/DELETE /api/data-feeds`, `GET /api/data-feeds/context-data` API
+
+---
+
+## v32 업데이트 내역
+
+### 1. AI 시스템 프롬프트 동적화
+- 모든 AI 시스템 프롬프트(CHAIRMAN, CEO, CFO, CMO, CTO, COO, CPO, MARKET_ANALYST)에서 하드코딩 그룹명 제거
+- `__GROUP__`/`__GROUP_EN__` 플레이스홀더 → DB GroupSettings 기반 런타임 치환
+- `get_chairman_system(db)`, `get_system_for_role(role, level, db)` 동적 함수 제공
+- `_resolve_group()` 헬퍼로 모든 역할 프롬프트 자동 그룹명 적용
+
+### 2. 백엔드 하드코딩 완전 제거
+- `chat.py` — 브리핑, 이사회, 주간 리포트, 추천 액션 등 모든 "한그룹" 참조 제거
+- `strategy.py` — 시너지 분석, CEO 토론 요약 프롬프트 동적화
+- `ir_service.py` — IR 페이지 기본 텍스트 동적화
+- `site_service.py` — 사이트 빌더 푸터 동적화
+- `work_service.py` — 주간 보고서 시스템 프롬프트 동적화
+- `platform_guides.py` — 앱 이름 예시 동적화
+- `config.py` — APP_NAME 기본값 "Group OS"
+- 프론트엔드 `Chairman.tsx`, `VideoStudio.tsx` — `useGroupStore` 연동
+
+### 3. i18n 전체 페이지 적용
+- 번역 키 대폭 확장: 공통(30+), 네비게이션, 대시보드, 승인, 회장, 관리자, 계열사, 영상, 성과, 인증
+- `Sidebar.tsx` — 전체 네비게이션(5개 그룹 + 30개 메뉴) `useT()` 적용
+- `Dashboard.tsx` — 8개 통계 카드 i18n 적용
+- `Login.tsx` — 폼 라벨/버튼 i18n 적용
+- 일본어(ja) 번역 전체 키 동기화
+
+### 4. AI 성과 메트릭 자동 수집
+- `AIProvider.chat()` → `_chat_inner()` 래핑으로 모든 AI 호출 자동 계측
+- 응답 시간(ms), 토큰 수(추정), 프로바이더/모델 자동 기록
+- `_record_metric()` — `AiAgentMetrics` DB 자동 저장 (실패 시 무시)
+- `chat.py` 주요 엔드포인트에 `agent_name`, `company_id`, `org_node_id` 전달
+- 성과 대시보드 (`/agent-performance`)에서 실시간 데이터 확인 가능
+
+### 5. CI/CD 파이프라인 (GitHub Actions)
+- `.github/workflows/ci.yml` 생성
+- **backend-test** 잡: Python 3.11 + pytest 자동 실행
+- **frontend-build** 잡: Node 20 + TypeScript 타입 체크 + Vite 빌드
+- **docker-build** 잡: push 시 backend/frontend Docker 이미지 빌드 검증
+- `requirements.txt`에 pytest 의존성 추가
 
 ---
 
@@ -135,28 +404,43 @@
 - SQLAlchemy 2.0 (SQLite)
 - Pydantic v2
 - JWT 인증 (python-jose)
+- pytest (테스트)
 
 **Frontend**
 - React 18 + TypeScript
 - Vite 5
 - Tailwind CSS 3
 - Zustand (상태관리)
+- Recharts (차트)
 - Axios + React Router v6
 
 **AI 프로바이더**
 - Anthropic Claude (Opus/Sonnet/Haiku)
 - OpenAI GPT-4o / GPT-4o-mini
 - Google Gemini 1.5 Flash
-- **Ollama (로컬 Llama, Mistral 등 — 무료, API 키 불필요)**
+- Ollama (로컬 — 무료, API 키 불필요)
 - Mock (API 키 없이 테스트)
+
+**배포 / CI**
+- Docker Compose (backend + frontend + Ollama)
+- Nginx (프론트엔드 서빙 + API 프록시)
+- GitHub Actions (pytest + TypeScript 빌드 + Docker 빌드)
 
 ---
 
 ## 실행 방법
 
-### 방법 0: han CLI (원라인 설치, 권장)
+### 방법 0: Docker Compose (가장 간편)
 
-터미널 한 줄로 설치하고 `han` 명령어로 관리합니다.
+```bash
+git clone https://github.com/rrrr66254/HanGroupOS.git
+cd HanGroupOS
+docker compose up -d
+```
+
+접속: `http://localhost:5173`
+
+### 방법 1: han CLI (원라인 설치)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rrrr66254/HanGroupOS/master/install.sh | bash
@@ -167,161 +451,68 @@ curl -fsSL https://raw.githubusercontent.com/rrrr66254/HanGroupOS/master/install
 irm https://raw.githubusercontent.com/rrrr66254/HanGroupOS/master/install.ps1 | iex
 ```
 
-설치 완료 후 사용 가능한 명령어:
+### 방법 2: 수동 실행
 
+**백엔드** (터미널 1)
 ```bash
-# 서버 관리
-han start           # 서버 시작 (포그라운드)
-han start --daemon  # 백그라운드 시작
-han stop            # 서버 종료
-han restart         # 재시작
-han status          # 실행 상태 + 버전 + 설정 요약
-
-# 진단 & 로그
-han init_check      # 환경 사전 점검 (Python/Node/포트/Ollama 연결 등)
-han logs            # 실시간 로그 보기
-han logs backend    # 백엔드 로그만
-
-# 업데이트 & 유지보수
-han update          # GitHub 업데이트 확인 → 변경 내역 출력 → 적용
-han reset           # DB 초기화
-han backup          # DB 백업 (~/.han/backups/)
-han restore         # 백업 목록에서 선택해 복원
-
-# 설정 & 기타
-han config          # 현재 .env 보기 (API 키 마스킹)
-han open            # 브라우저 열기
-han --version       # 버전 + 커밋 해시
-han help            # 전체 도움말
-```
-
----
-
-### 방법 1: WSL2 (Windows 권장)
-
-> Windows에서 Linux 환경을 사용하는 가장 안정적인 방법입니다.
-
-**1단계 — WSL2 설치** (PowerShell 관리자 권한)
-```powershell
-wsl --install
-```
-설치 후 PC 재부팅
-
-**2단계 — Ubuntu 터미널에서 실행**
-```bash
-git clone https://github.com/rrrr66254/HanGroupOS.git
-cd HanGroupOS
-chmod +x start.sh
-./start.sh
-```
-
-**3단계 — 브라우저 접속**
-```
-http://localhost:5173
-```
-
----
-
-### 방법 2: Windows 직접 실행
-
-**사전 설치 필요**
-- [Python 3.11+](https://www.python.org/downloads/) — 설치 시 **"Add Python to PATH"** 체크 필수
-- [Node.js 20+](https://nodejs.org/)
-- [Git](https://git-scm.com/)
-
-설치 확인:
-```powershell
-python --version   # Python 3.11.x
-node --version     # v20.x.x
-git --version
-```
-
-**코드 받기**
-```powershell
-git clone https://github.com/rrrr66254/HanGroupOS.git
-cd HanGroupOS
-```
-
-**백엔드 실행** (터미널 1)
-```powershell
 cd backend
-python -m venv venv
-venv\Scripts\activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-**프론트엔드 실행** (터미널 2 — 새 창)
-```powershell
+**프론트엔드** (터미널 2)
+```bash
 cd frontend
-npm install
-npm run dev
+npm install && npm run dev
 ```
 
-**접속**
-```
-앱:       http://localhost:5173
-API 문서: http://localhost:8000/docs
-```
+접속: `http://localhost:5173`
 
 ---
 
-### 방법 3: macOS / Linux
+## 테스트 실행
 
+**백엔드 (pytest)**
 ```bash
-git clone https://github.com/rrrr66254/HanGroupOS.git
-cd HanGroupOS
-chmod +x start.sh
-./start.sh
+cd backend
+pip install pytest httpx
+pytest tests/ -v
 ```
 
-`start.sh`가 가상환경 생성, 패키지 설치, 서버 실행을 자동으로 처리합니다.
+**프론트엔드 E2E (Playwright)**
+```bash
+cd frontend
+npx playwright install
+npm run test:e2e
+```
 
 ---
 
 ## 초기 설정
 
-### 기본 로그인 정보
+### 기본 로그인
 ```
 ID:       admin
 Password: admin1234
 ```
 
-### AI 프로바이더 설정
+### 그룹 이름 설정
+1. 로그인 후 **관리자** 페이지 접속
+2. **그룹 설정** 탭 선택
+3. 영문/한국어 이름과 슬로건 입력 → 저장
+4. 전체 UI에 즉시 반영
 
-`backend/.env` 파일을 수정하세요. (최초 실행 시 자동 생성)
+### AI 프로바이더 설정
+`backend/.env` 파일 수정 또는 관리자 UI에서 설정:
 
 ```env
-# 기본 프로바이더 (api key 없이 테스트 가능)
-DEFAULT_PROVIDER=mock
-
-# 실제 AI 연동 시 아래 키 입력
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-GEMINI_API_KEY=...
-
-# 로컬 AI (Ollama 사용 시 — API 키 불필요)
-OLLAMA_BASE_URL=http://localhost:11434
+DEFAULT_PROVIDER=mock        # API 키 없이 테스트
+ANTHROPIC_API_KEY=sk-ant-... # Claude 사용 시
+OPENAI_API_KEY=sk-...        # GPT 사용 시
+OLLAMA_BASE_URL=http://localhost:11434  # 로컬 AI
 OLLAMA_MODEL=llama3.2
 ```
-
-API 키 없이 시작하려면 `DEFAULT_PROVIDER=mock` 상태로 두면 됩니다.
-
-### Ollama 로컬 LLM 사용법 (무료)
-
-1. [Ollama 설치](https://ollama.com/download)
-2. 모델 다운로드:
-   ```bash
-   ollama pull llama3.2      # 추천 (2GB)
-   ollama pull mistral       # 대안
-   ollama pull phi3          # 경량화 (1.7GB)
-   ```
-3. 앱 실행 후 **관리자 > AI Provider 설정** 에서:
-   - Provider: `Ollama (로컬)` 선택
-   - API Key: 비워두기 (불필요)
-   - Base URL: `http://localhost:11434`
-   - 모델: `llama3.2` (또는 설치한 모델명)
-   - 저장
 
 ---
 
@@ -329,126 +520,88 @@ API 키 없이 시작하려면 `DEFAULT_PROVIDER=mock` 상태로 두면 됩니�
 
 ```
 HanGroupOS/
-├── start.sh                  # 통합 실행 스크립트 (Linux/Mac)
-│
+├── .github/workflows/ci.yml  # CI/CD 파이프라인
+├── docker-compose.yml         # 컨테이너 배포 설정
 ├── frontend/
-│   ├── public/
-│   │   └── logo.png          # HAN Group 로고 (투명 배경 PNG)
-│   ├── index.html
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── src/
-│       ├── App.tsx            # 라우팅
-│       ├── api/client.ts      # Axios 클라이언트
-│       ├── store/useStore.ts  # Zustand 전역 상태
-│       ├── components/        # 공통 컴포넌트
-│       │   ├── Sidebar.tsx    # 로고 + 네비게이션
-│       │   └── ...
-│       └── pages/             # 12개 페이지
-│           ├── Dashboard.tsx  # 클릭 가능한 통계 카드
-│           ├── Chairman.tsx   # AI 허브 (다중 AI 대화)
-│           ├── Companies.tsx  # 계열사 설립 + AI 자동 배정
-│           ├── LiveOffice.tsx # 픽셀 AI 오피스
-│           └── ...
-│
+│   ├── Dockerfile             # 프론트엔드 컨테이너
+│   ├── nginx.conf             # Nginx 설정
+│   ├── src/
+│   │   ├── i18n/              # 다국어 번역 (ko/en/ja)
+│   │   ├── pages/
+│   │   │   ├── AgentPerformance.tsx  # AI 성과 분석
+│   │   │   └── ...
+│   │   └── store/useStore.ts  # Zustand (인증+앱+그룹설정)
+│   └── ...
 └── backend/
-    ├── main.py               # FastAPI 진입점
-    ├── requirements.txt      # Python 의존성
-    ├── core/
-    │   ├── config.py         # 환경변수 설정
-    │   ├── database.py       # DB 초기화
-    │   └── security.py       # JWT 인증
-    ├── models/
-    │   └── models.py         # 27개 DB 모델 (KpiSyncHistory, WebhookToken 추가)
-    ├── schemas/
-    │   └── schemas.py        # Pydantic 스키마
+    ├── Dockerfile             # 백엔드 컨테이너
+    ├── tests/                 # pytest 테스트
+    │   ├── conftest.py
+    │   ├── test_auth.py
+    │   ├── test_companies.py
+    │   ├── test_approvals.py
+    │   └── test_group_settings.py
+    ├── routers/
+    │   ├── group_settings.py  # 그룹 설정 API
+    │   ├── agent_metrics.py   # AI 성과 분석 API
+    │   └── ...
     ├── services/
-    │   ├── ai_provider.py    # AI 프로바이더 추상화 (Ollama 포함)
-    │   └── org_service.py    # 조직 생성 + AI 자동 배정 로직
-    └── routers/              # API 엔드포인트 (15개+)
+    │   └── ai_provider.py     # 동적 시스템 프롬프트 + 자동 메트릭 수집
+    └── models/models.py       # GroupSettings, AiAgentMetrics 모델
 ```
 
 ---
 
 ## API 문서
 
-서버 실행 후 아래 주소에서 Swagger UI로 전체 API를 확인할 수 있습니다.
+서버 실행 후: `http://localhost:8000/docs`
 
-```
-http://localhost:8000/docs
-```
-
-주요 엔드포인트:
+### 신규 API (v31-34)
 
 | 경로 | 설명 |
 |------|------|
-| `POST /auth/login` | 로그인 (JWT 발급) |
-| `GET /companies` | 계열사 목록 |
-| `POST /companies?ai_budget=any` | 계열사 설립 (AI 예산 티어 지정) |
-| `GET /org/group-tree` | 전체 조직도 트리 |
-| `PATCH /org/nodes/{id}` | 조직원 AI 모델 변경 |
-| `POST /chat/send` | AI 에이전트 대화 |
-| `GET /approvals/inbox` | 결재 수신함 |
-| `POST /simulation/run` | 시뮬레이션 실행 |
-| `GET /market/reports` | 시장 분석 리포트 |
-| `GET /memory` | 기업 메모리 조회 |
-| `GET /models/catalog` | AI 모델 카탈로그 |
-| `POST /models/recommend` | 역할별 AI 모델 추천 |
-| `POST /approvals/{id}/ai-review` | 결재 AI 위험도 사전 검토 |
-| `POST /data/auto-tag` | 수집 데이터 AI 자동 태깅 |
-| `GET /kpi-links/{id}/history` | KPI 동기화 이력 조회 |
-| `GET /competitors/trend` | 경쟁사 주간 트렌드 데이터 |
-| `POST /strategy/items/{id}/diagnose` | 전략 아이템 AI 진단 |
-| `GET /strategy/items/{id}/genealogy` | 격상 계보 트리 조회 |
-| `GET /companies/health-scores` | 계열사 건강 스코어카드 |
-| `POST /briefing/generate` | 그룹 주간 브리핑 AI 생성 |
-| `POST /webhooks/collect` | 외부 웹훅 데이터 수집 트리거 |
-| `GET /webhooks/tokens` | 웹훅 토큰 목록 (관리자) |
-
----
-
-## 기본 포함 데이터
-
-최초 실행 시 아래 데이터가 자동으로 생성됩니다.
-
-- **계열사**: 없음 (빈 상태에서 시작, 직접 설립)
-- **조직**: AI 회장 + 전략위원회, 투자위원회, 데이터위원회
-- **AI 모델 카탈로그**: Claude Opus/Sonnet/Haiku, GPT-4o, GPT-4o-mini, Gemini 1.5 Flash, Llama 3.2, Mock
-- **전략 이니셔티브** 2개 샘플
-- **기업 메모리** 2개 샘플
+| `GET /api/group-settings` | 그룹 설정 조회 |
+| `PATCH /api/group-settings` | 그룹 설정 변경 (이름, 슬로건) |
+| `GET /api/agent-metrics/summary` | AI 에이전트 성과 요약 (자동 수집 데이터) |
+| `GET /api/agent-metrics/recent` | 최근 AI 호출 이력 |
+| `GET /api/agent-metrics/cost-summary` | 프로바이더별 비용 추적 요약 |
+| `GET /api/agent-metrics/pricing` | 토큰 단가표 조회 |
+| `POST /api/delegation/run` | 자동 위임 체인 실행 |
+| `GET /api/kpi-scoreboard/ranking` | 계열사 KPI 랭킹 |
+| `GET/PUT /api/agent-personality/node/{id}` | 에이전트 성격 조회/수정 |
+| `GET/POST /api/data-feeds` | 외부 데이터 피드 관리 |
+| `PUT /api/webhook-notify/config` | 웹훅 알림 설정 |
+| `POST /api/webhook-notify/test` | 웹훅 테스트 발송 |
+| `POST /api/chat-summary/auto` | 대화 요약 일괄 생성 |
+| `GET /api/synergy-match/opportunities` | 시너지 매칭 기회 조회 |
+| `GET/PUT /api/dashboard-layout` | 대시보드 위젯 레이아웃 |
+| `POST /api/ai-feedback` | AI 피드백 제출 |
+| `GET /api/ai-feedback/stats` | 에이전트별 만족도 통계 |
+| `GET/POST /api/workflows` | AI 워크플로우 관리 |
+| `POST /api/workflows/{id}/execute` | 워크플로우 실행 |
+| `GET/POST /api/financial` | 재무제표 관리 |
+| `POST /api/financial/{id}/analyze` | AI 재무 분석 |
+| `POST /api/financial/company/{id}/report` | 종합 재무 리포트 |
+| `GET/POST /api/permissions` | 권한 관리 |
+| `GET /api/permissions/company/{id}/check` | 접근 권한 확인 |
 
 ---
 
 ## 문제 해결
 
-**포트 충돌 시**
-
-> `start.sh`는 실행 전에 포트 충돌을 자동 감지하고 해결 방법을 안내합니다.
-
+**Docker 실행 오류**
 ```bash
-# Linux/macOS — 포트 점유 프로세스 확인 및 종료
-lsof -i :8000          # 백엔드 포트
-fuser -k 8000/tcp      # 강제 종료
-
-# Windows PowerShell
-Get-NetTCPConnection -LocalPort 8000 -State Listen
-Stop-Process -Id <PID> -Force
-```
-
-**Python 패키지 설치 오류 시**
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-**npm 설치 오류 시**
-```bash
-npm cache clean --force
-npm install
+docker compose down && docker compose up --build -d
 ```
 
 **DB 초기화 (데이터 리셋)**
 ```bash
 rm backend/han_group.db
 # 서버 재시작하면 자동으로 재생성됩니다
+```
+
+**테스트 실패 시**
+```bash
+cd backend
+pip install -r requirements.txt
+pytest tests/ -v --tb=short
 ```

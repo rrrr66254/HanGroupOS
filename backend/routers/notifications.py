@@ -1,11 +1,11 @@
 """
-알림 시스템 라우터 — DB 영속화 + WebSocket 실시간 푸시
+알림 시스템 라우터 — DB 영속화 + WebSocket 실시간 푸시 (통합 허브)
 GET  /api/notifications          — 내 알림 목록
 POST /api/notifications/read/{id} — 읽음 처리
 POST /api/notifications/read-all  — 전체 읽음
 GET  /api/notifications/unread-count — 미읽음 수
 DELETE /api/notifications/{id}   — 삭제
-WS   /ws/notifications?token=    — 실시간 푸시 (unread_count)
+WS   /ws/notifications?token=    — 실시간 푸시 (통합: 알림/배지/메신저/터미널/GPU)
 """
 import asyncio
 from typing import Dict, List, Optional
@@ -18,9 +18,14 @@ from core.security import get_current_user
 from models.models import Notification, User
 
 
-# ── WebSocket 연결 관리자 ────────────────────────────────────────────────────
+# ── WebSocket 통합 연결 관리자 ────────────────────────────────────────────────
 
 class ConnectionManager:
+    """
+    통합 WebSocket 허브.
+    이벤트 타입: unread_count, badge_update, messenger_message,
+                terminal_update, provider_status, gpu_status
+    """
     def __init__(self):
         self.connections: Dict[int, List[WebSocket]] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -36,6 +41,10 @@ class ConnectionManager:
         conns = self.connections.get(user_id, [])
         if ws in conns:
             conns.remove(ws)
+
+    def get_connected_user_ids(self) -> List[int]:
+        """현재 연결된 사용자 ID 목록."""
+        return [uid for uid, conns in self.connections.items() if conns]
 
     async def broadcast_to(self, user_id: int, data: dict):
         dead = []
@@ -62,6 +71,35 @@ class ConnectionManager:
                 asyncio.run_coroutine_threadsafe(self.broadcast_all(data), self._loop)
         except Exception:
             pass
+
+    def broadcast_badge_sync(self, user_id: int, approvals: int, terminals: int):
+        """사이드바 배지 카운트 업데이트 브로드캐스트 (동기)."""
+        self.notify_sync(user_id, {
+            "type": "badge_update",
+            "approvals": approvals,
+            "terminals": terminals,
+        })
+
+    def broadcast_terminal_sync(self, user_id: int, request_data: dict):
+        """터미널 요청 상태 변경 브로드캐스트 (동기)."""
+        self.notify_sync(user_id, {
+            "type": "terminal_update",
+            **request_data,
+        })
+
+    def broadcast_provider_sync(self, data: dict):
+        """AI 프로바이더 상태 변경 브로드캐스트 (동기, 전체)."""
+        self.notify_sync(None, {
+            "type": "provider_status",
+            **data,
+        })
+
+    def broadcast_messenger_sync(self, user_id: int, message_data: dict):
+        """메신저 메시지 브로드캐스트 (동기)."""
+        self.notify_sync(user_id, {
+            "type": "messenger_message",
+            **message_data,
+        })
 
 
 manager = ConnectionManager()

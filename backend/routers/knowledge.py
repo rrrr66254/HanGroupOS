@@ -15,6 +15,8 @@ def list_documents(
     company_id: Optional[int] = None,
     doc_type: Optional[str] = None,
     search: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
@@ -27,7 +29,7 @@ def list_documents(
         q = q.filter(
             Document.title.ilike(f"%{search}%") | Document.content.ilike(f"%{search}%")
         )
-    return q.order_by(Document.created_at.desc()).all()
+    return q.order_by(Document.created_at.desc()).offset(offset).limit(min(limit, 500)).all()
 
 
 @router.post("", response_model=DocumentOut)

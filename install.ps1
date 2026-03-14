@@ -4,16 +4,17 @@
 
 $ErrorActionPreference = "Stop"
 
-$HAN_VERSION = "30"
+$HAN_VERSION = "32"
 $HAN_REPO    = "https://github.com/rrrr66254/HanGroupOS.git"
 $INSTALL_DIR = "$env:USERPROFILE\HanGroupOS"
 $HAN_CFG_DIR = "$env:USERPROFILE\.han"
 $HAN_BIN     = "$env:USERPROFILE\AppData\Local\Microsoft\WindowsApps"
+$GroupDisplayName = if ($env:GROUP_NAME) { $env:GROUP_NAME } else { "Group OS" }
 
 # ── 배너 ──────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "╔══════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "║   HAN Group OS v$HAN_VERSION — Windows 설치 프로그램  ║" -ForegroundColor Cyan
+Write-Host "║   $GroupDisplayName v$HAN_VERSION — Windows 설치 프로그램  ║" -ForegroundColor Cyan
 Write-Host "╚══════════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 
@@ -161,7 +162,7 @@ if ($UserPath -notlike "*$INSTALL_DIR*") {
 # ── 완료 ──────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host "  ✅ HAN Group OS v$HAN_VERSION 설치 완료!" -ForegroundColor Green
+Write-Host "  ✅ $GroupDisplayName v$HAN_VERSION 설치 완료!" -ForegroundColor Green
 Write-Host ""
 Write-Host "  설치 경로: $INSTALL_DIR"
 Write-Host ""

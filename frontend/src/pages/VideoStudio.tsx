@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Film, Play, Plus, Trash2, RefreshCw, AlertCircle, CheckCircle,
   Clock, Loader2, Users, Building2, Download, Upload, X, ImageIcon,
-  Cpu, Zap, AlertTriangle,
+  Cpu, Zap, AlertTriangle, XCircle,
 } from 'lucide-react'
 import { videoApi, companiesApi } from '../api/client'
-import { useAuthStore } from '../store/useStore'
+import { useAuthStore, useGroupStore } from '../store/useStore'
 
 interface GpuStatus {
   name?: string
@@ -72,6 +72,7 @@ const EST_SECONDS: Record<string, number> = {
 }
 
 export default function VideoStudio() {
+  const groupName = useGroupStore((s) => s.config.group_name)
   const [models, setModels] = useState<VideoModel[]>([])
   const [jobs, setJobs] = useState<VideoJob[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
@@ -92,6 +93,11 @@ export default function VideoStudio() {
   const [gpuStatus, setGpuStatus] = useState<GpuStatus | null>(null)
   const gpuPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const token = useAuthStore((s) => s.token)
+  const [cancelling, setCancelling] = useState<number | null>(null)
+  const [gpuTestResult, setGpuTestResult] = useState<any>(null)
+  const [gpuTesting, setGpuTesting] = useState(false)
+  const [downloading, setDownloading] = useState<string | null>(null)
+  const [showGpuTest, setShowGpuTest] = useState(false)
 
   // 회사 ID → 이름 맵
   const companyMap: Record<number, string> = {}
@@ -227,6 +233,32 @@ export default function VideoStudio() {
     }
   }
 
+  const handleCancel = async (job: VideoJob) => {
+    setCancelling(job.id)
+    try {
+      await videoApi.cancelJob(job.id)
+      await loadJobs()
+    } catch { /* ignore */ }
+    finally { setCancelling(null) }
+  }
+
+  const handleGpuTest = async () => {
+    setGpuTesting(true)
+    try {
+      const r = await videoApi.localGpuTest()
+      setGpuTestResult(r.data)
+    } catch { setGpuTestResult({ error: 'GPU 테스트 실패' }) }
+    finally { setGpuTesting(false) }
+  }
+
+  const handleModelDownload = async (modelId: string) => {
+    setDownloading(modelId)
+    try {
+      await videoApi.localGpuDownload(modelId)
+    } catch { /* ignore */ }
+    finally { setTimeout(() => setDownloading(null), 3000) }
+  }
+
   const handleDelete = async (job: VideoJob) => {
     await videoApi.deleteJob(job.id)
     if (selected?.id === job.id) setSelected(null)
@@ -325,13 +357,70 @@ export default function VideoStudio() {
 
             {/* 모델별 안내 */}
             {selectedModelInfo?.provider === 'local-gpu' ? (
-              <div className="bg-emerald-500/10 border border-emerald-500/20 rounded p-2.5 text-[10px] text-emerald-300 space-y-1">
+              <div className="bg-emerald-500/10 border border-emerald-500/20 rounded p-2.5 text-[10px] text-emerald-300 space-y-2">
                 <div className="font-semibold text-emerald-200">Local GPU — API 키 불필요, 완전 무료</div>
                 <div>필요 VRAM: {(selectedModelInfo as any).vram_gb ?? '?'}GB+ · RTX 5070 Ti 지원</div>
                 <div className="text-emerald-400">
                   첫 실행 시 모델 자동 다운로드 (수 GB). 터미널에서{' '}
                   <code className="bg-bg-base px-1 rounded">han setup-gpu</code>를 먼저 실행하세요.
                 </div>
+                <div className="flex gap-1.5 pt-1">
+                  <button
+                    onClick={() => { setShowGpuTest(!showGpuTest); if (!gpuTestResult) handleGpuTest() }}
+                    disabled={gpuTesting}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-[10px] bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 transition-colors disabled:opacity-40"
+                  >
+                    {gpuTesting ? <Loader2 size={10} className="animate-spin" /> : <Cpu size={10} />}
+                    GPU 테스트
+                  </button>
+                  <button
+                    onClick={() => handleModelDownload(selectedModel)}
+                    disabled={!!downloading}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-[10px] bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 transition-colors disabled:opacity-40"
+                  >
+                    {downloading === selectedModel ? <Loader2 size={10} className="animate-spin" /> : <Download size={10} />}
+                    모델 사전 다운로드
+                  </button>
+                </div>
+                {showGpuTest && gpuTestResult && (
+                  <div className="bg-bg-base border border-bg-border rounded p-2 space-y-1 text-[10px]">
+                    <div className="flex items-center gap-1.5">
+                      {gpuTestResult.cuda_available ? (
+                        <CheckCircle size={10} className="text-green-400" />
+                      ) : (
+                        <AlertCircle size={10} className="text-red-400" />
+                      )}
+                      <span className={gpuTestResult.cuda_available ? 'text-green-400' : 'text-red-400'}>
+                        CUDA: {gpuTestResult.cuda_available ? '사용 가능' : '사용 불가'}
+                      </span>
+                    </div>
+                    {gpuTestResult.gpu_name && (
+                      <div className="text-slate-400">GPU: {gpuTestResult.gpu_name}</div>
+                    )}
+                    {gpuTestResult.vram_total_gb > 0 && (
+                      <div className="text-slate-400">
+                        VRAM: {gpuTestResult.vram_free_gb}GB 여유 / {gpuTestResult.vram_total_gb}GB 전체
+                      </div>
+                    )}
+                    <div className="text-slate-500">
+                      PyTorch: {gpuTestResult.torch_version} · diffusers: {gpuTestResult.diffusers_installed ? '설치됨' : '미설치'}
+                    </div>
+                    {gpuTestResult.models?.map((m: any) => (
+                      <div key={m.id} className="flex items-center justify-between pl-2">
+                        <span className="text-slate-400">{m.label?.split('(')[0]?.trim()}</span>
+                        <span className={m.downloaded ? 'text-green-400' : 'text-yellow-400'}>
+                          {m.downloaded ? '다운로드됨' : '미다운로드'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {downloading && (
+                  <div className="flex items-center gap-1.5 text-blue-400">
+                    <Loader2 size={10} className="animate-spin" />
+                    모델 다운로드 시작됨 (백그라운드에서 진행)
+                  </div>
+                )}
               </div>
             ) : selectedModelInfo?.provider === 'json2video' ? (
               <div className="bg-indigo-500/10 border border-indigo-500/20 rounded p-2.5 text-[10px] text-indigo-300 space-y-1">
@@ -475,7 +564,7 @@ export default function VideoStudio() {
                       type="text"
                       value={j2vConfig.logo}
                       onChange={(e) => setJ2vConfig((p) => ({ ...p, logo: e.target.value }))}
-                      placeholder="HAN Group"
+                      placeholder={groupName}
                       className="w-full bg-bg-base border border-bg-border rounded text-xs text-slate-200 p-1.5 focus:outline-none focus:border-brand/60 placeholder:text-slate-600"
                     />
                   </div>
@@ -608,12 +697,23 @@ export default function VideoStudio() {
                       </span>
                     )}
                   </div>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleDelete(job) }}
-                    className="text-slate-600 hover:text-red-400 transition-colors shrink-0 ml-1"
-                  >
-                    <Trash2 size={11} />
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0 ml-1">
+                    {(job.status === 'pending' || job.status === 'running') && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleCancel(job) }}
+                        className="text-slate-600 hover:text-yellow-400 transition-colors"
+                        title="생성 중단"
+                      >
+                        {cancelling === job.id ? <Loader2 size={11} className="animate-spin" /> : <XCircle size={11} />}
+                      </button>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDelete(job) }}
+                      className="text-slate-600 hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
                 </div>
                 <p className="text-xs text-slate-300 truncate">{job.prompt}</p>
                 <p className="text-[10px] text-slate-600 mt-0.5">{new Date(job.created_at).toLocaleString('ko-KR')}</p>
@@ -712,6 +812,17 @@ export default function VideoStudio() {
                     )}
                   </div>
                 )}
+                <button
+                  onClick={() => handleCancel(selected)}
+                  disabled={cancelling === selected.id}
+                  className="flex items-center justify-center gap-2 py-2 rounded text-xs font-medium bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 transition-colors disabled:opacity-40"
+                >
+                  {cancelling === selected.id ? (
+                    <><Loader2 size={13} className="animate-spin" /> 중단 중...</>
+                  ) : (
+                    <><XCircle size={13} /> 생성 중단</>
+                  )}
+                </button>
               </div>
             )}
 
@@ -728,7 +839,7 @@ export default function VideoStudio() {
           <div className="flex-1 flex flex-col items-center justify-center gap-4 text-slate-600">
             <Film size={48} strokeWidth={1} />
             <div className="text-center">
-              <p className="text-sm text-slate-400">HAN Group 공유 영상 스튜디오</p>
+              <p className="text-sm text-slate-400">{groupName} 공유 영상 스튜디오</p>
               <p className="text-xs mt-1">FAL-AI · HuggingFace · JSON2Video 지원</p>
               <p className="text-xs text-slate-600 mt-1">왼쪽에서 프롬프트를 입력하고 영상을 생성하세요</p>
             </div>

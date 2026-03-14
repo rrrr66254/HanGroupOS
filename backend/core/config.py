@@ -5,7 +5,7 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # App
-    APP_NAME: str = "HAN Group OS"
+    APP_NAME: str = "Group OS"
     VERSION: str = "27.0.0"
     DEBUG: bool = True
 

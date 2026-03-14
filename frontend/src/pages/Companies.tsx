@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Building2, Plus, X, RefreshCw, ChevronRight, ChevronLeft, Bot, Check, Zap, Sparkles } from 'lucide-react'
 import { companiesApi, orgApi, modelsApi, capabilitiesApi, approvalsApi } from '../api/client'
 import type { Company, OrgNode } from '../types'
+import { useT } from '../i18n'
 import OrgChart from '../components/OrgChart'
 import type { NodeMovePayload } from '../components/OrgChart'
 
@@ -440,6 +441,7 @@ const STATUS_MAP: Record<string, string> = {
 
 // ── Main Page ─────────────────────────────────────────────────────────────
 export default function Companies() {
+  const t = useT()
   const [companies, setCompanies] = useState<Company[]>([])
   const [selected, setSelected] = useState<Company | null>(null)
   const [orgTree, setOrgTree] = useState<OrgNode[]>([])
@@ -514,7 +516,7 @@ export default function Companies() {
         <div className="lg:col-span-1 space-y-2">
           <h3 className="text-xs text-slate-500 font-medium px-1">{filtered.length}개 계열사</h3>
           {filtered.length === 0 && (
-            <div className="card p-8 text-center text-slate-600 text-sm">계열사가 없습니다.</div>
+            <div className="card p-8 text-center text-slate-600 text-sm">{t('companies.noCompanies')}</div>
           )}
           {filtered.map((c) => (
             <div

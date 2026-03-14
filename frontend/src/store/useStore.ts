@@ -21,6 +21,36 @@ export const useAuthStore = create<AuthState>()(
   )
 )
 
+// ── Group Settings Store ─────────────────────────────────────────────────────
+export interface GroupConfig {
+  group_name: string
+  group_name_ko: string
+  slogan: string
+  slogan_ko: string
+}
+
+interface GroupSettingsState {
+  config: GroupConfig
+  loaded: boolean
+  setConfig: (c: GroupConfig) => void
+}
+
+export const useGroupStore = create<GroupSettingsState>()(
+  persist(
+    (set) => ({
+      config: {
+        group_name: 'Group',
+        group_name_ko: '그룹',
+        slogan: 'AI Corporate Operating System',
+        slogan_ko: 'AI 기업 운영 시스템',
+      },
+      loaded: false,
+      setConfig: (c) => set({ config: c, loaded: true }),
+    }),
+    { name: 'group-settings' }
+  )
+)
+
 export interface AppToast {
   id: string
   type: 'success' | 'error' | 'info'
@@ -32,20 +62,26 @@ export interface AppToast {
 interface AppState {
   selectedCompany: Company | null
   sidebarOpen: boolean
+  mobileSidebarOpen: boolean
   newEventCount: number
   pendingApprovals: number
   pendingTerminals: number
   badgeTick: number
   theme: 'dark' | 'light'
+  wsStatus: 'connecting' | 'connected' | 'disconnected' | 'failed'
+  wsRetryCount: number
   toasts: AppToast[]
   setSelectedCompany: (company: Company | null) => void
   toggleSidebar: () => void
+  setMobileSidebarOpen: (open: boolean) => void
   setNewEventCount: (n: number) => void
   clearNewEvents: () => void
   setPendingApprovals: (n: number) => void
   setPendingTerminals: (n: number) => void
   triggerBadgeRefresh: () => void
   toggleTheme: () => void
+  setWsStatus: (s: 'connecting' | 'connected' | 'disconnected' | 'failed') => void
+  setWsRetryCount: (n: number) => void
   addToast: (t: Omit<AppToast, 'id'>) => void
   removeToast: (id: string) => void
 }
@@ -53,19 +89,25 @@ interface AppState {
 export const useAppStore = create<AppState>((set) => ({
   selectedCompany: null,
   sidebarOpen: true,
+  mobileSidebarOpen: false,
   newEventCount: 0,
   pendingApprovals: 0,
   pendingTerminals: 0,
   badgeTick: 0,
   theme: (localStorage.getItem('han-theme') as 'dark' | 'light') ?? 'dark',
+  wsStatus: 'disconnected' as const,
+  wsRetryCount: 0,
   toasts: [],
   setSelectedCompany: (company) => set({ selectedCompany: company }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+  setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
   setNewEventCount: (n) => set({ newEventCount: n }),
   clearNewEvents: () => set({ newEventCount: 0 }),
   setPendingApprovals: (n) => set({ pendingApprovals: n }),
   setPendingTerminals: (n) => set({ pendingTerminals: n }),
   triggerBadgeRefresh: () => set((s) => ({ badgeTick: s.badgeTick + 1 })),
+  setWsStatus: (s) => set({ wsStatus: s }),
+  setWsRetryCount: (n) => set({ wsRetryCount: n }),
   toggleTheme: () => set((s) => {
     const next = s.theme === 'dark' ? 'light' : 'dark'
     localStorage.setItem('han-theme', next)

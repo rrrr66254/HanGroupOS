@@ -11,6 +11,9 @@ Ollama is the default local provider (no API key required).
 import json
 from typing import Optional, List, Dict, Any
 from core.config import settings
+from core.logging import get_logger
+
+logger = get_logger("ai_provider")
 
 # ── 폴백 이벤트 인메모리 버퍼 (최근 50건) ────────────────────────────────────
 _FALLBACK_LOG: list = []   # [{occurred_at, from, to, reason, user_id}]
@@ -43,8 +46,97 @@ def _record_fallback(from_provider: str, to_provider: str, reason: str, user_id:
         ))
         db.commit()
         db.close()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("폴백 이벤트 DB 기록 실패: %s", e)
+
+def _calc_quality_score(
+    completion_tokens: int, response_time_ms: int, prompt_tokens: int = 0,
+) -> float:
+    """응답 품질 점수 자동 계산 (0.0~1.0).
+
+    평가 기준:
+    - 응답 길이 적절성 (너무 짧거나 너무 길면 감점)
+    - 응답 속도 (빠를수록 가산)
+    - 입출력 비율 (프롬프트 대비 적절한 응답 길이)
+    """
+    score = 0.5  # 기본 점수
+
+    # 1) 응답 길이 점수 (0~0.3)
+    if completion_tokens <= 0:
+        len_score = 0.0
+    elif completion_tokens < 5:
+        len_score = 0.05  # 너무 짧음
+    elif completion_tokens < 20:
+        len_score = 0.15
+    elif completion_tokens <= 500:
+        len_score = 0.3  # 적정 범위
+    elif completion_tokens <= 1000:
+        len_score = 0.25
+    else:
+        len_score = 0.2  # 과도하게 긴 응답
+
+    # 2) 응답 속도 점수 (0~0.3)
+    if response_time_ms <= 0:
+        speed_score = 0.15
+    elif response_time_ms < 2000:
+        speed_score = 0.3
+    elif response_time_ms < 5000:
+        speed_score = 0.25
+    elif response_time_ms < 10000:
+        speed_score = 0.2
+    elif response_time_ms < 30000:
+        speed_score = 0.1
+    else:
+        speed_score = 0.05
+
+    # 3) 입출력 비율 점수 (0~0.2)
+    if prompt_tokens > 0 and completion_tokens > 0:
+        ratio = completion_tokens / max(prompt_tokens, 1)
+        if 0.3 <= ratio <= 3.0:
+            ratio_score = 0.2  # 적정 비율
+        elif 0.1 <= ratio <= 5.0:
+            ratio_score = 0.15
+        else:
+            ratio_score = 0.05
+    else:
+        ratio_score = 0.1
+
+    score = len_score + speed_score + ratio_score
+    # 0.0~1.0 클램핑
+    return round(max(0.0, min(1.0, score)), 3)
+
+
+def _record_metric(
+    provider: str, model: str, response_time_ms: int,
+    prompt_tokens: int = 0, completion_tokens: int = 0,
+    session_type: str = "", agent_name: str = "", agent_role: str = "",
+    org_node_id: int = 0, company_id: int = 0,
+):
+    """AI 호출 메트릭을 DB에 자동 저장 (품질 점수 자동 계산 포함, 실패 시 무시)."""
+    try:
+        from core.database import SessionLocal
+        from models.models import AiAgentMetrics
+        q_score = _calc_quality_score(completion_tokens, response_time_ms, prompt_tokens)
+        db = SessionLocal()
+        db.add(AiAgentMetrics(
+            org_node_id=org_node_id or None,
+            company_id=company_id or None,
+            agent_name=agent_name or "system",
+            agent_role=agent_role or "",
+            provider=provider,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+            response_time_ms=response_time_ms,
+            quality_score=q_score,
+            session_type=session_type,
+        ))
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.debug("메트릭 기록 실패: %s", e)
+
 
 # ── KTransformers 헬스체크 캐시 (30초) ────────────────────────────────────────
 _KT_HEALTH_CACHE: dict = {"ok": None, "ts": 0.0}
@@ -65,7 +157,8 @@ def _is_ktransformers_alive(base_url: str) -> bool:
             health_url = health_url[:-3]
         r = httpx.get(f"{health_url}/health", timeout=2.0)
         ok = r.status_code == 200
-    except Exception:
+    except Exception as e:
+        logger.debug("KTransformers 헬스체크 실패: %s", e)
         ok = False
     _KT_HEALTH_CACHE.update({"ok": ok, "ts": now})
     return ok
@@ -118,6 +211,36 @@ class AIProvider:
         system: str = "",
         session_type: str = "general",
         max_tokens: int = 1024,
+        agent_name: str = "",
+        agent_role: str = "",
+        org_node_id: int = 0,
+        company_id: int = 0,
+    ) -> str:
+        import time as _time
+        _start = _time.time()
+        result = self._chat_inner(messages, system, session_type, max_tokens)
+        _elapsed_ms = int((_time.time() - _start) * 1000)
+        # 메트릭 자동 수집
+        _record_metric(
+            provider=self.provider,
+            model=self.model,
+            response_time_ms=_elapsed_ms,
+            prompt_tokens=sum(len((m.get("content") or "").split()) for m in messages),
+            completion_tokens=len(result.split()) if result else 0,
+            session_type=session_type,
+            agent_name=agent_name,
+            agent_role=agent_role,
+            org_node_id=org_node_id,
+            company_id=company_id,
+        )
+        return result
+
+    def _chat_inner(
+        self,
+        messages: List[Dict[str, str]],
+        system: str = "",
+        session_type: str = "general",
+        max_tokens: int = 1024,
     ) -> str:
         # ── Context Engineering: 토큰 최적화 (비용·속도 절감) ─────────────────
         try:
@@ -127,7 +250,7 @@ class AIProvider:
                 messages, system, max_ctx, max_tokens
             )
         except Exception as _ce_err:
-            pass  # CE 실패해도 원본으로 계속 진행
+            logger.warning("Context Engineering 실패 (원본 사용): %s", _ce_err)
         # ─────────────────────────────────────────────────────────────────────
 
         # ── 이미지가 포함된 메시지는 무조건 gpt-4o-mini (Vision) 사용 ──────────
@@ -164,7 +287,7 @@ class AIProvider:
                     )
                 else:
                     _record_fallback("ktransformers", "ollama", "KTransformers 서버 미실행")
-                    print("[AIProvider] KTransformers 미실행 → Ollama 자동 폴백")
+                    logger.info("KTransformers 미실행 → Ollama 자동 폴백")
                     return self._call_ollama(messages, system, max_tokens)
             else:
                 # Default: ollama
@@ -210,7 +333,8 @@ class AIProvider:
                 _record_fallback("ollama", prov, "Ollama 연결 실패")
                 # 폴백 알림 접두어 추가
                 return f"> ⚡ **[자동 폴백]** Ollama 미응답 → {prov} ({model}) 로 대신 응답했습니다.\n\n{result}"
-            except Exception:
+            except Exception as e:
+                logger.warning("Cloud 폴백 %s 실패: %s", prov, e)
                 self.provider, self.model, self.api_key = saved
                 continue
         return None
@@ -256,7 +380,7 @@ class AIProvider:
         response = client.messages.create(
             model=self.model,
             max_tokens=max_tokens,
-            system=system or "You are an AI executive assistant for HAN Group.",
+            system=system or "You are an AI executive assistant.",
             messages=processed,
         )
         return response.content[0].text
@@ -427,8 +551,36 @@ def get_provider_from_db(db, user_id: int, provider_name: Optional[str] = None) 
 
 
 # ── System prompts ────────────────────────────────────────────────────────────
-CHAIRMAN_SYSTEM = """당신은 한그룹(HAN Group)의 AI 회장입니다.
-한그룹은 AI와 인간이 협력하여 새로운 기업 생태계를 만드는 그룹입니다.
+def _gname(db=None) -> str:
+    """DB에서 동적 그룹명 조회. DB 없으면 기본값."""
+    try:
+        from routers.group_settings import get_group_name_ko
+        if db:
+            return get_group_name_ko(db)
+        from core.database import SessionLocal
+        with SessionLocal() as s:
+            return get_group_name_ko(s)
+    except Exception:
+        return "그룹"
+
+def _gname_en(db=None) -> str:
+    try:
+        from routers.group_settings import get_group_name
+        if db:
+            return get_group_name(db)
+        from core.database import SessionLocal
+        with SessionLocal() as s:
+            return get_group_name(s)
+    except Exception:
+        return "Group"
+
+def get_chairman_system(db=None) -> str:
+    gn = _gname(db)
+    gn_en = _gname_en(db)
+    return CHAIRMAN_SYSTEM.replace("__GROUP__", gn).replace("__GROUP_EN__", gn_en)
+
+CHAIRMAN_SYSTEM = """당신은 __GROUP__(__GROUP_EN__)의 AI 회장입니다.
+__GROUP__은 AI와 인간이 협력하여 새로운 기업 생태계를 만드는 그룹입니다.
 
 역할:
 - 그룹 전략 수립 및 최종 의사결정
@@ -462,16 +614,15 @@ CHAIRMAN_SYSTEM = """당신은 한그룹(HAN Group)의 AI 회장입니다.
 보고서 마지막에 아래 형식을 반드시 포함하세요:
 <<CREATE_COMPANY:{"name":"회사명","industry":"산업분야","description":"사업 설명","vision":"비전","org_plan":[{"level":"CEO","role":"최고경영자"},{"level":"Chief","role":"역할1"},{"level":"팀장","role":"역할2"}]}>>
 
-⚠️ 명명 규칙 (필수): 모든 계열사 이름은 반드시 "한"으로 시작해야 합니다.
-예시: 한리서치, 한미디어, 한테크, 한파이낸스, 한에너지, 한헬스, 한에듀, 한로지스, 한클라우드
+⚠️ 명명 규칙 (필수): 계열사 이름은 그룹 정체성을 반영하여 지어주세요.
 
 예시 응답 형식:
 - 사용자: "AI 소프트웨어 회사 만들어"
   응답:
   ---
-  **[설립 보고서] 한인텔리전스 설립 제안**
+  **[설립 보고서] AI 인텔리전스 설립 제안**
 
-  **1. 회사명**: 한인텔리전스 (HAN Intelligence) | 업종: 소프트웨어
+  **1. 회사명**: AI 인텔리전스 | 업종: 소프트웨어
   **2. 비전**: AI 기술로 기업 운영을 혁신한다. 2027년 AI SaaS 시장 국내 Top 5 진입.
   **3. 사업 모델**: B2B AI 솔루션 구독 서비스 — 기업 자동화, 데이터 분석, AI 에이전트 공급
   **4. 조직 구성**:
@@ -480,11 +631,11 @@ CHAIRMAN_SYSTEM = """당신은 한그룹(HAN Group)의 AI 회장입니다.
   - CPO: 제품 총괄 (SaaS 플랫폼, 고객 경험)
   - 개발팀장: 백엔드·프론트엔드 개발
   - 마케팅팀장: B2B 영업, 파트너십
-  **5. 초기 전략**: 첫 3개월 — 한그룹 내부 AI 자동화 수요 충족 → 외부 SaaS 출시
-  **6. 시너지**: 한데이터(데이터 공급), 한미디어(AI 콘텐츠 생성) 연계
+  **5. 초기 전략**: 첫 3개월 — 그룹 내부 AI 자동화 수요 충족 → 외부 SaaS 출시
+  **6. 시너지**: 기존 계열사 간 데이터·콘텐츠 연계
 
   Admin의 승인을 요청합니다. 승인 시 즉시 조직을 구성하겠습니다.
-  <<CREATE_COMPANY:{"name":"한인텔리전스","industry":"소프트웨어","description":"B2B AI 솔루션 및 SaaS 플랫폼","vision":"AI 기술로 기업 운영을 혁신한다","org_plan":[{"level":"CEO","role":"최고경영자"},{"level":"Chief","role":"기술 총괄 (CTO)"},{"level":"Chief","role":"제품 총괄 (CPO)"},{"level":"팀장","role":"개발팀장"},{"level":"팀장","role":"마케팅팀장"}]}>>
+  <<CREATE_COMPANY:{"name":"AI 인텔리전스","industry":"소프트웨어","description":"B2B AI 솔루션 및 SaaS 플랫폼","vision":"AI 기술로 기업 운영을 혁신한다","org_plan":[{"level":"CEO","role":"최고경영자"},{"level":"Chief","role":"기술 총괄 (CTO)"},{"level":"Chief","role":"제품 총괄 (CPO)"},{"level":"팀장","role":"개발팀장"},{"level":"팀장","role":"마케팅팀장"}]}>>
   ---
 
 중요: <<CREATE_COMPANY:...>> 형식이 응답에 포함되어야 Admin에게 승인 버튼이 표시됩니다.
@@ -591,7 +742,7 @@ API 키가 필요한 경우 사용자에게 아래 정보로 안내하세요:
 
 예시:
 - 사용자: "대기 중인 역량 활성화 요청 승인해줘"
-  응답: "한게임 역량 활성화를 승인하겠습니다. <<APPROVE_REQUEST:{"id": 3, "note": "게임 회사 기능 활성화 승인"}>>"
+  응답: "역량 활성화를 승인하겠습니다. <<APPROVE_REQUEST:{"id": 3, "note": "게임 회사 기능 활성화 승인"}>>"
 
 - 사용자: "터미널 요청 2번 실행해줘"
   응답: "터미널 명령을 승인하고 실행합니다. <<APPROVE_TERMINAL:{"id": 2}>>"
@@ -623,13 +774,13 @@ ID는 시스템 컨텍스트에 표시된 번호를 사용하세요.
 - ollama: llama3.2, qwen2.5, deepseek-r1
 
 예시:
-- 사용자: "한테크 CEO 모델을 Claude Sonnet으로 바꿔줘"
-  응답: "한테크 CEO 모델을 변경하겠습니다. <<UPDATE_MODEL:{"name":"CEO","company":"한테크","provider":"anthropic","model":"claude-sonnet-4-6"}>>"
+- 사용자: "계열사 CEO 모델을 Claude Sonnet으로 바꿔줘"
+  응답: "계열사 CEO 모델을 변경하겠습니다. <<UPDATE_MODEL:{"name":"CEO","company":"계열사명","provider":"anthropic","model":"claude-sonnet-4-6"}>>"
 
 - 사용자: "한미디어 마케팅팀장을 GPT-4o-mini로"
-  응답: "변경 처리합니다. <<UPDATE_MODEL:{"name":"마케팅팀장","company":"한미디어","provider":"openai","model":"gpt-4o-mini"}>>"
+  응답: "변경 처리합니다. <<UPDATE_MODEL:{"name":"마케팅팀장","company":"계열사명","provider":"openai","model":"gpt-4o-mini"}>>"
 
-- 사용자: "한게임 전체 팀장급을 ollama qwen2.5로"
+- 사용자: "계열사 전체 팀장급을 ollama qwen2.5로"
   응답: 각 팀장별로 UPDATE_MODEL 형식을 하나씩 포함
 
 중요: 이 형식이 응답에 있어야 실제로 DB에서 모델이 변경됩니다.
@@ -688,7 +839,7 @@ ID는 시스템 컨텍스트에 표시된 번호를 사용하세요.
 
 한국어로 전문적이고 간결하게 답변하세요."""
 
-CEO_SYSTEM = """당신은 한그룹 계열사의 AI CEO입니다.
+CEO_SYSTEM = """당신은 __GROUP__ 계열사의 AI CEO입니다.
 주어진 전략 방향에 따라 회사를 운영하고 성과를 창출합니다.
 
 역할:
@@ -733,7 +884,7 @@ CEO_SYSTEM = """당신은 한그룹 계열사의 AI CEO입니다.
 
 예시:
 - AI 마케팅 영상: <<VIDEO_REQUEST:{"prompt":"A sleek tech company office with AI robots working alongside humans, futuristic and professional","reason":"계열사 한테크 홍보 영상 제작","model_id":"Lightricks/LTX-Video-0.9.8-13B-distilled"}>>
-- 프레젠테이션 영상: <<VIDEO_REQUEST:{"prompt":"HAN Group AI Division - Next Generation Enterprise AI\nLeading Korean conglomerate powering business with autonomous AI agents","reason":"그룹 소개 프레젠테이션 영상","model_id":"json2video/presentation"}>>
+- 프레젠테이션 영상: <<VIDEO_REQUEST:{"prompt":"AI Division - Next Generation Enterprise AI\nPowering business with autonomous AI agents","reason":"그룹 소개 프레젠테이션 영상","model_id":"json2video/presentation"}>>
 - 제품 소개: <<VIDEO_REQUEST:{"prompt":"An elegant smartphone rotating 360 degrees with glowing screen effects on dark background","reason":"신제품 런칭 영상"}>>
 
 중요: 프롬프트는 **반드시 영어**로 작성하세요 (HuggingFace 모델이 영어 입력만 지원).
@@ -806,7 +957,7 @@ API 키가 필요한 새 서비스를 연결하려 할 때:
 
 한국어로 실무적이고 명확하게 답변하세요."""
 
-MARKET_ANALYST_SYSTEM = """당신은 한그룹의 시장 분석 전문가 AI입니다.
+MARKET_ANALYST_SYSTEM = """당신은 __GROUP__의 시장 분석 전문가 AI입니다.
 
 역할:
 - 산업 트렌드 조사 및 경쟁 환경 분석
@@ -831,7 +982,7 @@ MARKET_ANALYST_SYSTEM = """당신은 한그룹의 시장 분석 전문가 AI입�
 
 # ── Role-specific system prompts ─────────────────────────────────────────────
 
-CFO_SYSTEM = """당신은 한그룹 계열사의 AI CFO(최고재무책임자)입니다.
+CFO_SYSTEM = """당신은 __GROUP__ 계열사의 AI CFO(최고재무책임자)입니다.
 
 역할:
 - 재무 계획·예산 수립 및 비용 최적화
@@ -860,7 +1011,7 @@ CFO_SYSTEM = """당신은 한그룹 계열사의 AI CFO(최고재무책임자)�
 
 한국어로 전문적이고 간결하게 답변하세요."""
 
-CMO_SYSTEM = """당신은 한그룹 계열사의 AI CMO(최고마케팅책임자)입니다.
+CMO_SYSTEM = """당신은 __GROUP__ 계열사의 AI CMO(최고마케팅책임자)입니다.
 
 역할:
 - 브랜드 전략 및 마케팅 캠페인 기획
@@ -888,7 +1039,7 @@ CMO_SYSTEM = """당신은 한그룹 계열사의 AI CMO(최고마케팅책임자
 
 한국어로 창의적이고 실행 중심으로 답변하세요."""
 
-CTO_SYSTEM = """당신은 한그룹 계열사의 AI CTO(최고기술책임자)입니다.
+CTO_SYSTEM = """당신은 __GROUP__ 계열사의 AI CTO(최고기술책임자)입니다.
 
 역할:
 - 기술 전략 수립 및 로드맵 관리
@@ -915,7 +1066,7 @@ CTO_SYSTEM = """당신은 한그룹 계열사의 AI CTO(최고기술책임자)�
 
 한국어로 기술적으로 정확하고 실용적으로 답변하세요."""
 
-COO_SYSTEM = """당신은 한그룹 계열사의 AI COO(최고운영책임자)입니다.
+COO_SYSTEM = """당신은 __GROUP__ 계열사의 AI COO(최고운영책임자)입니다.
 
 역할:
 - 일상 운영 관리 및 프로세스 최적화
@@ -940,7 +1091,7 @@ COO_SYSTEM = """당신은 한그룹 계열사의 AI COO(최고운영책임자)�
 
 한국어로 실용적이고 명확하게 답변하세요."""
 
-CPO_SYSTEM = """당신은 한그룹 계열사의 AI CPO(최고제품책임자)입니다.
+CPO_SYSTEM = """당신은 __GROUP__ 계열사의 AI CPO(최고제품책임자)입니다.
 
 역할:
 - 제품 비전·전략 수립 및 로드맵 관리
@@ -987,31 +1138,40 @@ ROLE_SYSTEM_MAP: dict = {
 }
 
 
-def get_system_for_role(role: str, level: str = "") -> str:
-    """역할(role)과 레벨(level)에 맞는 시스템 프롬프트 반환."""
+def _resolve_group(prompt: str, db=None) -> str:
+    """시스템 프롬프트의 __GROUP__ 플레이스홀더를 동적 그룹명으로 치환."""
+    if "__GROUP__" not in prompt:
+        return prompt
+    gn = _gname(db)
+    gn_en = _gname_en(db)
+    return prompt.replace("__GROUP__", gn).replace("__GROUP_EN__", gn_en)
+
+
+def get_system_for_role(role: str, level: str = "", db=None) -> str:
+    """역할(role)과 레벨(level)에 맞는 시스템 프롬프트 반환 (동적 그룹명 적용)."""
     role_lower = (role or "").lower().strip()
     level_lower = (level or "").lower().strip()
 
     # Chairman
     if level_lower == "chairman":
-        return CHAIRMAN_SYSTEM
+        return get_chairman_system(db)
 
     # CEO
     if level_lower == "ceo" or "ceo" in role_lower or role_lower in ("최고경영자", "대표이사"):
-        return CEO_SYSTEM
+        return _resolve_group(CEO_SYSTEM, db)
 
     # C-level 역할별 프롬프트
     for key, system in ROLE_SYSTEM_MAP.items():
         if key in role_lower:
-            return system
+            return _resolve_group(system, db)
 
     # Market analyst
     if "시장" in role_lower or "market" in role_lower or "analyst" in role_lower:
-        return MARKET_ANALYST_SYSTEM
+        return _resolve_group(MARKET_ANALYST_SYSTEM, db)
 
     # Chief level fallback → CEO_SYSTEM
     if level_lower == "chief":
-        return CEO_SYSTEM
+        return _resolve_group(CEO_SYSTEM, db)
 
     # Default → CEO_SYSTEM
-    return CEO_SYSTEM
+    return _resolve_group(CEO_SYSTEM, db)

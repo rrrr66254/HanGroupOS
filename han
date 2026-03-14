@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# han — HAN Group OS CLI
+# han — Group OS CLI
 # 설치: curl -fsSL https://raw.githubusercontent.com/rrrr66254/HanGroupOS/master/install.sh | bash
 # 사용: han <명령>  |  han help 로 전체 목록 확인
 
 set -e
 
-HAN_VERSION="30"
+HAN_VERSION="39"
+GROUP_DISPLAY_NAME="${GROUP_NAME:-Group OS}"
 HAN_RUN_DIR="$HOME/.han"
 HAN_LOG_DIR="$HAN_RUN_DIR/logs"
 HAN_BACKUP_DIR="$HAN_RUN_DIR/backups"
@@ -37,7 +38,7 @@ if [ -z "$HAN_DIR" ]; then
   elif [ -d "$HOME/HanGroupOS" ]; then
     HAN_DIR="$HOME/HanGroupOS"
   else
-    echo -e "${RED}✗ HAN Group OS 설치 경로를 찾을 수 없습니다.${NC}"
+    echo -e "${RED}✗ ${GROUP_DISPLAY_NAME} 설치 경로를 찾을 수 없습니다.${NC}"
     echo ""
     echo "  설치하려면:"
     echo "    curl -fsSL https://raw.githubusercontent.com/rrrr66254/HanGroupOS/master/install.sh | bash"
@@ -74,7 +75,7 @@ port_in_use() {
 # ── han help ──────────────────────────────────────────────────────────────────
 cmd_help() {
   echo ""
-  echo -e "${BOLD}han — HAN Group OS CLI v${HAN_VERSION}${NC}"
+  echo -e "${BOLD}han — ${GROUP_DISPLAY_NAME} CLI v${HAN_VERSION}${NC}"
   echo ""
   echo "사용법:  han <명령> [옵션]"
   echo ""
@@ -136,7 +137,7 @@ cmd_help() {
 
 # ── han --version ─────────────────────────────────────────────────────────────
 cmd_version() {
-  echo "han v${HAN_VERSION} — HAN Group OS CLI"
+  echo "han v${HAN_VERSION} — ${GROUP_DISPLAY_NAME} CLI"
   echo "설치 경로: $HAN_DIR"
   if command -v git &>/dev/null && [ -d "$HAN_DIR/.git" ]; then
     local commit
@@ -607,7 +608,7 @@ cmd_start() {
   fi
 
   if [ "$DAEMON" = true ]; then
-    echo -e "${BOLD}HAN Group OS 백그라운드 시작 중...${NC}"
+    echo -e "${BOLD}${GROUP_DISPLAY_NAME} 백그라운드 시작 중...${NC}"
     echo ""
 
     cd "$HAN_DIR/backend"
@@ -630,7 +631,7 @@ cmd_start() {
     sleep 2
     echo ""
     echo -e "${GREEN}════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}  ✅ HAN Group OS v${HAN_VERSION} 백그라운드 실행 중${NC}"
+    echo -e "${GREEN}  ✅ ${GROUP_DISPLAY_NAME} v${HAN_VERSION} 백그라운드 실행 중${NC}"
     echo ""
     echo "  🌐 앱:  http://localhost:5173"
     echo "  🔧 API: http://localhost:8000"
@@ -707,7 +708,7 @@ cmd_stop() {
 # ── han restart ───────────────────────────────────────────────────────────────
 cmd_restart() {
   echo ""
-  echo -e "${BOLD}HAN Group OS 재시작${NC}"
+  echo -e "${BOLD}${GROUP_DISPLAY_NAME} 재시작${NC}"
   echo ""
 
   # ─ 현재 LLM 설정 읽기 ──────────────────────────────────────────────────────
@@ -755,7 +756,7 @@ cmd_restart() {
 # ── han status ────────────────────────────────────────────────────────────────
 cmd_status() {
   echo ""
-  echo -e "${BOLD}HAN Group OS 상태${NC}"
+  echo -e "${BOLD}${GROUP_DISPLAY_NAME} 상태${NC}"
   echo ""
 
   for spec in "8000:백엔드:$HAN_PID_BACKEND" "5173:프론트엔드:$HAN_PID_FRONTEND"; do
@@ -1388,7 +1389,7 @@ cmd_backup_auto() {
   HAN_BIN=$(command -v han 2>/dev/null || echo "$HAN_DIR/han")
 
   # crontab 항목 식별 태그
-  local CRON_TAG="# HAN Group OS auto-backup"
+  local CRON_TAG="# ${GROUP_DISPLAY_NAME} auto-backup"
 
   case "$SUBCMD" in
     # ── enable ────────────────────────────────────────────────────────────────
@@ -1766,7 +1767,7 @@ cmd_path_fix() {
         echo -e "  ${GREEN}✓ 이미 $RC 에 PATH가 등록되어 있습니다.${NC}"
       else
         echo "" >> "$RC"
-        echo "# HAN Group OS CLI" >> "$RC"
+        echo "# ${GROUP_DISPLAY_NAME} CLI" >> "$RC"
         echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$RC"
         echo -e "  ${GREEN}✓ PATH 영구 등록됨${NC} → $RC"
       fi

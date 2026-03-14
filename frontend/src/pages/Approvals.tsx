@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { CheckSquare, X, Check, Mail, Clock, AlertCircle, Terminal, Bot, Loader, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react'
 import { approvalsApi, terminalApi } from '../api/client'
 import { useAppStore } from '../store/useStore'
+import { useT } from '../i18n'
 import type { ApprovalRequest } from '../types'
 import { format } from 'date-fns'
 
@@ -332,6 +333,7 @@ function TerminalDetail({ tr, onDecide, onClose }: {
 
 export default function Approvals() {
   const { triggerBadgeRefresh } = useAppStore()
+  const t = useT()
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([])
   const [terminals, setTerminals] = useState<TerminalRequest[]>([])
   const [mainTab, setMainTab] = useState<'approvals' | 'terminal'>('approvals')
@@ -417,7 +419,7 @@ export default function Approvals() {
                     : 'text-slate-500 hover:text-slate-300 hover:bg-bg-elevated'
                 }`}
               >
-                {s === 'pending' ? '대기' : s === 'approved' ? '승인' : '반려'}
+                {s === 'pending' ? t('approvals.pending') : s === 'approved' ? t('approvals.approved') : t('approvals.rejected')}
               </button>
             ))}
           </div>
@@ -425,7 +427,7 @@ export default function Approvals() {
             {approvals.length === 0 && (
               <div className="card p-12 text-center text-slate-600">
                 <Mail size={32} className="mx-auto mb-3 text-slate-700" />
-                <p className="text-sm">해당하는 승인 요청이 없습니다.</p>
+                <p className="text-sm">{t('approvals.noPending')}</p>
               </div>
             )}
             {approvals.map((a) => (

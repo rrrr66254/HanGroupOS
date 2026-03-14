@@ -1,4 +1,4 @@
-# HAN Group OS v30 — Windows PowerShell Startup Script
+# Group OS v32 — Windows PowerShell Startup Script
 # 사용법: PowerShell 관리자 권한으로 실행
 #   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 #   .\start.ps1
@@ -7,11 +7,12 @@ $ErrorActionPreference = "Stop"
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $BACKEND = Join-Path $ROOT "backend"
 $FRONTEND = Join-Path $ROOT "frontend"
+$GroupDisplayName = if ($env:GROUP_NAME) { $env:GROUP_NAME } else { "Group OS" }
 
 # ── 배너 ──────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "╔══════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "║       HAN Group OS v30 — Startup             ║" -ForegroundColor Cyan
+Write-Host "║       $GroupDisplayName v32 — Startup             ║" -ForegroundColor Cyan
 Write-Host "║  AI Corporate Operating System               ║" -ForegroundColor Cyan
 Write-Host "╚══════════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
@@ -267,7 +268,7 @@ $frontendProc = Start-Process -FilePath "npm" `
 Start-Sleep -Seconds 3
 Write-Host ""
 Write-Host "════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host "  ✅ HAN Group OS v30 실행 중" -ForegroundColor Green
+Write-Host "  ✅ $GroupDisplayName v32 실행 중" -ForegroundColor Green
 Write-Host ""
 Write-Host "  🌐 앱:       http://localhost:5173"
 Write-Host "  🔧 API:      http://localhost:8000"

@@ -61,12 +61,12 @@ class Company(Base):
 class OrgNode(Base):
     __tablename__ = "org_nodes"
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     name = Column(String(100), nullable=False)
     role = Column(String(100), nullable=False)
     level = Column(String(50), nullable=False)
     # chairman | committee | ceo | chief | team_lead | specialist
-    parent_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=True)
+    parent_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=True, index=True)
     ai_provider = Column(String(50), default="mock")
     ai_model = Column(String(100), default="")
     description = Column(Text, default="")
@@ -102,7 +102,7 @@ class Meeting(Base):
 class MeetingMessage(Base):
     __tablename__ = "meeting_messages"
     id = Column(Integer, primary_key=True, index=True)
-    meeting_id = Column(Integer, ForeignKey("meetings.id"), nullable=False)
+    meeting_id = Column(Integer, ForeignKey("meetings.id"), nullable=False, index=True)
     sender = Column(String(100), nullable=False)
     sender_role = Column(String(100), default="")
     content = Column(Text, nullable=False)
@@ -132,7 +132,7 @@ class ApprovalRequest(Base):
     # company_create | org_change | strategy | general
     status = Column(String(20), default="pending")  # pending | approved | rejected
     requester = Column(String(100), nullable=False)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     meta = Column(JSON, default={})
     reviewer_note = Column(Text, default="")
     reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -143,7 +143,7 @@ class ApprovalRequest(Base):
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     session_type = Column(String(50), default="chairman")
     # chairman | ceo | committee | general
     title = Column(String(200), default="New Session")
@@ -155,7 +155,7 @@ class ChatSession(Base):
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
     id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False, index=True)
     role = Column(String(20), nullable=False)  # user | assistant | system
     content = Column(Text, nullable=False)
     sender_name = Column(String(100), default="")
@@ -299,7 +299,7 @@ class CorporateMemory(Base):
 class StrategyItem(Base):
     __tablename__ = "strategy_items"
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     title = Column(String(200), nullable=False)
     description = Column(Text, default="")
     item_type = Column(String(50), default="objective")
@@ -343,7 +343,7 @@ class AgentActivity(Base):
 class WorkLog(Base):
     __tablename__ = "work_logs"
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     org_node_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=True)
     agent_name = Column(String(100), nullable=False)
     agent_role = Column(String(100), nullable=False)
@@ -449,7 +449,7 @@ class CollectedData(Base):
     """인터넷에서 수집한 데이터 저장."""
     __tablename__ = "collected_data"
     id = Column(Integer, primary_key=True, index=True)
-    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     data_type = Column(String(50), nullable=False, index=True)
     # web_search | news | rss | scraped | trade | custom
     source = Column(String(200), default="")         # URL or API name
@@ -462,7 +462,7 @@ class CollectedData(Base):
     content_hash = Column(String(64), nullable=True, index=True)  # SHA256 중복 감지
     relevance_score = Column(Float, nullable=True)   # 0.0~1.0 관련성 점수
     quality_flag = Column(String(20), nullable=True) # ok | short | duplicate | low_quality
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
 # ── Media Posts ───────────────────────────────────────────────────────────────
@@ -518,7 +518,7 @@ class Notification(Base):
     """시스템 알림 — DB 영속화."""
     __tablename__ = "notifications"
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # None = 전체
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # None = 전체
     title = Column(String(200), nullable=False)
     body = Column(Text, default="")
     notif_type = Column(String(50), default="info")
@@ -640,6 +640,34 @@ class GpuHistory(Base):
     util_pct = Column(Integer, default=0)
 
 
+class GroupSettings(Base):
+    """그룹 전역 설정 (이름, 로고, 슬로건 등)."""
+    __tablename__ = "group_settings"
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    value = Column(Text, default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AiAgentMetrics(Base):
+    """AI 에이전트 성과 측정 기록."""
+    __tablename__ = "ai_agent_metrics"
+    id = Column(Integer, primary_key=True, index=True)
+    org_node_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    agent_name = Column(String(100), nullable=False)
+    agent_role = Column(String(100), default="")
+    provider = Column(String(50), default="")
+    model = Column(String(100), default="")
+    prompt_tokens = Column(Integer, default=0)
+    completion_tokens = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    response_time_ms = Column(Integer, default=0)
+    quality_score = Column(Float, nullable=True)  # 0.0~1.0
+    session_type = Column(String(50), default="")
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class AiProviderFallbackLog(Base):
     """AI Provider 자동 폴백 이벤트 로그."""
     __tablename__ = "ai_provider_fallback_log"
@@ -649,3 +677,216 @@ class AiProviderFallbackLog(Base):
     to_provider = Column(String(50), default="")
     reason = Column(String(500), default="")
     user_id = Column(Integer, nullable=True)
+
+
+class CompanyKpi(Base):
+    """계열사 KPI 스코어보드 (게이미피케이션)."""
+    __tablename__ = "company_kpis"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    metric_name = Column(String(100), nullable=False)   # revenue, growth, ai_usage, quality, speed
+    metric_label = Column(String(200), default="")       # 표시명
+    value = Column(Float, default=0.0)
+    target = Column(Float, default=100.0)
+    unit = Column(String(30), default="")                # %, 원, 건, 점
+    period = Column(String(20), default="monthly")       # monthly, weekly, quarterly
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AgentPersonality(Base):
+    """AI 에이전트 성격 커스터마이징."""
+    __tablename__ = "agent_personalities"
+    id = Column(Integer, primary_key=True, index=True)
+    org_node_id = Column(Integer, ForeignKey("org_nodes.id"), nullable=False, unique=True, index=True)
+    preset = Column(String(50), default="balanced")     # conservative, aggressive, creative, balanced
+    tone = Column(String(50), default="professional")    # professional, casual, formal, friendly
+    expertise = Column(Text, default="")                 # 쉼표 구분 전문분야
+    custom_instruction = Column(Text, default="")        # 사용자 지정 추가 지시
+    response_length = Column(String(20), default="medium")  # short, medium, long
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ExternalDataFeed(Base):
+    """외부 데이터 소스 피드 설정."""
+    __tablename__ = "external_data_feeds"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    feed_type = Column(String(50), nullable=False)       # rss, news_api, exchange_rate, stock
+    url = Column(String(500), default="")
+    config = Column(Text, default="{}")                  # JSON: api_key, params 등
+    interval_minutes = Column(Integer, default=360)      # 수집 주기
+    is_active = Column(Boolean, default=True)
+    last_collected_at = Column(DateTime, nullable=True)
+    inject_to_context = Column(Boolean, default=True)    # 에이전트 컨텍스트 주입 여부
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ExternalDataCache(Base):
+    """수집된 외부 데이터 캐시."""
+    __tablename__ = "external_data_cache"
+    id = Column(Integer, primary_key=True, index=True)
+    feed_id = Column(Integer, ForeignKey("external_data_feeds.id"), nullable=False, index=True)
+    title = Column(String(500), default="")
+    content = Column(Text, default="")
+    source_url = Column(String(500), default="")
+    collected_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class DashboardLayout(Base):
+    """사용자별 대시보드 위젯 레이아웃 설정."""
+    __tablename__ = "dashboard_layouts"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    layout = Column(JSON, default=[])  # [{widget_id, x, y, w, h, visible}]
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AiFeedback(Base):
+    """AI 응답 피드백 (좋아요/싫어요)."""
+    __tablename__ = "ai_feedbacks"
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, ForeignKey("chat_messages.id"), nullable=False, index=True)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    rating = Column(Integer, nullable=False)  # 1=좋아요, -1=싫어요
+    comment = Column(Text, default="")
+    agent_name = Column(String(100), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ── AI 워크플로우 빌더 ──────────────────────────────────────────────────────
+class WorkflowDefinition(Base):
+    """노드 기반 AI 처리 파이프라인 정의."""
+    __tablename__ = "workflow_definitions"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, default="")
+    nodes = Column(JSON, default=[])       # [{id, type, label, position, config}]
+    edges = Column(JSON, default=[])       # [{id, source, target, label}]
+    status = Column(String(20), default="draft")  # draft | active | archived
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WorkflowExecution(Base):
+    """워크플로우 실행 이력."""
+    __tablename__ = "workflow_executions"
+    id = Column(Integer, primary_key=True, index=True)
+    workflow_id = Column(Integer, ForeignKey("workflow_definitions.id"), nullable=False, index=True)
+    status = Column(String(20), default="running")  # running | completed | failed
+    input_data = Column(JSON, default={})
+    output_data = Column(JSON, default={})
+    node_results = Column(JSON, default={})  # {node_id: {status, output, duration_ms}}
+    error_msg = Column(Text, default="")
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
+
+
+# ── 재무제표 ──────────────────────────────────────────────────────────────────
+class FinancialStatement(Base):
+    """계열사 재무제표 데이터."""
+    __tablename__ = "financial_statements"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    period = Column(String(20), nullable=False)         # 2026-Q1, 2025-12 등
+    statement_type = Column(String(50), default="income")  # income | balance | cashflow
+    revenue = Column(Float, default=0.0)
+    cost_of_sales = Column(Float, default=0.0)
+    operating_expense = Column(Float, default=0.0)
+    operating_income = Column(Float, default=0.0)
+    net_income = Column(Float, default=0.0)
+    total_assets = Column(Float, default=0.0)
+    total_liabilities = Column(Float, default=0.0)
+    total_equity = Column(Float, default=0.0)
+    cash_flow = Column(Float, default=0.0)
+    raw_data = Column(JSON, default={})                 # 추가 항목
+    ai_analysis = Column(Text, default="")              # AI 분석 리포트
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── 멀티테넌트 권한 관리 ─────────────────────────────────────────────────────
+class UserCompanyRole(Base):
+    """사용자별 계열사 권한 (역할 기반 접근 제어)."""
+    __tablename__ = "user_company_roles"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    role = Column(String(30), nullable=False)  # chairman | ceo | manager | viewer
+    granted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── News Feed Subscriptions ─────────────────────────────────────────────────
+# ── Group Messenger ──────────────────────────────────────────────────────────
+class ChatRoom(Base):
+    """그룹 내부 메신저 채팅방."""
+    __tablename__ = "chat_rooms"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, default="")
+    room_type = Column(String(20), default="group")  # group | direct | project
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    members = relationship("ChatRoomMember", back_populates="room", lazy="selectin")
+    messages = relationship("ChatRoomMessage", back_populates="room", lazy="dynamic")
+
+
+class ChatRoomMember(Base):
+    """채팅방 멤버."""
+    __tablename__ = "chat_room_members"
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("chat_rooms.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    role = Column(String(20), default="member")  # admin | member
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    room = relationship("ChatRoom", back_populates="members")
+
+
+class ChatRoomMessage(Base):
+    """채팅방 메시지."""
+    __tablename__ = "chat_room_messages"
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("chat_rooms.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    message_type = Column(String(20), default="text")  # text | system | file
+    reply_to = Column(Integer, ForeignKey("chat_room_messages.id"), nullable=True)
+    is_edited = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    room = relationship("ChatRoom", back_populates="messages")
+
+
+class MessageReadStatus(Base):
+    """메시지 읽음 상태 추적."""
+    __tablename__ = "message_read_statuses"
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("chat_rooms.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    last_read_message_id = Column(Integer, ForeignKey("chat_room_messages.id"), nullable=True)
+    last_read_at = Column(DateTime, default=datetime.utcnow)
+
+
+class NewsFeedSubscription(Base):
+    """회사별 뉴스 피드 구독 설정."""
+    __tablename__ = "news_feed_subscriptions"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)           # 구독 이름 (예: "AI 산업 동향")
+    industry = Column(String(100), default="")           # 산업 분류
+    keywords = Column(JSON, default=[])                  # 검색 키워드 리스트
+    category = Column(String(50), default="")            # NewsAPI 카테고리
+    country = Column(String(10), default="kr")
+    language = Column(String(10), default="ko")
+    is_active = Column(Boolean, default=True)
+    last_fetched_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
