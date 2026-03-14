@@ -6,7 +6,7 @@ async function login(page: import('@playwright/test').Page) {
   await page.fill('input[placeholder="username"]', 'admin')
   await page.fill('input[placeholder="password"]', 'admin1234')
   await page.click('button[type="submit"]')
-  await page.waitForURL('**/group-home', { timeout: 10_000 })
+  await page.waitForURL('**/dashboard', { timeout: 10_000 })
 }
 
 test.describe('Messenger', () => {
