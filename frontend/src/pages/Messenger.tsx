@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { subscribeWsEvent } from '../components/NotificationPoller'
 import {
   MessageSquare, Plus, Send, Users, Hash, Trash2, UserPlus,
   ChevronLeft, Search, Paperclip, Image, FileText, X,
@@ -78,7 +79,7 @@ export default function Messenger() {
       messengerApi.markRead(selectedRoom.id).catch(() => {})
 
       // WebSocket으로 실시간 메시지 수신
-      const { subscribeWsEvent } = require('../components/NotificationPoller')
+      // subscribeWsEvent imported at top level
       const unsubMsg = subscribeWsEvent('messenger_message', (data: Record<string, unknown>) => {
         if ((data as { room_id?: number }).room_id === selectedRoom.id) {
           setMessages((prev) => [...prev, {

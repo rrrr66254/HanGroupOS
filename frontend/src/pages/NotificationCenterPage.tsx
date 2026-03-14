@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { subscribeWsEvent } from '../components/NotificationPoller'
 import {
   Bell, Check, CheckCheck, Trash2, ExternalLink, Info, AlertTriangle,
   CheckCircle, XCircle, Filter, Settings, Search, RefreshCw,
@@ -76,7 +77,6 @@ export default function NotificationCenterPage() {
 
   // WebSocket 실시간 업데이트
   useEffect(() => {
-    const { subscribeWsEvent } = require('../components/NotificationPoller')
     const unsub = subscribeWsEvent('unread_count', () => {
       fetchNotifications()
     })
