@@ -478,9 +478,9 @@ export default function Messenger() {
                         {/* 읽음 확인 체크 아이콘 (내 메시지만) */}
                         {isMe && (
                           readCount > 0 ? (
-                            <CheckCheck size={12} className="text-blue-400" title={`${readCount}명 읽음`} />
+                            <CheckCheck size={12} className="text-blue-400" aria-label={`${readCount}명 읽음`} />
                           ) : (
-                            <Check size={12} className="text-slate-600" title="전송됨" />
+                            <Check size={12} className="text-slate-600" aria-label="전송됨" />
                           )
                         )}
                       </div>

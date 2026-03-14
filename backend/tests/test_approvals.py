@@ -40,7 +40,7 @@ def test_approve_request(client, auth_headers):
     aid = create.json()["id"]
     res = client.post(
         f"/api/approvals/{aid}/review",
-        json={"action": "approve", "note": "승인합니다"},
+        json={"status": "approved", "reviewer_note": "승인합니다"},
         headers=auth_headers,
     )
     assert res.status_code == 200
@@ -61,7 +61,7 @@ def test_reject_request(client, auth_headers):
     aid = create.json()["id"]
     res = client.post(
         f"/api/approvals/{aid}/review",
-        json={"action": "reject", "note": "반려합니다"},
+        json={"status": "rejected", "reviewer_note": "반려합니다"},
         headers=auth_headers,
     )
     assert res.status_code == 200

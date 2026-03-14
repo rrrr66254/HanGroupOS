@@ -410,8 +410,8 @@ export default function Dashboard() {
               <Tooltip
                 contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
                 labelFormatter={(v) => new Date(String(v) + 'Z').toLocaleTimeString('ko-KR')}
-                formatter={(val: number, name: string) =>
-                  name === 'pct' ? [`${val.toFixed(1)}%`, 'VRAM'] :
+                formatter={(val, name) =>
+                  name === 'pct' ? [`${Number(val).toFixed(1)}%`, 'VRAM'] :
                   name === 'temp' ? [`${val}°C`, '온도'] :
                   [`${val}%`, 'GPU']
                 }

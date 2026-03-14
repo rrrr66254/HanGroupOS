@@ -418,7 +418,7 @@ export default function LiveOffice() {
   const [p2pTarget, setP2pTarget] = useState<number | ''>('')
   const [p2pTopic, setP2pTopic] = useState('')
   const [p2pLoading, setP2pLoading] = useState(false)
-  const [p2pResult, setP2pResult] = useState<{ message: string; reply: string; from: string; to: string } | null>(null)
+  const [p2pResult, setP2pResult] = useState<{ message: string; reply: string; from: string; to: string; from_name?: string; to_name?: string } | null>(null)
   const [p2pHistory, setP2pHistory] = useState<Array<{ from_name: string; to_name: string; topic: string; message: string; reply: string; created_at: string }>>([])
   const [p2pHistoryOpen, setP2pHistoryOpen] = useState(false)
 
@@ -530,7 +530,7 @@ export default function LiveOffice() {
     setP2pResult(null)
     try {
       const res = await workApi.p2p(selectedAgent.id, p2pTarget as number, p2pTopic)
-      const data = res.data as { from_name: string; to_name: string; message: string; reply: string }
+      const data = res.data as { from_name: string; to_name: string; message: string; reply: string; from: string; to: string }
       setP2pResult(data)
       setP2pTopic('')
     } catch { /* ignore */ } finally { setP2pLoading(false) }
