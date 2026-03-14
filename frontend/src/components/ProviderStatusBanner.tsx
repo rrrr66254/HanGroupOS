@@ -18,7 +18,7 @@ export interface ProviderHealth {
   gemini: { status: 'configured' | 'no_api_key'; model: string }
 }
 
-// ── Global health hook (singleton-ish via interval ref) ───────────────────────
+// ── Global health hook (WebSocket + REST fallback) ───────────────────────────
 let _globalHealth: ProviderHealth | null = null
 const _listeners = new Set<(h: ProviderHealth | null) => void>()
 
@@ -43,7 +43,32 @@ export function useProviderHealth() {
     if (!_globalHealth) {
       fetchHealth().then(() => setLoading(false))
     }
-    return () => { _listeners.delete(update) }
+
+    // WebSocket으로 프로바이더 상태 실시간 수신
+    let unsub: (() => void) | null = null
+    try {
+      const { subscribeWsEvent } = require('./NotificationPoller')
+      unsub = subscribeWsEvent('provider_status', (data: Record<string, unknown>) => {
+        const wsHealth: ProviderHealth = {
+          ollama: {
+            status: (data.ollama as { status: string })?.status === 'connected' ? 'connected' : 'disconnected',
+            model: _globalHealth?.ollama.model || '',
+            models_available: (data.ollama as { models?: string[] })?.models || [],
+            base_url: _globalHealth?.ollama.base_url || '',
+          },
+          anthropic: { status: (data.anthropic as { status: string })?.status === 'configured' ? 'configured' : 'no_api_key', model: _globalHealth?.anthropic.model || '' },
+          openai: { status: (data.openai as { status: string })?.status === 'configured' ? 'configured' : 'no_api_key', model: _globalHealth?.openai.model || '' },
+          gemini: { status: (data.gemini as { status: string })?.status === 'configured' ? 'configured' : 'no_api_key', model: _globalHealth?.gemini.model || '' },
+        }
+        _globalHealth = wsHealth
+        _listeners.forEach((fn) => fn(_globalHealth))
+      })
+    } catch { /* silent */ }
+
+    return () => {
+      _listeners.delete(update)
+      if (unsub) unsub()
+    }
   }, [])
 
   const refresh = useCallback(async () => {
@@ -55,13 +80,12 @@ export function useProviderHealth() {
   return { health, loading, refresh }
 }
 
-// Start background polling
+// Start health check — initial fetch only (WebSocket handles updates)
 let _pollerStarted = false
 export function startHealthPoller() {
   if (_pollerStarted) return
   _pollerStarted = true
   fetchHealth()
-  setInterval(fetchHealth, 30000)
 }
 
 // ── Setup Modal ───────────────────────────────────────────────────────────────
@@ -143,8 +167,7 @@ function SetupModal({ onClose, health, onRefresh }: SetupModalProps) {
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
-        className="w-full max-w-lg rounded-xl shadow-2xl"
-        style={{ background: '#141420', border: '1px solid rgba(255,255,255,0.1)' }}
+        className="w-full max-w-lg rounded-xl shadow-2xl bg-bg-card border border-bg-border"
       >
         {/* Modal Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border">

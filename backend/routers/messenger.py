@@ -10,7 +10,13 @@ DELETE /api/messenger/rooms/{id}/members/{uid} — 멤버 제거
 GET    /api/messenger/rooms/{id}/messages     — 메시지 목록
 POST   /api/messenger/rooms/{id}/messages     — 메시지 전송
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+import os
+import uuid
+import shutil
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from pydantic import BaseModel
@@ -19,6 +25,15 @@ from datetime import datetime
 from core.database import get_db
 from core.security import get_current_user
 from models.models import ChatRoom, ChatRoomMember, ChatRoomMessage, User
+
+UPLOAD_DIR = Path(__file__).parent.parent / "uploads" / "messenger"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+ALLOWED_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg",  # 이미지
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".pptx", ".txt", ".csv",  # 문서
+    ".zip", ".tar", ".gz",  # 압축
+}
 
 router = APIRouter(prefix="/api/messenger", tags=["messenger"])
 
@@ -349,8 +364,83 @@ def list_users_for_invite(
 
 # ── Internal ───────────────────────────────────────────────────────────────────
 
+# ── File Upload ─────────────────────────────────────────────────────────────
+
+@router.post("/rooms/{room_id}/upload")
+def upload_file(
+    room_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """파일 업로드 → 자동으로 file 타입 메시지 전송."""
+    _check_membership(db, room_id, user.id)
+
+    room = db.query(ChatRoom).filter(ChatRoom.id == room_id, ChatRoom.is_active == True).first()
+    if not room:
+        raise HTTPException(404, "채팅방을 찾을 수 없습니다.")
+
+    # 확장자 검증
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(400, f"허용되지 않는 파일 형식입니다: {ext}")
+
+    # 크기 검증
+    content = file.file.read()
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(400, f"파일 크기가 10MB를 초과합니다.")
+    file.file.seek(0)
+
+    # 저장
+    unique_name = f"{uuid.uuid4().hex}{ext}"
+    file_path = UPLOAD_DIR / unique_name
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # 이미지인지 판별
+    is_image = ext in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}
+    file_url = f"/api/messenger/files/{unique_name}"
+
+    # 파일 메시지 생성
+    msg = ChatRoomMessage(
+        room_id=room_id,
+        user_id=user.id,
+        content=f"[file:{file.filename}]({file_url})",
+        message_type="file",
+    )
+    db.add(msg)
+    room.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(msg)
+
+    _notify_room_members(db, room_id, user, msg)
+
+    return {
+        "id": msg.id,
+        "room_id": msg.room_id,
+        "user_id": msg.user_id,
+        "username": user.username,
+        "content": msg.content,
+        "message_type": "file",
+        "file_url": file_url,
+        "file_name": file.filename,
+        "file_size": len(content),
+        "is_image": is_image,
+        "created_at": str(msg.created_at),
+    }
+
+
+@router.get("/files/{filename}")
+def serve_file(filename: str):
+    """업로드된 파일 서빙."""
+    file_path = UPLOAD_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(404, "파일을 찾을 수 없습니다.")
+    return FileResponse(file_path)
+
+
 def _notify_room_members(db: Session, room_id: int, sender: User, msg: ChatRoomMessage):
-    """채팅방 멤버들에게 알림 전송."""
+    """채팅방 멤버들에게 WebSocket 실시간 메시지 브로드캐스트."""
     try:
         from routers.notifications import manager as notif_manager
         members = db.query(ChatRoomMember).filter(
@@ -358,12 +448,15 @@ def _notify_room_members(db: Session, room_id: int, sender: User, msg: ChatRoomM
             ChatRoomMember.user_id != sender.id,
         ).all()
         for m in members:
-            notif_manager.notify_sync(m.user_id, {
-                "type": "messenger",
+            notif_manager.broadcast_messenger_sync(m.user_id, {
                 "room_id": room_id,
-                "sender": sender.username,
-                "content": msg.content[:100],
                 "message_id": msg.id,
+                "user_id": sender.id,
+                "username": sender.username,
+                "content": msg.content,
+                "message_type": msg.message_type,
+                "reply_to": msg.reply_to,
+                "created_at": str(msg.created_at),
             })
     except Exception:
         pass  # 알림 실패해도 메시지 전송은 성공

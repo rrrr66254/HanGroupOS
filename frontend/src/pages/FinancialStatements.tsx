@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Plus, Trash2, FileText, TrendingUp, TrendingDown, DollarSign,
   BarChart2, Loader2, Brain, ChevronDown, PieChart, AlertTriangle,
+  ArrowRightLeft, RefreshCw,
 } from 'lucide-react'
 import { financialApi, companiesApi } from '../api/client'
 import { useAppStore } from '../store/useStore'
@@ -44,6 +45,36 @@ export default function FinancialStatements() {
   const [showForm, setShowForm] = useState(false)
   const [viewDetail, setViewDetail] = useState<FinancialStatement | null>(null)
   const addToast = useAppStore((s) => s.addToast)
+
+  // ── 환율 ──
+  const [fxRates, setFxRates] = useState<Record<string, number>>({})
+  const [fxDate, setFxDate] = useState('')
+  const [fxLoading, setFxLoading] = useState(false)
+  const [convertAmount, setConvertAmount] = useState(1000000)
+  const [convertFrom, setConvertFrom] = useState('KRW')
+  const [convertTo, setConvertTo] = useState('USD')
+  const [convertResult, setConvertResult] = useState<number | null>(null)
+  const [convertRate, setConvertRate] = useState<number | null>(null)
+
+  const loadExchangeRates = useCallback(async () => {
+    setFxLoading(true)
+    try {
+      const res = await financialApi.exchangeRates('KRW', 'USD,EUR,JPY,CNY,GBP')
+      setFxRates(res.data.rates || {})
+      setFxDate(res.data.date || '')
+    } catch { /* silent */ }
+    setFxLoading(false)
+  }, [])
+
+  useEffect(() => { loadExchangeRates() }, [loadExchangeRates])
+
+  const handleConvert = async () => {
+    try {
+      const res = await financialApi.convert(convertAmount, convertFrom, convertTo)
+      setConvertResult(res.data.result)
+      setConvertRate(res.data.rate)
+    } catch { /* silent */ }
+  }
 
   const [form, setForm] = useState({
     period: '2026-Q1', statement_type: 'income',
@@ -158,6 +189,69 @@ export default function FinancialStatements() {
             <p className={`text-lg font-bold mt-1 ${color}`}>{value}</p>
           </div>
         ))}
+      </div>
+
+      {/* Exchange Rate Panel */}
+      <div className="bg-bg-card border border-bg-border rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+            <ArrowRightLeft size={14} className="text-blue-400" />
+            실시간 환율 (KRW 기준)
+            {fxDate && <span className="text-[10px] text-slate-500 font-normal">{fxDate}</span>}
+          </h3>
+          <button onClick={loadExchangeRates} disabled={fxLoading}
+            className="p-1 rounded text-slate-500 hover:text-slate-300">
+            <RefreshCw size={12} className={fxLoading ? 'animate-spin' : ''} />
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-3 mb-4">
+          {Object.entries(fxRates).map(([cur, rate]) => (
+            <div key={cur} className="bg-bg-elevated rounded-lg px-3 py-2 text-center min-w-[80px]">
+              <span className="text-[10px] text-slate-500 block">{cur}</span>
+              <span className="text-sm font-mono text-slate-200">
+                {rate < 1 ? rate.toFixed(6) : rate.toFixed(2)}
+              </span>
+            </div>
+          ))}
+          {Object.keys(fxRates).length === 0 && !fxLoading && (
+            <span className="text-[11px] text-slate-500">환율 정보 로딩 중...</span>
+          )}
+        </div>
+
+        {/* 환율 변환기 */}
+        <div className="flex flex-wrap items-end gap-2 p-3 bg-bg-base rounded-lg">
+          <div>
+            <label className="text-[10px] text-slate-500 block mb-1">금액</label>
+            <input type="number" value={convertAmount}
+              onChange={(e) => setConvertAmount(Number(e.target.value))}
+              className="bg-bg-elevated border border-bg-border rounded-lg px-3 py-1.5 text-xs text-slate-200 w-32 font-mono outline-none focus:border-brand" />
+          </div>
+          <div>
+            <label className="text-[10px] text-slate-500 block mb-1">From</label>
+            <select value={convertFrom} onChange={(e) => setConvertFrom(e.target.value)}
+              className="bg-bg-elevated border border-bg-border rounded-lg px-2 py-1.5 text-xs text-slate-200 outline-none">
+              {['KRW', 'USD', 'EUR', 'JPY', 'CNY', 'GBP'].map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <ArrowRightLeft size={14} className="text-slate-500 mb-1" />
+          <div>
+            <label className="text-[10px] text-slate-500 block mb-1">To</label>
+            <select value={convertTo} onChange={(e) => setConvertTo(e.target.value)}
+              className="bg-bg-elevated border border-bg-border rounded-lg px-2 py-1.5 text-xs text-slate-200 outline-none">
+              {['USD', 'EUR', 'JPY', 'CNY', 'GBP', 'KRW'].map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <button onClick={handleConvert}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 transition-colors">
+            변환
+          </button>
+          {convertResult !== null && (
+            <div className="ml-2 flex items-center gap-2">
+              <span className="text-sm font-bold text-emerald-400 font-mono">{convertResult.toLocaleString()} {convertTo}</span>
+              {convertRate && <span className="text-[10px] text-slate-500">(1 {convertFrom} = {convertRate < 1 ? convertRate.toFixed(6) : convertRate.toFixed(2)} {convertTo})</span>}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* AI Report */}

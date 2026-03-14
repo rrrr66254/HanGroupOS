@@ -187,11 +187,11 @@ async def _setup_ws_loop():
     notif_manager.set_loop(asyncio.get_running_loop())
 
 
-# ── WebSocket: 실시간 알림 ─────────────────────────────────────────────────────
+# ── WebSocket: 통합 실시간 허브 ─────────────────────────────────────────────────
 @app.websocket("/ws/notifications")
 async def ws_notifications(ws: WebSocket, token: str = Query("")):
     from core.security import decode_token
-    from models.models import Notification, User as UserModel
+    from models.models import Notification, User as UserModel, ApprovalRequest, TerminalRequest
     from routers.notifications import manager as notif_manager
 
     payload = decode_token(token) if token else None
@@ -200,6 +200,7 @@ async def ws_notifications(ws: WebSocket, token: str = Query("")):
         return
 
     db = SessionLocal()
+    user = None
     try:
         user = db.query(UserModel).filter(UserModel.username == payload.get("sub")).first()
         if not user:
@@ -208,22 +209,65 @@ async def ws_notifications(ws: WebSocket, token: str = Query("")):
 
         await notif_manager.connect(user.id, ws)
 
-        # 연결 즉시 미읽음 수 전송
+        # ── 연결 즉시 초기 상태 일괄 전송 ──
+        # 1) 미읽음 알림 수
         cnt = db.query(Notification).filter(
             (Notification.user_id == user.id) | (Notification.user_id == None),
             Notification.is_read == False,
         ).count()
         await ws.send_json({"type": "unread_count", "count": cnt})
 
+        # 2) 배지 카운트 (승인/터미널)
+        try:
+            pending_approvals = db.query(ApprovalRequest).filter(ApprovalRequest.status == "pending").count()
+            pending_terminals = db.query(TerminalRequest).filter(TerminalRequest.status == "pending").count()
+            await ws.send_json({
+                "type": "badge_update",
+                "approvals": pending_approvals,
+                "terminals": pending_terminals,
+            })
+        except Exception:
+            pass
+
+        # 3) AI 프로바이더 상태
+        try:
+            import httpx
+            ollama_status = "disconnected"
+            ollama_models: list = []
+            try:
+                r = httpx.get(f"{settings.OLLAMA_BASE_URL}/api/tags", timeout=2.0)
+                if r.status_code == 200:
+                    ollama_status = "connected"
+                    ollama_models = [m["name"] for m in r.json().get("models", [])]
+            except Exception:
+                pass
+            await ws.send_json({
+                "type": "provider_status",
+                "ollama": {"status": ollama_status, "models": ollama_models[:5]},
+                "anthropic": {"status": "configured" if settings.ANTHROPIC_API_KEY else "no_api_key"},
+                "openai": {"status": "configured" if settings.OPENAI_API_KEY else "no_api_key"},
+                "gemini": {"status": "configured" if settings.GEMINI_API_KEY else "no_api_key"},
+            })
+        except Exception:
+            pass
+
+        db.close()
+        db = None
+
         try:
             while True:
-                await ws.receive_text()  # 클라이언트 ping 수신용
+                data = await ws.receive_text()
+                # 클라이언트 ping/pong 지원
+                if data == "ping":
+                    await ws.send_json({"type": "pong"})
         except WebSocketDisconnect:
             notif_manager.disconnect(user.id, ws)
     except Exception:
-        notif_manager.disconnect(user.id, ws) if user else None
+        if user:
+            notif_manager.disconnect(user.id, ws)
     finally:
-        db.close()
+        if db:
+            db.close()
 
 
 def _check_ollama():

@@ -100,6 +100,20 @@ def review_approval(
     db.commit()
     db.refresh(approval)
 
+    # WebSocket으로 배지 카운트 업데이트 브로드캐스트
+    try:
+        from routers.notifications import manager as notif_manager
+        from models.models import TerminalRequest
+        pending_approvals = db.query(ApprovalRequest).filter(ApprovalRequest.status == "pending").count()
+        pending_terminals = db.query(TerminalRequest).filter(TerminalRequest.status == "pending").count()
+        notif_manager.notify_sync(None, {
+            "type": "badge_update",
+            "approvals": pending_approvals,
+            "terminals": pending_terminals,
+        })
+    except Exception:
+        pass
+
     # 역량 승인 시 자동 활성화
     if review.status == "approved" and approval.request_type == "capability_update":
         try:

@@ -136,7 +136,7 @@ export default function Sidebar() {
   const [logoError, setLogoError] = useState(false)
   const location = useLocation()
 
-  // Poll pending counts every 30 seconds; also refreshes when badgeTick changes
+  // 배지 카운트: WebSocket badge_update 이벤트로 실시간 수신 + 초기 fetch
   useEffect(() => {
     const fetchCounts = async () => {
       try {
@@ -157,8 +157,14 @@ export default function Sidebar() {
       } catch { /* silent */ }
     }
     fetchCounts()
-    const iv = setInterval(fetchCounts, 30_000)
-    return () => clearInterval(iv)
+
+    // WebSocket으로 실시간 수신 (badge_update 이벤트)
+    const { subscribeWsEvent } = require('./NotificationPoller')
+    const unsub = subscribeWsEvent('badge_update', (data: Record<string, unknown>) => {
+      setPendingApprovals((data.approvals as number) ?? 0)
+      setPendingTerminals((data.terminals as number) ?? 0)
+    })
+    return () => unsub()
   }, [badgeTick])
 
   // Open groups: auto-open the group that contains the active route

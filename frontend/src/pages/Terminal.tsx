@@ -53,9 +53,17 @@ function LivePanel() {
 
   useEffect(() => {
     load()
-    // Auto-refresh every 5s while panel is visible
-    intervalRef.current = window.setInterval(load, 5000)
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
+    // WebSocket으로 터미널 상태 변경 수신 + 30초 폴백
+    let unsub: (() => void) | null = null
+    try {
+      const { subscribeWsEvent } = require('../components/NotificationPoller')
+      unsub = subscribeWsEvent('terminal_update', () => { load() })
+    } catch { /* silent */ }
+    intervalRef.current = window.setInterval(load, 30_000) // 폴백: 30초
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current)
+      if (unsub) unsub()
+    }
   }, [])
 
   const toggleExpand = (id: number) => {

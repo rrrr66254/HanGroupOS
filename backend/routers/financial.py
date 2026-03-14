@@ -1,5 +1,5 @@
 """
-계열사 재무제표 자동 생성 — 매출/비용/손익 데이터 입력 + AI 분석
+계열사 재무제표 자동 생성 — 매출/비용/손익 데이터 입력 + AI 분석 + 환율 변환
 
 GET    /api/financial                     — 재무제표 목록
 POST   /api/financial                     — 재무 데이터 입력
@@ -9,6 +9,8 @@ DELETE /api/financial/{id}                — 삭제
 POST   /api/financial/{id}/analyze        — AI 경영 분석 리포트 생성
 POST   /api/financial/company/{id}/report — 계열사 종합 재무 리포트
 GET    /api/financial/company/{id}/summary — 계열사 재무 요약
+GET    /api/financial/exchange-rates       — 실시간 환율 조회 (Frankfurter API)
+POST   /api/financial/convert              — 금액 환율 변환
 """
 import json
 import logging
@@ -324,6 +326,108 @@ def _fmt(fs: FinancialStatement) -> dict:
         "ai_analysis": fs.ai_analysis,
         "created_at": fs.created_at.isoformat() if fs.created_at else None,
         "updated_at": fs.updated_at.isoformat() if fs.updated_at else None,
+    }
+
+
+# ── 환율 API (Frankfurter) ──────────────────────────────────────────────────
+
+@router.get("/exchange-rates")
+def get_exchange_rates(
+    base: str = "KRW",
+    symbols: Optional[str] = "USD,EUR,JPY,CNY,GBP",
+    _: User = Depends(get_current_user),
+):
+    """
+    실시간 환율 조회 (Frankfurter API).
+    base: 기준 통화 (기본 KRW)
+    symbols: 대상 통화 (쉼표 구분)
+    10분 캐시 적용.
+    """
+    from core.cache import cache_get, cache_set
+    import httpx
+
+    cache_key = f"fx:{base}:{symbols}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        cached["_cached"] = True
+        return cached
+
+    try:
+        url = f"https://api.frankfurter.dev/v1/latest?base={base}"
+        if symbols:
+            url += f"&symbols={symbols}"
+        r = httpx.get(url, timeout=5.0)
+        r.raise_for_status()
+        data = r.json()
+        result = {
+            "base": data.get("base", base),
+            "date": data.get("date"),
+            "rates": data.get("rates", {}),
+        }
+        cache_set(cache_key, result, ttl=600)
+        return result
+    except Exception as e:
+        logger.warning("환율 조회 실패: %s", e)
+        # 폴백: 고정 환율 (대략적)
+        fallback_rates = {
+            "USD": 0.00074, "EUR": 0.00068, "JPY": 0.11,
+            "CNY": 0.0053, "GBP": 0.00059,
+        }
+        if base != "KRW":
+            fallback_rates = {"KRW": 1350.0, "USD": 1.0, "EUR": 0.92, "JPY": 149.5}
+        return {
+            "base": base,
+            "date": datetime.utcnow().strftime("%Y-%m-%d"),
+            "rates": fallback_rates,
+            "_fallback": True,
+        }
+
+
+@router.post("/convert")
+def convert_currency(
+    body: dict,
+    _: User = Depends(get_current_user),
+):
+    """
+    금액 환율 변환.
+    body: { "amount": 1000000, "from": "KRW", "to": "USD" }
+    """
+    import httpx
+    from core.cache import cache_get, cache_set
+
+    amount = body.get("amount", 0)
+    from_cur = body.get("from", "KRW")
+    to_cur = body.get("to", "USD")
+
+    if not amount:
+        return {"amount": 0, "from": from_cur, "to": to_cur, "result": 0}
+
+    cache_key = f"fx_convert:{from_cur}:{to_cur}"
+    rate = cache_get(cache_key)
+
+    if rate is None:
+        try:
+            url = f"https://api.frankfurter.dev/v1/latest?base={from_cur}&symbols={to_cur}"
+            r = httpx.get(url, timeout=5.0)
+            r.raise_for_status()
+            rates = r.json().get("rates", {})
+            rate = rates.get(to_cur)
+            if rate:
+                cache_set(cache_key, rate, ttl=600)
+        except Exception as e:
+            logger.warning("환율 변환 실패: %s", e)
+            rate = None
+
+    if rate is None:
+        return {"amount": amount, "from": from_cur, "to": to_cur, "result": None, "error": "환율 정보를 가져올 수 없습니다."}
+
+    result = round(amount * rate, 2)
+    return {
+        "amount": amount,
+        "from": from_cur,
+        "to": to_cur,
+        "rate": rate,
+        "result": result,
     }
 
 

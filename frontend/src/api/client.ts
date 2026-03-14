@@ -584,6 +584,10 @@ export const financialApi = {
   analyze: (id: number) => api.post(`/financial/${id}/analyze`),
   companyReport: (companyId: number) => api.post(`/financial/company/${companyId}/report`),
   companySummary: (companyId: number) => api.get(`/financial/company/${companyId}/summary`),
+  exchangeRates: (base?: string, symbols?: string) =>
+    api.get('/financial/exchange-rates', { params: { base, symbols } }),
+  convert: (amount: number, from: string, to: string) =>
+    api.post('/financial/convert', { amount, from, to }),
 }
 
 // ── Permissions (Multi-tenant) ───────────────────────────────────────────────

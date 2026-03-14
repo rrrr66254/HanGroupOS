@@ -134,6 +134,25 @@ def decide_request(
     req.decided_at = datetime.utcnow()
     db.commit()
     db.refresh(req)
+
+    # WebSocket으로 배지 + 터미널 상태 브로드캐스트
+    try:
+        from routers.notifications import manager as notif_manager
+        from models.models import ApprovalRequest
+        pending_approvals = db.query(ApprovalRequest).filter(ApprovalRequest.status == "pending").count()
+        pending_terminals = db.query(TerminalRequest).filter(TerminalRequest.status == "pending").count()
+        notif_manager.notify_sync(None, {
+            "type": "badge_update",
+            "approvals": pending_approvals,
+            "terminals": pending_terminals,
+        })
+        notif_manager.broadcast_terminal_sync(0, {
+            "request_id": req.id,
+            "status": req.status,
+        })
+    except Exception:
+        pass
+
     return _format(req)
 
 

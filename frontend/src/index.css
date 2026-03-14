@@ -27,6 +27,27 @@ html.light .text-slate-500 { color: #64748b !important }
 html.light .text-slate-600 { color: #94a3b8 !important }
 html.light .text-slate-700 { color: #94a3b8 !important }
 
+/* Light mode fixes for new components */
+html.light .bg-brand { background-color: #6366f1 !important }
+html.light .text-brand-light { color: #4f46e5 !important }
+html.light .bg-brand\/15 { background-color: rgba(99, 102, 241, 0.1) !important }
+html.light .bg-brand\/10 { background-color: rgba(99, 102, 241, 0.08) !important }
+html.light .bg-bg-base { background-color: rgb(248, 250, 252) !important }
+html.light .chat-ai { background: rgb(241, 245, 249) !important; border-color: rgb(226, 232, 240) !important; color: #334155 !important }
+html.light .chat-user { background: rgba(99, 102, 241, 0.15) !important; border-color: rgba(99, 102, 241, 0.25) !important; color: #1e293b !important }
+html.light select, html.light option { background-color: rgb(255, 255, 255) !important; color: #1e293b !important }
+html.light input:not([type="checkbox"]):not([type="radio"]) {
+  background-color: rgb(248, 250, 252) !important;
+  border-color: rgb(226, 232, 240) !important;
+  color: #1e293b !important;
+}
+html.light input::placeholder { color: #94a3b8 !important }
+html.light .bg-black\/60, html.light .bg-black\/50, html.light .bg-black\/80 {
+  background-color: rgba(0, 0, 0, 0.4) !important;
+}
+html.light ::-webkit-scrollbar-track { background: rgb(248, 250, 252) !important }
+html.light ::-webkit-scrollbar-thumb { background: rgb(203, 213, 225) !important }
+
 @layer base {
   * {
     box-sizing: border-box;

@@ -1,4 +1,4 @@
-# Group OS v37
+# Group OS v38
 **AI 기반 기업 운영 시스템 (AI Corporate Operating System)**
 
 <p align="center">
@@ -46,6 +46,49 @@
 | **고급 헬스체크** | DB/Ollama/KTransformers/AI키/캐시/Rate Limit 상태 통합 진단 |
 | **그룹 메신저** | 프로젝트/팀별 채팅방, 실시간 메시지, 멤버 관리, WebSocket 알림 |
 | **모바일 반응형** | 햄버거 메뉴, 오버레이 사이드바, 반응형 그리드, 터치 최적화 |
+| **통합 WebSocket 허브** | 알림/배지/메신저/터미널/프로바이더 상태 단일 WS 실시간 수신 |
+| **파일 첨부 메신저** | 이미지/문서 업로드 + 인라인 프리뷰 + 전체화면 뷰어 |
+| **실시간 환율** | Frankfurter API 기반 환율 조회 + 금액 변환기 (10분 캐시) |
+| **E2E 테스트** | Playwright 기반 메신저/헬스체크/Rate Limit/환율 시나리오 |
+
+---
+
+## v38 업데이트 내역
+
+### 1. 폴링→WebSocket 전환 (통합 허브)
+- 기존 30+ 초 REST 폴링을 단일 WebSocket 연결로 전환
+- 알림(`unread_count`), 배지(`badge_update`), 메신저(`messenger_message`), 터미널(`terminal_update`), AI 프로바이더(`provider_status`) 통합
+- 연결 시 초기 상태 일괄 전송 (배지 카운트, AI 프로바이더 상태, 미읽음 수)
+- `subscribeWsEvent()` 구독 시스템으로 컴포넌트별 이벤트 수신
+- 사이드바 배지: 30초 폴링 → WS 즉시 업데이트
+- 터미널 실행 현황: 5초 폴링 → WS + 30초 폴백
+- 프로바이더 상태: 30초 폴링 제거 → WS 초기 전송
+- 핑/퐁 연결 유지 (25초 간격)
+
+### 2. 메신저 파일 첨부
+- `POST /api/messenger/rooms/{id}/upload` — 파일 업로드 (10MB 제한)
+- 이미지: 인라인 프리뷰 + 클릭 시 전체화면 뷰어 (모달)
+- 문서: 파일명 링크 + 아이콘 표시
+- 허용 확장자: jpg/png/gif/webp/svg/pdf/doc/xlsx/pptx/txt/csv/zip
+- `GET /api/messenger/files/{filename}` — 파일 서빙
+- 프론트엔드: 클립 버튼 + 드래그&드롭 지원
+
+### 3. 환율 API (Frankfurter)
+- `GET /api/financial/exchange-rates?base=KRW&symbols=USD,EUR,JPY,CNY,GBP`
+- `POST /api/financial/convert` — 금액 환율 변환
+- 10분 캐시 (인메모리) + 폴백 고정 환율
+- 재무제표 페이지에 환율 패널 + 변환기 UI 추가
+
+### 4. 다크/라이트 모드 점검
+- ProviderStatusBanner 모달: 하드코딩 배경 → CSS 변수 기반
+- 라이트 모드 input/select/scrollbar 색상 보정
+- 채팅 버블, 브랜드 색상, 배경 오버레이 라이트 모드 최적화
+
+### 5. E2E 테스트 (Playwright)
+- `e2e/health.spec.ts` — 기본/상세 헬스체크 API 검증
+- `e2e/rate-limit.spec.ts` — Rate Limit 헤더, 감소 검증
+- `e2e/messenger.spec.ts` — 채팅방 생성, 메시지 전송, 파일 첨부 UI
+- `e2e/exchange-rate.spec.ts` — 환율 조회, 변환, 제로 처리
 
 ---
 

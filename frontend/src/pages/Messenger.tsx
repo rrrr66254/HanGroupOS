@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   MessageSquare, Plus, Send, Users, Hash, Trash2, UserPlus,
-  ChevronLeft, Search,
+  ChevronLeft, Search, Paperclip, Image, FileText, X,
 } from 'lucide-react'
 import { messengerApi } from '../api/client'
+import api from '../api/client'
 import { useAuthStore } from '../store/useStore'
 
 interface Room {
@@ -49,6 +50,9 @@ export default function Messenger() {
   const [selectedMembers, setSelectedMembers] = useState<number[]>([])
   const [searchFilter, setSearchFilter] = useState('')
   const [mobileShowChat, setMobileShowChat] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const pollRef = useRef<ReturnType<typeof setInterval>>()
 
@@ -59,9 +63,26 @@ export default function Messenger() {
   useEffect(() => {
     if (selectedRoom) {
       loadMessages(selectedRoom.id)
-      // 5초마다 새 메시지 폴링
-      pollRef.current = setInterval(() => loadMessages(selectedRoom.id), 5000)
-      return () => clearInterval(pollRef.current)
+      // WebSocket으로 실시간 메시지 수신
+      const { subscribeWsEvent } = require('../components/NotificationPoller')
+      const unsub = subscribeWsEvent('messenger_message', (data: Record<string, unknown>) => {
+        if ((data as { room_id?: number }).room_id === selectedRoom.id) {
+          // 새 메시지를 직접 추가
+          setMessages((prev) => [...prev, {
+            id: data.message_id as number,
+            room_id: data.room_id as number,
+            user_id: data.user_id as number,
+            username: data.username as string,
+            content: data.content as string,
+            message_type: (data.message_type as string) || 'text',
+            reply_to: (data.reply_to as number) || null,
+            created_at: data.created_at as string,
+          }])
+        }
+      })
+      // 30초 폴백 폴링 (WS 메시지 누락 방지)
+      pollRef.current = setInterval(() => loadMessages(selectedRoom.id), 30000)
+      return () => { unsub(); clearInterval(pollRef.current) }
     }
   }, [selectedRoom?.id])
 
@@ -110,6 +131,36 @@ export default function Messenger() {
       setSelectedMembers([])
       setMobileShowChat(true)
     } catch { /* silent */ }
+  }
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !selectedRoom) return
+    if (file.size > 10 * 1024 * 1024) {
+      alert('파일 크기가 10MB를 초과합니다.')
+      return
+    }
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      await api.post(`/messenger/rooms/${selectedRoom.id}/upload`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      loadMessages(selectedRoom.id)
+    } catch { /* silent */ }
+    setUploading(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const isImageFile = (content: string) => {
+    return /\.(jpg|jpeg|png|gif|webp|svg)/i.test(content)
+  }
+
+  const parseFileMessage = (content: string) => {
+    const match = content.match(/^\[file:(.*?)\]\((.*?)\)$/)
+    if (match) return { name: match[1], url: match[2] }
+    return null
   }
 
   const handleDeleteRoom = async (roomId: number) => {
@@ -278,6 +329,9 @@ export default function Messenger() {
                   )
                 }
 
+                const fileInfo = msg.message_type === 'file' ? parseFileMessage(msg.content) : null
+                const isImg = fileInfo && isImageFile(fileInfo.url)
+
                 return (
                   <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[75%] sm:max-w-[65%] ${isMe ? 'order-2' : ''}`}>
@@ -289,7 +343,27 @@ export default function Messenger() {
                           ? 'bg-brand text-white rounded-br-md'
                           : 'bg-bg-card text-slate-200 rounded-bl-md border border-bg-border'
                       }`}>
-                        {msg.content}
+                        {fileInfo ? (
+                          isImg ? (
+                            <div>
+                              <img
+                                src={fileInfo.url}
+                                alt={fileInfo.name}
+                                className="max-w-full max-h-60 rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                                onClick={() => setPreviewImage(fileInfo.url)}
+                              />
+                              <span className="text-[10px] opacity-70 mt-1 block">{fileInfo.name}</span>
+                            </div>
+                          ) : (
+                            <a href={fileInfo.url} target="_blank" rel="noopener noreferrer"
+                              className={`flex items-center gap-2 ${isMe ? 'text-white/90 hover:text-white' : 'text-brand-light hover:text-brand'}`}>
+                              <FileText size={16} className="flex-shrink-0" />
+                              <span className="truncate underline">{fileInfo.name}</span>
+                            </a>
+                          )
+                        ) : (
+                          msg.content
+                        )}
                       </div>
                       <span className={`text-[10px] text-slate-600 mt-0.5 block ${isMe ? 'text-right mr-1' : 'ml-1'}`}>
                         {formatTime(msg.created_at)}
@@ -304,6 +378,25 @@ export default function Messenger() {
             {/* Input */}
             <div className="p-3 border-t border-bg-border bg-bg-card">
               <div className="flex items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                  accept=".jpg,.jpeg,.png,.gif,.webp,.svg,.pdf,.doc,.docx,.xls,.xlsx,.pptx,.txt,.csv,.zip"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="p-2.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-bg-elevated transition-colors flex-shrink-0"
+                  title="파일 첨부"
+                >
+                  {uploading ? (
+                    <div className="w-4 h-4 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Paperclip size={16} />
+                  )}
+                </button>
                 <input
                   className="input flex-1 text-sm"
                   placeholder="메시지를 입력하세요..."
@@ -375,6 +468,16 @@ export default function Messenger() {
               <button onClick={handleCreateRoom} disabled={!newRoomName.trim()} className="btn-primary text-sm px-4 py-2 disabled:opacity-40">생성</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Image Preview Modal */}
+      {previewImage && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
+          <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 p-2 rounded-full bg-black/50 text-white hover:bg-black/70">
+            <X size={20} />
+          </button>
+          <img src={previewImage} alt="Preview" className="max-w-full max-h-[90vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
 
