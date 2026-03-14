@@ -44,8 +44,9 @@ export default function MarkdownMessage({ content, streaming }: Props) {
           ),
 
           // ── Inline code ─────────────────────────────────────────────────────
-          code: ({ inline, className, children, ...props }: { inline?: boolean; className?: string; children?: React.ReactNode; [key: string]: unknown }) => {
-            if (inline) {
+          code: ({ className, children, ...props }) => {
+            const isInline = !className
+            if (isInline) {
               return (
                 <code
                   className="text-xs font-mono px-1.5 py-0.5 rounded text-amber-300"

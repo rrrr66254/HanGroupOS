@@ -202,7 +202,7 @@ export default function AgentPerformance() {
                     tickFormatter={(v: number) => `${(v * 100).toFixed(0)}%`} />
                   <Tooltip
                     contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
-                    formatter={(v: number) => [`${(v * 100).toFixed(1)}%`, '품질']}
+                    formatter={(v) => [`${(Number(v) * 100).toFixed(1)}%`, '품질']}
                   />
                   <Line type="monotone" dataKey="avg_quality" stroke="#34d399" strokeWidth={2} dot={{ r: 2 }} name="품질" />
                 </LineChart>
@@ -228,7 +228,7 @@ export default function AgentPerformance() {
                         tickFormatter={(v: number) => `${v}%`} />
                       <YAxis type="category" dataKey="agent_name" tick={{ fontSize: 10, fill: '#94a3b8' }} width={80} />
                       <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
-                        formatter={(v: number) => [`${v}%`, '품질']} />
+                        formatter={(v) => [`${v}%`, '품질']} />
                       <Bar dataKey="quality_pct" fill="#34d399" radius={[0, 4, 4, 0]} name="품질" />
                     </BarChart>
                   </ResponsiveContainer>

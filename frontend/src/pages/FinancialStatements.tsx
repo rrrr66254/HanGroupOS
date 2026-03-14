@@ -403,7 +403,7 @@ export default function FinancialStatements() {
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 11 }}
                   labelStyle={{ color: '#94a3b8' }}
-                  formatter={(v: number) => [v < 1 ? v.toFixed(6) : v.toFixed(4), fxHistoryCurrency]}
+                  formatter={(v) => { const n = Number(v); return [n < 1 ? n.toFixed(6) : n.toFixed(4), fxHistoryCurrency] }}
                 />
                 <Area
                   type="monotone"
@@ -428,7 +428,7 @@ export default function FinancialStatements() {
           <div className="flex items-center gap-2 mb-3">
             <Brain size={16} className="text-purple-400" />
             <span className="text-sm font-semibold text-purple-300">AI 종합 재무 리포트</span>
-            {(report.report as Record<string, unknown>)?.grade && (
+            {!!(report.report as Record<string, unknown>)?.grade && (
               <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-xs font-bold">
                 등급: {String((report.report as Record<string, unknown>).grade)}
               </span>
@@ -437,7 +437,7 @@ export default function FinancialStatements() {
           <p className="text-xs text-slate-300 leading-relaxed">
             {typeof report.report === 'object' ? String((report.report as Record<string, unknown>).summary || JSON.stringify(report.report)) : String(report.report)}
           </p>
-          {(report.report as Record<string, unknown>)?.recommendations && (
+          {!!((report.report as Record<string, unknown>)?.recommendations) && (
             <div className="mt-3 space-y-1">
               <span className="text-[10px] text-slate-500">추천 사항</span>
               {((report.report as Record<string, unknown>).recommendations as string[]).map((r, i) => (

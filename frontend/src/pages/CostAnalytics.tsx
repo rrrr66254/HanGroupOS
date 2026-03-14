@@ -126,7 +126,7 @@ export default function CostAnalytics() {
                   tickFormatter={(v: number) => `$${v.toFixed(3)}`} />
                 <Tooltip
                   contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
-                  formatter={(v: number) => [`$${v.toFixed(4)}`, '비용']}
+                  formatter={(v) => [`$${Number(v).toFixed(4)}`, '비용']}
                 />
                 <Line type="monotone" dataKey="cost_usd" stroke="#34d399" strokeWidth={2} dot={{ r: 2 }} />
               </LineChart>
@@ -150,14 +150,14 @@ export default function CostAnalytics() {
                   cx="50%" cy="50%"
                   innerRadius={40} outerRadius={70}
                   paddingAngle={2}
-                  label={({ provider, percent }) => `${provider} ${(percent * 100).toFixed(0)}%`}
+                  label={(props) => `${props.name ?? ''} ${((props.percent ?? 0) * 100).toFixed(0)}%`}
                 >
                   {data.by_provider.filter((p) => p.cost_usd > 0).map((_, i) => (
                     <Cell key={i} fill={COLORS[i % COLORS.length]} />
                   ))}
                 </Pie>
                 <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
-                  formatter={(v: number) => [`$${v.toFixed(4)}`, '비용']} />
+                  formatter={(v) => [`$${Number(v).toFixed(4)}`, '비용']} />
               </PieChart>
             </ResponsiveContainer>
           ) : (
@@ -182,7 +182,7 @@ export default function CostAnalytics() {
                 tickFormatter={(v: number) => `$${v.toFixed(3)}`} />
               <YAxis type="category" dataKey="model" tick={{ fontSize: 9, fill: '#94a3b8' }} width={120} />
               <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 11 }}
-                formatter={(v: number) => [`$${v.toFixed(4)}`, '비용']} />
+                formatter={(v) => [`$${Number(v).toFixed(4)}`, '비용']} />
               <Bar dataKey="cost_usd" fill="#818cf8" radius={[0, 4, 4, 0]} name="비용 (USD)" />
             </BarChart>
           </ResponsiveContainer>
