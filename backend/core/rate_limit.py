@@ -22,15 +22,28 @@ _requests: dict[str, list[float]] = defaultdict(list)
 DEFAULT_RATE = 60       # 기본: 분당 60회
 DEFAULT_WINDOW = 60     # 윈도우: 60초
 
-# 경로별 커스텀 제한
+# 경로별 커스텀 제한 (method, path) 또는 path만 지정
+# method가 None이면 모든 메소드에 적용
 PATH_LIMITS: dict[str, tuple[int, int]] = {
-    "/api/chat":           (20, 60),    # 분당 20회 (AI 호출 비용)
-    "/api/news/briefing":  (10, 60),    # 분당 10회 (AI 호출)
-    "/api/game/ideas":     (10, 60),    # 분당 10회
-    "/api/video-gen":      (5, 60),     # 분당 5회 (GPU 집약)
-    "/api/docs/generate":  (10, 60),    # 분당 10회
-    "/api/financial":      (30, 60),    # 분당 30회
-    "/health":             (120, 60),   # 헬스체크는 느슨하게
+    "/api/chat/send":              (20, 60),    # AI 호출 POST — 분당 20회
+    "/api/chat/company-query":     (20, 60),    # AI 호출 POST
+    "/api/chat/collaborate":       (10, 60),    # AI 호출 POST
+    "/api/chat/multi-ceo-meeting": (10, 60),    # AI 호출 POST
+    "/api/chat/board-meeting":     (10, 60),    # AI 호출 POST
+    "/api/chat/brief-ceo":         (20, 60),    # AI 호출 POST
+    "/api/chat":                   (120, 60),   # 읽기 GET (timeline, group-kpi 등) — 분당 120회
+    "/api/news/briefing":          (10, 60),    # AI 호출
+    "/api/game/ideas":             (10, 60),    # AI 호출
+    "/api/video-gen":              (5, 60),     # GPU 집약
+    "/api/docs/generate":          (10, 60),    # AI 호출
+    "/api/financial":              (60, 60),    # 분당 60회
+    "/api/notifications":          (120, 60),   # 알림 폴링 — 느슨하게
+    "/api/approvals":              (120, 60),   # 대시보드 폴링
+    "/api/companies":              (120, 60),   # 대시보드 폴링
+    "/api/models":                 (120, 60),   # 상태 체크
+    "/api/video":                  (120, 60),   # GPU 상태 폴링
+    "/api/terminal":               (120, 60),   # 터미널 폴링
+    "/health":                     (120, 60),   # 헬스체크
 }
 
 # Rate Limit 제외 경로
@@ -54,11 +67,14 @@ def _get_client_key(request: Request) -> str:
 
 
 def _get_limit(path: str) -> tuple[int, int]:
-    """경로에 맞는 (최대 요청 수, 윈도우 초) 반환."""
+    """경로에 맞는 (최대 요청 수, 윈도우 초) 반환. 가장 긴 prefix 우선 매칭."""
+    best_match = ""
+    best_limit = (DEFAULT_RATE, DEFAULT_WINDOW)
     for prefix, limit in PATH_LIMITS.items():
-        if path.startswith(prefix):
-            return limit
-    return (DEFAULT_RATE, DEFAULT_WINDOW)
+        if path.startswith(prefix) and len(prefix) > len(best_match):
+            best_match = prefix
+            best_limit = limit
+    return best_limit
 
 
 def _cleanup_old_entries():

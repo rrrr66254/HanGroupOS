@@ -16,11 +16,22 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (res) => res,
-  (err) => {
+  async (err) => {
     if (err.response?.status === 401) {
       useAuthStore.getState().logout()
       window.location.href = '/login'
+      return Promise.reject(err)
     }
+
+    // 429 Too Many Requests — Retry-After 헤더 기반 자동 재시도
+    if (err.response?.status === 429 && err.config && !err.config.__retryCount) {
+      const retryAfter = parseInt(err.response.headers['retry-after'] || '2', 10)
+      const delay = Math.min(retryAfter * 1000, 10000)
+      err.config.__retryCount = 1
+      await new Promise((r) => setTimeout(r, delay))
+      return api.request(err.config)
+    }
+
     return Promise.reject(err)
   }
 )
