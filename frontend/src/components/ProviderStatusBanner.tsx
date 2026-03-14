@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { subscribeWsEvent } from './NotificationPoller'
 import {
   Wifi, WifiOff, Key, Settings, X, CheckCircle,
   AlertTriangle, Loader2, RefreshCw, Eye, EyeOff,
@@ -47,7 +48,6 @@ export function useProviderHealth() {
     // WebSocket으로 프로바이더 상태 실시간 수신
     let unsub: (() => void) | null = null
     try {
-      const { subscribeWsEvent } = require('./NotificationPoller')
       unsub = subscribeWsEvent('provider_status', (data: Record<string, unknown>) => {
         const wsHealth: ProviderHealth = {
           ollama: {

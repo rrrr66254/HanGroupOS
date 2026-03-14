@@ -10,7 +10,7 @@ import WorkFeed from '../components/WorkFeed'
 import { useAppStore, useAuthStore, useGroupStore } from '../store/useStore'
 import { format } from 'date-fns'
 
-const POLL_INTERVAL = 30 // seconds
+const POLL_INTERVAL = 120 // seconds — 토큰 절약을 위해 2분 간격
 
 interface LiveEvent {
   type: string; icon: string; title: string; body: string

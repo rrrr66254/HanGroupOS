@@ -1448,12 +1448,27 @@ def board_meeting(
     }
 
 
+# ── 추천 액션 캐시 (5분) ──────────────────────────────────────────────────────
+_recommended_actions_cache: dict = {"data": None, "ts": 0.0, "user_id": None}
+_RECOMMENDED_ACTIONS_TTL = 300  # 5분
+
 @router.get("/recommended-actions")
 def recommended_actions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Generate today's AI-recommended actions for the chairman based on group status."""
+    import time as _time
+
+    now = _time.time()
+    cache = _recommended_actions_cache
+    if (
+        cache["data"] is not None
+        and cache["user_id"] == current_user.id
+        and (now - cache["ts"]) < _RECOMMENDED_ACTIONS_TTL
+    ):
+        return cache["data"]
+
     company_count = db.query(Company).filter(Company.status == "active").count()
     recent_msgs = (
         db.query(ChatMessage)
@@ -1488,7 +1503,9 @@ def recommended_actions(
             {"action": "CEO 브리핑 일정 확인", "reason": "전략 정렬 확인", "priority": "low"},
         ]
 
-    return {"actions": actions, "company_count": company_count}
+    result = {"actions": actions, "company_count": company_count}
+    _recommended_actions_cache.update({"data": result, "ts": now, "user_id": current_user.id})
+    return result
 
 
 @router.delete("/sessions/{session_id}")

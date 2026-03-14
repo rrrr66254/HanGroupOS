@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { subscribeWsEvent } from './NotificationPoller'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, MessageSquare, Building2, CheckSquare,
@@ -160,7 +161,6 @@ export default function Sidebar() {
     fetchCounts()
 
     // WebSocket으로 실시간 수신 (badge_update 이벤트)
-    const { subscribeWsEvent } = require('./NotificationPoller')
     const unsub = subscribeWsEvent('badge_update', (data: Record<string, unknown>) => {
       setPendingApprovals((data.approvals as number) ?? 0)
       setPendingTerminals((data.terminals as number) ?? 0)

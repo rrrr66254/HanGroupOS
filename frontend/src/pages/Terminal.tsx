@@ -3,6 +3,7 @@
  * Flow: CEO requests → Admin approves (+ optional instant execute) → view live output
  */
 import { useEffect, useRef, useState } from 'react'
+import { subscribeWsEvent } from '../components/NotificationPoller'
 import {
   Terminal as TerminalIcon, Check, X, Play, RefreshCw,
   Clock, CheckCircle, XCircle, Zap, Activity, ChevronDown,
@@ -56,7 +57,6 @@ function LivePanel() {
     // WebSocket으로 터미널 상태 변경 수신 + 30초 폴백
     let unsub: (() => void) | null = null
     try {
-      const { subscribeWsEvent } = require('../components/NotificationPoller')
       unsub = subscribeWsEvent('terminal_update', () => { load() })
     } catch { /* silent */ }
     intervalRef.current = window.setInterval(load, 30_000) // 폴백: 30초
