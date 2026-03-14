@@ -4,6 +4,10 @@ import {
   BarChart2, Loader2, Brain, ChevronDown, PieChart, AlertTriangle,
   ArrowRightLeft, RefreshCw,
 } from 'lucide-react'
+import {
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, Legend, Area, AreaChart,
+} from 'recharts'
 import { financialApi, companiesApi } from '../api/client'
 import { useAppStore } from '../store/useStore'
 import type { Company } from '../types'
@@ -34,6 +38,13 @@ const FMT = (n: number) => {
   return n.toLocaleString()
 }
 
+const CHART_COLORS = {
+  revenue: '#34d399',
+  operating_income: '#60a5fa',
+  net_income: '#a78bfa',
+  total_assets: '#fbbf24',
+}
+
 export default function FinancialStatements() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [selectedCompany, setSelectedCompany] = useState<number | null>(null)
@@ -56,6 +67,11 @@ export default function FinancialStatements() {
   const [convertResult, setConvertResult] = useState<number | null>(null)
   const [convertRate, setConvertRate] = useState<number | null>(null)
 
+  // ── 환율 이력 차트 ──
+  const [fxHistory, setFxHistory] = useState<{ date: string; rate: number }[]>([])
+  const [fxHistoryCurrency, setFxHistoryCurrency] = useState('USD')
+  const [fxHistoryLoading, setFxHistoryLoading] = useState(false)
+
   const loadExchangeRates = useCallback(async () => {
     setFxLoading(true)
     try {
@@ -66,7 +82,24 @@ export default function FinancialStatements() {
     setFxLoading(false)
   }, [])
 
+  const loadFxHistory = useCallback(async (currency: string) => {
+    setFxHistoryLoading(true)
+    try {
+      const res = await financialApi.exchangeHistory('KRW', currency, 30)
+      const rates = res.data.rates || {}
+      const chartData = Object.entries(rates)
+        .map(([date, rateObj]) => ({
+          date,
+          rate: (rateObj as Record<string, number>)[currency] || 0,
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date))
+      setFxHistory(chartData)
+    } catch { /* silent */ }
+    setFxHistoryLoading(false)
+  }, [])
+
   useEffect(() => { loadExchangeRates() }, [loadExchangeRates])
+  useEffect(() => { loadFxHistory(fxHistoryCurrency) }, [fxHistoryCurrency, loadFxHistory])
 
   const handleConvert = async () => {
     try {
@@ -138,6 +171,45 @@ export default function FinancialStatements() {
   const totalNetIncome = Object.values(latestByCompany).reduce((s, f) => s + f.net_income, 0)
   const totalAssets = Object.values(latestByCompany).reduce((s, f) => s + f.total_assets, 0)
 
+  // 차트 데이터: 기간별 추이
+  const chartData = [...statements]
+    .sort((a, b) => a.period.localeCompare(b.period))
+    .reduce<{ period: string; revenue: number; operating_income: number; net_income: number; total_assets: number }[]>(
+      (acc, s) => {
+        const existing = acc.find((d) => d.period === s.period)
+        if (existing) {
+          existing.revenue += s.revenue
+          existing.operating_income += s.operating_income
+          existing.net_income += s.net_income
+          existing.total_assets += s.total_assets
+        } else {
+          acc.push({
+            period: s.period,
+            revenue: s.revenue,
+            operating_income: s.operating_income,
+            net_income: s.net_income,
+            total_assets: s.total_assets,
+          })
+        }
+        return acc
+      },
+      []
+    )
+
+  const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) => {
+    if (!active || !payload?.length) return null
+    return (
+      <div className="bg-bg-card border border-bg-border rounded-lg p-3 shadow-xl">
+        <p className="text-xs font-medium text-slate-300 mb-1">{label}</p>
+        {payload.map((p, i) => (
+          <p key={i} className="text-[11px]" style={{ color: p.color }}>
+            {p.name}: {FMT(p.value)}
+          </p>
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -191,64 +263,160 @@ export default function FinancialStatements() {
         ))}
       </div>
 
-      {/* Exchange Rate Panel */}
-      <div className="bg-bg-card border border-bg-border rounded-xl p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
-            <ArrowRightLeft size={14} className="text-blue-400" />
-            실시간 환율 (KRW 기준)
-            {fxDate && <span className="text-[10px] text-slate-500 font-normal">{fxDate}</span>}
+      {/* Revenue / Profit Trend Chart */}
+      {chartData.length >= 2 && (
+        <div className="bg-bg-card border border-bg-border rounded-xl p-5">
+          <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-2 mb-4">
+            <BarChart2 size={14} className="text-emerald-400" />
+            매출/수익 추이
           </h3>
-          <button onClick={loadExchangeRates} disabled={fxLoading}
-            className="p-1 rounded text-slate-500 hover:text-slate-300">
-            <RefreshCw size={12} className={fxLoading ? 'animate-spin' : ''} />
-          </button>
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={chartData} barGap={4}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey="period" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+              <YAxis
+                tick={{ fill: '#94a3b8', fontSize: 10 }}
+                tickFormatter={(v: number) => FMT(v)}
+              />
+              <Tooltip content={<CustomTooltip />} />
+              <Legend
+                wrapperStyle={{ fontSize: 11 }}
+                formatter={(value: string) => {
+                  const map: Record<string, string> = { revenue: '매출', operating_income: '영업이익', net_income: '순이익' }
+                  return map[value] || value
+                }}
+              />
+              <Bar dataKey="revenue" name="revenue" fill={CHART_COLORS.revenue} radius={[4, 4, 0, 0]} />
+              <Bar dataKey="operating_income" name="operating_income" fill={CHART_COLORS.operating_income} radius={[4, 4, 0, 0]} />
+              <Bar dataKey="net_income" name="net_income" fill={CHART_COLORS.net_income} radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </div>
-        <div className="flex flex-wrap gap-3 mb-4">
-          {Object.entries(fxRates).map(([cur, rate]) => (
-            <div key={cur} className="bg-bg-elevated rounded-lg px-3 py-2 text-center min-w-[80px]">
-              <span className="text-[10px] text-slate-500 block">{cur}</span>
-              <span className="text-sm font-mono text-slate-200">
-                {rate < 1 ? rate.toFixed(6) : rate.toFixed(2)}
-              </span>
+      )}
+
+      {/* Exchange Rate Panel + History Chart */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Exchange Rate Panel */}
+        <div className="bg-bg-card border border-bg-border rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+              <ArrowRightLeft size={14} className="text-blue-400" />
+              실시간 환율 (KRW 기준)
+              {fxDate && <span className="text-[10px] text-slate-500 font-normal">{fxDate}</span>}
+            </h3>
+            <button onClick={loadExchangeRates} disabled={fxLoading}
+              className="p-1 rounded text-slate-500 hover:text-slate-300">
+              <RefreshCw size={12} className={fxLoading ? 'animate-spin' : ''} />
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-3 mb-4">
+            {Object.entries(fxRates).map(([cur, rate]) => (
+              <div key={cur} className="bg-bg-elevated rounded-lg px-3 py-2 text-center min-w-[80px]">
+                <span className="text-[10px] text-slate-500 block">{cur}</span>
+                <span className="text-sm font-mono text-slate-200">
+                  {rate < 1 ? rate.toFixed(6) : rate.toFixed(2)}
+                </span>
+              </div>
+            ))}
+            {Object.keys(fxRates).length === 0 && !fxLoading && (
+              <span className="text-[11px] text-slate-500">환율 정보 로딩 중...</span>
+            )}
+          </div>
+
+          {/* 환율 변환기 */}
+          <div className="flex flex-wrap items-end gap-2 p-3 bg-bg-base rounded-lg">
+            <div>
+              <label className="text-[10px] text-slate-500 block mb-1">금액</label>
+              <input type="number" value={convertAmount}
+                onChange={(e) => setConvertAmount(Number(e.target.value))}
+                className="bg-bg-elevated border border-bg-border rounded-lg px-3 py-1.5 text-xs text-slate-200 w-32 font-mono outline-none focus:border-brand" />
             </div>
-          ))}
-          {Object.keys(fxRates).length === 0 && !fxLoading && (
-            <span className="text-[11px] text-slate-500">환율 정보 로딩 중...</span>
-          )}
+            <div>
+              <label className="text-[10px] text-slate-500 block mb-1">From</label>
+              <select value={convertFrom} onChange={(e) => setConvertFrom(e.target.value)}
+                className="bg-bg-elevated border border-bg-border rounded-lg px-2 py-1.5 text-xs text-slate-200 outline-none">
+                {['KRW', 'USD', 'EUR', 'JPY', 'CNY', 'GBP'].map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <ArrowRightLeft size={14} className="text-slate-500 mb-1" />
+            <div>
+              <label className="text-[10px] text-slate-500 block mb-1">To</label>
+              <select value={convertTo} onChange={(e) => setConvertTo(e.target.value)}
+                className="bg-bg-elevated border border-bg-border rounded-lg px-2 py-1.5 text-xs text-slate-200 outline-none">
+                {['USD', 'EUR', 'JPY', 'CNY', 'GBP', 'KRW'].map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <button onClick={handleConvert}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 transition-colors">
+              변환
+            </button>
+            {convertResult !== null && (
+              <div className="ml-2 flex items-center gap-2">
+                <span className="text-sm font-bold text-emerald-400 font-mono">{convertResult.toLocaleString()} {convertTo}</span>
+                {convertRate && <span className="text-[10px] text-slate-500">(1 {convertFrom} = {convertRate < 1 ? convertRate.toFixed(6) : convertRate.toFixed(2)} {convertTo})</span>}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* 환율 변환기 */}
-        <div className="flex flex-wrap items-end gap-2 p-3 bg-bg-base rounded-lg">
-          <div>
-            <label className="text-[10px] text-slate-500 block mb-1">금액</label>
-            <input type="number" value={convertAmount}
-              onChange={(e) => setConvertAmount(Number(e.target.value))}
-              className="bg-bg-elevated border border-bg-border rounded-lg px-3 py-1.5 text-xs text-slate-200 w-32 font-mono outline-none focus:border-brand" />
-          </div>
-          <div>
-            <label className="text-[10px] text-slate-500 block mb-1">From</label>
-            <select value={convertFrom} onChange={(e) => setConvertFrom(e.target.value)}
-              className="bg-bg-elevated border border-bg-border rounded-lg px-2 py-1.5 text-xs text-slate-200 outline-none">
-              {['KRW', 'USD', 'EUR', 'JPY', 'CNY', 'GBP'].map((c) => <option key={c} value={c}>{c}</option>)}
+        {/* Exchange Rate History Chart */}
+        <div className="bg-bg-card border border-bg-border rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-2">
+              <TrendingUp size={14} className="text-amber-400" />
+              환율 변동 추이 (30일)
+            </h3>
+            <select
+              value={fxHistoryCurrency}
+              onChange={(e) => setFxHistoryCurrency(e.target.value)}
+              className="bg-bg-elevated border border-bg-border rounded-lg px-2 py-1 text-[10px] text-slate-200 outline-none"
+            >
+              {['USD', 'EUR', 'JPY', 'CNY', 'GBP'].map((c) => (
+                <option key={c} value={c}>KRW/{c}</option>
+              ))}
             </select>
           </div>
-          <ArrowRightLeft size={14} className="text-slate-500 mb-1" />
-          <div>
-            <label className="text-[10px] text-slate-500 block mb-1">To</label>
-            <select value={convertTo} onChange={(e) => setConvertTo(e.target.value)}
-              className="bg-bg-elevated border border-bg-border rounded-lg px-2 py-1.5 text-xs text-slate-200 outline-none">
-              {['USD', 'EUR', 'JPY', 'CNY', 'GBP', 'KRW'].map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          <button onClick={handleConvert}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 transition-colors">
-            변환
-          </button>
-          {convertResult !== null && (
-            <div className="ml-2 flex items-center gap-2">
-              <span className="text-sm font-bold text-emerald-400 font-mono">{convertResult.toLocaleString()} {convertTo}</span>
-              {convertRate && <span className="text-[10px] text-slate-500">(1 {convertFrom} = {convertRate < 1 ? convertRate.toFixed(6) : convertRate.toFixed(2)} {convertTo})</span>}
+          {fxHistoryLoading ? (
+            <div className="flex items-center justify-center h-48">
+              <Loader2 size={20} className="animate-spin text-slate-500" />
+            </div>
+          ) : fxHistory.length > 0 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={fxHistory}>
+                <defs>
+                  <linearGradient id="fxGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#60a5fa" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#60a5fa" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fill: '#94a3b8', fontSize: 9 }}
+                  tickFormatter={(v: string) => v.slice(5)}
+                />
+                <YAxis
+                  tick={{ fill: '#94a3b8', fontSize: 9 }}
+                  domain={['auto', 'auto']}
+                  tickFormatter={(v: number) => v < 1 ? v.toFixed(5) : v.toFixed(2)}
+                />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 11 }}
+                  labelStyle={{ color: '#94a3b8' }}
+                  formatter={(v: number) => [v < 1 ? v.toFixed(6) : v.toFixed(4), fxHistoryCurrency]}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="rate"
+                  stroke="#60a5fa"
+                  fill="url(#fxGradient)"
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-48 text-slate-500 text-xs">
+              환율 이력 데이터 없음
             </div>
           )}
         </div>

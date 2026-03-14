@@ -72,6 +72,7 @@ const ko = {
     financial: '재무제표',
     permissions: '권한 관리',
     messenger: '메신저',
+    notifications: '알림 센터',
   },
 
   // 그룹 카테고리

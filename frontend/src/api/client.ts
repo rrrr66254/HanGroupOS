@@ -586,6 +586,8 @@ export const financialApi = {
   companySummary: (companyId: number) => api.get(`/financial/company/${companyId}/summary`),
   exchangeRates: (base?: string, symbols?: string) =>
     api.get('/financial/exchange-rates', { params: { base, symbols } }),
+  exchangeHistory: (base?: string, symbols?: string, days?: number) =>
+    api.get('/financial/exchange-history', { params: { base, symbols, days } }),
   convert: (amount: number, from: string, to: string) =>
     api.post('/financial/convert', { amount, from, to }),
 }
@@ -619,4 +621,6 @@ export const messengerApi = {
   sendMessage: (roomId: number, data: { content: string; message_type?: string; reply_to?: number }) =>
     api.post(`/messenger/rooms/${roomId}/messages`, data),
   listUsers: () => api.get('/messenger/users'),
+  markRead: (roomId: number) => api.post(`/messenger/rooms/${roomId}/read`),
+  readStatus: (roomId: number) => api.get(`/messenger/rooms/${roomId}/read-status`),
 }

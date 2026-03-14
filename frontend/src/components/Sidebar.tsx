@@ -103,6 +103,7 @@ const TOP_ITEMS = [
   { to: '/group-home', icon: Home, labelKey: 'nav.groupHome', highlight: true },
   { to: '/chairman', icon: MessageSquare, labelKey: 'nav.chairman' },
   { to: '/messenger', icon: MessageSquare, labelKey: 'nav.messenger' },
+  { to: '/notifications', icon: Bell, labelKey: 'nav.notifications' },
 ]
 
 function Badge({ count, color = 'red' }: { count: number; color?: 'red' | 'orange' | 'yellow' }) {

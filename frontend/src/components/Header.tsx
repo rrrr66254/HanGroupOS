@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom'
-import { LogOut, User, Sun, Moon, Globe, Menu } from 'lucide-react'
+import { LogOut, User, Sun, Moon, Globe, Menu, Wifi, WifiOff, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 import { useAuthStore, useAppStore, useGroupStore } from '../store/useStore'
 import { useI18nStore, LOCALE_LABELS, type Locale } from '../i18n'
@@ -23,6 +23,54 @@ const PAGE_TITLES: Record<string, string> = {
   '/financial': '재무제표 관리',
   '/permissions': '권한 관리',
   '/messenger': '그룹 메신저',
+  '/notifications': '알림 센터',
+}
+
+function WsStatusIndicator() {
+  const wsStatus = useAppStore((s) => s.wsStatus)
+  const wsRetryCount = useAppStore((s) => s.wsRetryCount)
+
+  const handleReconnect = () => {
+    const fn = (window as unknown as Record<string, unknown>).__wsReconnect as (() => void) | undefined
+    if (fn) fn()
+  }
+
+  if (wsStatus === 'connected') {
+    return (
+      <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-400" title="WebSocket 연결됨">
+        <Wifi size={12} />
+        <span className="text-[10px] font-medium">실시간</span>
+      </div>
+    )
+  }
+  if (wsStatus === 'connecting') {
+    return (
+      <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500/10 text-amber-400" title="연결 중...">
+        <RefreshCw size={12} className="animate-spin" />
+        <span className="text-[10px] font-medium">연결 중</span>
+      </div>
+    )
+  }
+  if (wsStatus === 'failed') {
+    return (
+      <button
+        onClick={handleReconnect}
+        className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
+        title={`연결 실패 (${wsRetryCount}회 시도) — 클릭하여 재연결`}
+      >
+        <WifiOff size={12} />
+        <span className="text-[10px] font-medium">연결 실패</span>
+      </button>
+    )
+  }
+  // disconnected — reconnecting
+  return (
+    <div className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500/10 text-amber-400"
+      title={`재연결 중 (${wsRetryCount}/${10})`}>
+      <RefreshCw size={12} className="animate-spin" />
+      <span className="text-[10px] font-medium">재연결 {wsRetryCount}</span>
+    </div>
+  )
 }
 
 export default function Header() {
@@ -60,6 +108,8 @@ export default function Header() {
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-3">
+        {/* WebSocket 연결 상태 표시 */}
+        <WsStatusIndicator />
         <div className="hidden lg:block"><ProviderStatusBanner /></div>
         <div className="h-4 w-px bg-bg-border hidden sm:block" />
 

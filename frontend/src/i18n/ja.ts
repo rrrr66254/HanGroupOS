@@ -72,6 +72,7 @@ const ja = {
     financial: '財務諸表',
     permissions: '権限管理',
     messenger: 'メッセンジャー',
+    notifications: '通知センター',
   },
 
   // グループカテゴリ

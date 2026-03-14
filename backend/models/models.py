@@ -865,6 +865,16 @@ class ChatRoomMessage(Base):
     room = relationship("ChatRoom", back_populates="messages")
 
 
+class MessageReadStatus(Base):
+    """메시지 읽음 상태 추적."""
+    __tablename__ = "message_read_statuses"
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, ForeignKey("chat_rooms.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    last_read_message_id = Column(Integer, ForeignKey("chat_room_messages.id"), nullable=True)
+    last_read_at = Column(DateTime, default=datetime.utcnow)
+
+
 class NewsFeedSubscription(Base):
     """회사별 뉴스 피드 구독 설정."""
     __tablename__ = "news_feed_subscriptions"

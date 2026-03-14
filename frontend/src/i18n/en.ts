@@ -72,6 +72,7 @@ const en = {
     financial: 'Financial',
     permissions: 'Permissions',
     messenger: 'Messenger',
+    notifications: 'Notifications',
   },
 
   // Group categories

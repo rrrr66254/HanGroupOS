@@ -24,7 +24,7 @@ from datetime import datetime
 
 from core.database import get_db
 from core.security import get_current_user
-from models.models import ChatRoom, ChatRoomMember, ChatRoomMessage, User
+from models.models import ChatRoom, ChatRoomMember, ChatRoomMessage, User, MessageReadStatus
 
 UPLOAD_DIR = Path(__file__).parent.parent / "uploads" / "messenger"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -437,6 +437,91 @@ def serve_file(filename: str):
     if not file_path.exists():
         raise HTTPException(404, "파일을 찾을 수 없습니다.")
     return FileResponse(file_path)
+
+
+# ── Read Receipt Endpoints ────────────────────────────────────────────────────
+
+@router.post("/rooms/{room_id}/read")
+def mark_read(
+    room_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """현재 방의 마지막 메시지까지 읽음 처리."""
+    _check_membership(db, room_id, user.id)
+
+    last_msg = db.query(ChatRoomMessage).filter(
+        ChatRoomMessage.room_id == room_id
+    ).order_by(ChatRoomMessage.created_at.desc()).first()
+
+    if not last_msg:
+        return {"ok": True}
+
+    status = db.query(MessageReadStatus).filter(
+        MessageReadStatus.room_id == room_id,
+        MessageReadStatus.user_id == user.id,
+    ).first()
+
+    if status:
+        status.last_read_message_id = last_msg.id
+        status.last_read_at = datetime.utcnow()
+    else:
+        status = MessageReadStatus(
+            room_id=room_id,
+            user_id=user.id,
+            last_read_message_id=last_msg.id,
+        )
+        db.add(status)
+
+    db.commit()
+
+    # 읽음 상태를 다른 멤버에게 브로드캐스트
+    try:
+        from routers.notifications import manager as notif_manager
+        members = db.query(ChatRoomMember).filter(
+            ChatRoomMember.room_id == room_id,
+            ChatRoomMember.user_id != user.id,
+        ).all()
+        for m in members:
+            notif_manager.broadcast_messenger_sync(m.user_id, {
+                "type": "messenger_read",
+                "room_id": room_id,
+                "user_id": user.id,
+                "last_read_message_id": last_msg.id,
+            })
+    except Exception:
+        pass
+
+    return {"ok": True, "last_read_message_id": last_msg.id}
+
+
+@router.get("/rooms/{room_id}/read-status")
+def get_read_status(
+    room_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """방 멤버별 마지막 읽은 메시지 ID 조회."""
+    _check_membership(db, room_id, user.id)
+
+    statuses = db.query(MessageReadStatus).filter(
+        MessageReadStatus.room_id == room_id
+    ).all()
+
+    user_cache = {}
+    result = []
+    for s in statuses:
+        if s.user_id not in user_cache:
+            u = db.query(User).filter(User.id == s.user_id).first()
+            user_cache[s.user_id] = u.username if u else f"User#{s.user_id}"
+        result.append({
+            "user_id": s.user_id,
+            "username": user_cache[s.user_id],
+            "last_read_message_id": s.last_read_message_id,
+            "last_read_at": str(s.last_read_at) if s.last_read_at else None,
+        })
+
+    return result
 
 
 def _notify_room_members(db: Session, room_id: int, sender: User, msg: ChatRoomMessage):

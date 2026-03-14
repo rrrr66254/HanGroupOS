@@ -68,6 +68,8 @@ interface AppState {
   pendingTerminals: number
   badgeTick: number
   theme: 'dark' | 'light'
+  wsStatus: 'connecting' | 'connected' | 'disconnected' | 'failed'
+  wsRetryCount: number
   toasts: AppToast[]
   setSelectedCompany: (company: Company | null) => void
   toggleSidebar: () => void
@@ -78,6 +80,8 @@ interface AppState {
   setPendingTerminals: (n: number) => void
   triggerBadgeRefresh: () => void
   toggleTheme: () => void
+  setWsStatus: (s: 'connecting' | 'connected' | 'disconnected' | 'failed') => void
+  setWsRetryCount: (n: number) => void
   addToast: (t: Omit<AppToast, 'id'>) => void
   removeToast: (id: string) => void
 }
@@ -91,6 +95,8 @@ export const useAppStore = create<AppState>((set) => ({
   pendingTerminals: 0,
   badgeTick: 0,
   theme: (localStorage.getItem('han-theme') as 'dark' | 'light') ?? 'dark',
+  wsStatus: 'disconnected' as const,
+  wsRetryCount: 0,
   toasts: [],
   setSelectedCompany: (company) => set({ selectedCompany: company }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -100,6 +106,8 @@ export const useAppStore = create<AppState>((set) => ({
   setPendingApprovals: (n) => set({ pendingApprovals: n }),
   setPendingTerminals: (n) => set({ pendingTerminals: n }),
   triggerBadgeRefresh: () => set((s) => ({ badgeTick: s.badgeTick + 1 })),
+  setWsStatus: (s) => set({ wsStatus: s }),
+  setWsRetryCount: (n) => set({ wsRetryCount: n }),
   toggleTheme: () => set((s) => {
     const next = s.theme === 'dark' ? 'light' : 'dark'
     localStorage.setItem('han-theme', next)

@@ -383,6 +383,50 @@ def get_exchange_rates(
         }
 
 
+@router.get("/exchange-history")
+def get_exchange_history(
+    base: str = "KRW",
+    symbols: str = "USD",
+    days: int = 30,
+    _: User = Depends(get_current_user),
+):
+    """환율 변동 이력 (Frankfurter time series)."""
+    from core.cache import cache_get, cache_set
+    import httpx
+    from datetime import timedelta
+
+    cache_key = f"fx_history:{base}:{symbols}:{days}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    end_date = datetime.utcnow().strftime("%Y-%m-%d")
+    start_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    try:
+        url = f"https://api.frankfurter.dev/v1/{start_date}..{end_date}?base={base}&symbols={symbols}"
+        r = httpx.get(url, timeout=10.0)
+        r.raise_for_status()
+        data = r.json()
+        result = {
+            "base": data.get("base", base),
+            "start_date": data.get("start_date", start_date),
+            "end_date": data.get("end_date", end_date),
+            "rates": data.get("rates", {}),
+        }
+        cache_set(cache_key, result, ttl=1800)  # 30분 캐시
+        return result
+    except Exception as e:
+        logger.warning("환율 이력 조회 실패: %s", e)
+        return {
+            "base": base,
+            "start_date": start_date,
+            "end_date": end_date,
+            "rates": {},
+            "_fallback": True,
+        }
+
+
 @router.post("/convert")
 def convert_currency(
     body: dict,

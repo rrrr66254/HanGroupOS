@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   MessageSquare, Plus, Send, Users, Hash, Trash2, UserPlus,
   ChevronLeft, Search, Paperclip, Image, FileText, X,
+  Check, CheckCheck, Upload,
 } from 'lucide-react'
 import { messengerApi } from '../api/client'
 import api from '../api/client'
@@ -29,6 +30,12 @@ interface Message {
   created_at: string
 }
 
+interface ReadStatus {
+  user_id: number
+  username: string
+  last_read_message_id: number | null
+}
+
 interface AvailableUser {
   id: number
   username: string
@@ -52,9 +59,12 @@ export default function Messenger() {
   const [mobileShowChat, setMobileShowChat] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [previewImage, setPreviewImage] = useState<string | null>(null)
+  const [readStatuses, setReadStatuses] = useState<ReadStatus[]>([])
+  const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const pollRef = useRef<ReturnType<typeof setInterval>>()
+  const dragCounterRef = useRef(0)
 
   useEffect(() => {
     loadRooms()
@@ -63,11 +73,14 @@ export default function Messenger() {
   useEffect(() => {
     if (selectedRoom) {
       loadMessages(selectedRoom.id)
+      loadReadStatus(selectedRoom.id)
+      // 읽음 처리
+      messengerApi.markRead(selectedRoom.id).catch(() => {})
+
       // WebSocket으로 실시간 메시지 수신
       const { subscribeWsEvent } = require('../components/NotificationPoller')
-      const unsub = subscribeWsEvent('messenger_message', (data: Record<string, unknown>) => {
+      const unsubMsg = subscribeWsEvent('messenger_message', (data: Record<string, unknown>) => {
         if ((data as { room_id?: number }).room_id === selectedRoom.id) {
-          // 새 메시지를 직접 추가
           setMessages((prev) => [...prev, {
             id: data.message_id as number,
             room_id: data.room_id as number,
@@ -78,11 +91,26 @@ export default function Messenger() {
             reply_to: (data.reply_to as number) || null,
             created_at: data.created_at as string,
           }])
+          // 새 메시지 수신 시 자동 읽음 처리
+          messengerApi.markRead(selectedRoom.id).catch(() => {})
         }
       })
-      // 30초 폴백 폴링 (WS 메시지 누락 방지)
+      // 읽음 상태 수신
+      const unsubRead = subscribeWsEvent('messenger_read', (data: Record<string, unknown>) => {
+        if ((data as { room_id?: number }).room_id === selectedRoom.id) {
+          setReadStatuses((prev) => {
+            const filtered = prev.filter((s) => s.user_id !== (data.user_id as number))
+            return [...filtered, {
+              user_id: data.user_id as number,
+              username: '',
+              last_read_message_id: data.last_read_message_id as number,
+            }]
+          })
+        }
+      })
+      // 30초 폴백 폴링
       pollRef.current = setInterval(() => loadMessages(selectedRoom.id), 30000)
-      return () => { unsub(); clearInterval(pollRef.current) }
+      return () => { unsubMsg(); unsubRead(); clearInterval(pollRef.current) }
     }
   }, [selectedRoom?.id])
 
@@ -101,6 +129,13 @@ export default function Messenger() {
     try {
       const r = await messengerApi.listMessages(roomId, 100)
       setMessages(r.data.messages)
+    } catch { /* silent */ }
+  }
+
+  const loadReadStatus = async (roomId: number) => {
+    try {
+      const r = await messengerApi.readStatus(roomId)
+      setReadStatuses(r.data)
     } catch { /* silent */ }
   }
 
@@ -133,9 +168,8 @@ export default function Messenger() {
     } catch { /* silent */ }
   }
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || !selectedRoom) return
+  const uploadFile = async (file: File) => {
+    if (!selectedRoom) return
     if (file.size > 10 * 1024 * 1024) {
       alert('파일 크기가 10MB를 초과합니다.')
       return
@@ -150,8 +184,52 @@ export default function Messenger() {
       loadMessages(selectedRoom.id)
     } catch { /* silent */ }
     setUploading(false)
+  }
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    await uploadFile(file)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
+
+  // ── 드래그 & 드롭 핸들러 ──
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current += 1
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDragOver(true)
+    }
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current -= 1
+    if (dragCounterRef.current === 0) {
+      setIsDragOver(false)
+    }
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current = 0
+    setIsDragOver(false)
+
+    const files = Array.from(e.dataTransfer.files)
+    if (files.length === 0) return
+
+    for (const file of files) {
+      await uploadFile(file)
+    }
+  }, [selectedRoom])
 
   const isImageFile = (content: string) => {
     return /\.(jpg|jpeg|png|gif|webp|svg)/i.test(content)
@@ -215,6 +293,14 @@ export default function Messenger() {
       }
       return d.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })
     } catch { return '' }
+  }
+
+  // 메시지가 다른 멤버에 의해 읽혔는지 확인
+  const getReadCount = (messageId: number) => {
+    if (!user) return 0
+    return readStatuses.filter(
+      (s) => s.user_id !== user.id && s.last_read_message_id !== null && s.last_read_message_id >= messageId
+    ).length
   }
 
   const filteredRooms = rooms.filter((r) =>
@@ -313,8 +399,26 @@ export default function Messenger() {
               </button>
             </div>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {/* Messages — 드래그 & 드롭 영역 */}
+            <div
+              className={`flex-1 overflow-y-auto p-4 space-y-3 relative transition-colors ${
+                isDragOver ? 'bg-brand/5' : ''
+              }`}
+              onDragEnter={handleDragEnter}
+              onDragLeave={handleDragLeave}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+            >
+              {/* 드래그 오버레이 */}
+              {isDragOver && (
+                <div className="absolute inset-0 bg-brand/10 border-2 border-dashed border-brand rounded-lg z-10 flex items-center justify-center pointer-events-none">
+                  <div className="flex flex-col items-center gap-2 text-brand-light">
+                    <Upload size={32} />
+                    <span className="text-sm font-medium">파일을 여기에 놓으세요</span>
+                  </div>
+                </div>
+              )}
+
               {messages.map((msg) => {
                 const isMe = msg.user_id === user?.id
                 const isSystem = msg.message_type === 'system'
@@ -331,6 +435,7 @@ export default function Messenger() {
 
                 const fileInfo = msg.message_type === 'file' ? parseFileMessage(msg.content) : null
                 const isImg = fileInfo && isImageFile(fileInfo.url)
+                const readCount = isMe ? getReadCount(msg.id) : 0
 
                 return (
                   <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
@@ -365,9 +470,19 @@ export default function Messenger() {
                           msg.content
                         )}
                       </div>
-                      <span className={`text-[10px] text-slate-600 mt-0.5 block ${isMe ? 'text-right mr-1' : 'ml-1'}`}>
-                        {formatTime(msg.created_at)}
-                      </span>
+                      <div className={`flex items-center gap-1 mt-0.5 ${isMe ? 'justify-end mr-1' : 'ml-1'}`}>
+                        <span className="text-[10px] text-slate-600">
+                          {formatTime(msg.created_at)}
+                        </span>
+                        {/* 읽음 확인 체크 아이콘 (내 메시지만) */}
+                        {isMe && (
+                          readCount > 0 ? (
+                            <CheckCheck size={12} className="text-blue-400" title={`${readCount}명 읽음`} />
+                          ) : (
+                            <Check size={12} className="text-slate-600" title="전송됨" />
+                          )
+                        )}
+                      </div>
                     </div>
                   </div>
                 )
