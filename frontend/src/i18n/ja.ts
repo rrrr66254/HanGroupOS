@@ -57,6 +57,7 @@ const ja = {
     weeklyReport: '週次レポート',
     irReport: 'IRレポート',
     siteBuilder: 'ウェブサイト',
+    websiteBuilder: 'ウェブデプロイ',
     siteEvaluator: 'サイト評価',
     game: 'ゲームプラットフォーム',
     videoStudio: '映像スタジオ',

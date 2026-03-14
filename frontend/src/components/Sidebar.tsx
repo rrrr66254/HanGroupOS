@@ -8,7 +8,7 @@ import {
   Zap, Home, Bell, FileText, Globe, Star, GitMerge, BarChart2, UserCheck,
   Terminal, Gamepad2, Shield, Briefcase, Users, Film, ListVideo,
   DatabaseZap, ScrollText, Lightbulb, Crosshair, Activity, DollarSign, Sparkles, Rss,
-  LayoutGrid,
+  LayoutGrid, Rocket,
 } from 'lucide-react'
 import { useAppStore, useGroupStore } from '../store/useStore'
 import { approvalsApi, terminalApi } from '../api/client'
@@ -77,6 +77,7 @@ const NAV_GROUPS = [
       { to: '/weekly-report', icon: FileText, labelKey: 'nav.weeklyReport' },
       { to: '/ir-report', icon: BarChart2, labelKey: 'nav.irReport' },
       { to: '/site-builder', icon: Globe, labelKey: 'nav.siteBuilder' },
+      { to: '/website-builder', icon: Rocket, labelKey: 'nav.websiteBuilder' },
       { to: '/site-evaluator', icon: Star, labelKey: 'nav.siteEvaluator' },
       { to: '/game', icon: Gamepad2, labelKey: 'nav.game' },
       { to: '/video-studio', icon: Film, labelKey: 'nav.videoStudio' },

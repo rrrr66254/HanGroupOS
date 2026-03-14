@@ -635,3 +635,21 @@ export const messengerApi = {
   markRead: (roomId: number) => api.post(`/messenger/rooms/${roomId}/read`),
   readStatus: (roomId: number) => api.get(`/messenger/rooms/${roomId}/read-status`),
 }
+
+// ── Websites ─────────────────────────────────────────────────────────────────
+export const websitesApi = {
+  list: (companyId?: number) => api.get('/websites', { params: { company_id: companyId } }),
+  get: (id: number) => api.get(`/websites/${id}`),
+  create: (data: object) => api.post('/websites', data),
+  update: (id: number, data: object) => api.patch(`/websites/${id}`, data),
+  delete: (id: number) => api.delete(`/websites/${id}`),
+  generateContent: (id: number, data: object) => api.post(`/websites/${id}/generate-content`, data),
+  deploy: (id: number) => api.post(`/websites/${id}/deploy`),
+  deploys: (id: number) => api.get(`/websites/${id}/deploys`),
+  preview: (id: number) => `/api/websites/${id}/preview`,
+  domainCheck: (domain: string) => api.post('/websites/domain/check', { domain }),
+  domainConnect: (id: number, domain: string) => api.post(`/websites/${id}/domain/connect`, { domain }),
+  cfZones: () => api.get('/websites/cloudflare/zones'),
+  cfSettings: () => api.get('/websites/settings/cloudflare'),
+  saveCfSettings: (data: object) => api.post('/websites/settings/cloudflare', data),
+}

@@ -57,6 +57,7 @@ const ko = {
     weeklyReport: '주간보고서',
     irReport: 'IR 보고서',
     siteBuilder: '웹사이트',
+    websiteBuilder: '웹 배포',
     siteEvaluator: '사이트평가',
     game: '게임 플랫폼',
     videoStudio: '영상 스튜디오',

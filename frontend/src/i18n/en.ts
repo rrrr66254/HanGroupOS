@@ -57,6 +57,7 @@ const en = {
     weeklyReport: 'Weekly Report',
     irReport: 'IR Report',
     siteBuilder: 'Website',
+    websiteBuilder: 'Web Deploy',
     siteEvaluator: 'Site Evaluator',
     game: 'Game Platform',
     videoStudio: 'Video Studio',

@@ -890,3 +890,42 @@ class NewsFeedSubscription(Base):
     last_fetched_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── Website Builder & Deploy ─────────────────────────────────────────────────
+
+class WebsiteProject(Base):
+    """계열사 웹사이트 프로젝트 — Cloudflare Pages 배포 + 도메인 관리."""
+    __tablename__ = "website_projects"
+    id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    slug = Column(String(100), unique=True, nullable=False)
+    template = Column(String(50), default="corporate")
+    status = Column(String(30), default="draft")
+    cf_project_name = Column(String(200), nullable=True)
+    cf_deployment_id = Column(String(200), nullable=True)
+    cf_deployment_url = Column(String(500), nullable=True)
+    custom_domain = Column(String(200), nullable=True)
+    domain_status = Column(String(30), default="none")
+    ssl_status = Column(String(30), default="none")
+    site_config = Column(JSON, default={})
+    pages_data = Column(JSON, default=[])
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    deployed_at = Column(DateTime, nullable=True)
+
+
+class WebsiteDeploy(Base):
+    """웹사이트 배포 이력."""
+    __tablename__ = "website_deploys"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("website_projects.id"), nullable=False, index=True)
+    cf_deployment_id = Column(String(200), nullable=True)
+    cf_url = Column(String(500), nullable=True)
+    status = Column(String(30), default="pending")
+    deploy_type = Column(String(30), default="manual")
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)

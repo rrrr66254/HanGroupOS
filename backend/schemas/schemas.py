@@ -706,3 +706,71 @@ class MediaPostOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Website Builder ──────────────────────────────────────────────────────────
+
+class WebsiteProjectCreate(BaseModel):
+    company_id: int
+    name: str
+    slug: str
+    template: str = "corporate"
+    custom_domain: Optional[str] = None
+    site_config: Dict[str, Any] = {}
+
+
+class WebsiteProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    template: Optional[str] = None
+    custom_domain: Optional[str] = None
+    site_config: Optional[Dict[str, Any]] = None
+    pages_data: Optional[List[Dict[str, Any]]] = None
+
+
+class WebsiteProjectOut(BaseModel):
+    id: int
+    company_id: int
+    name: str
+    slug: str
+    template: str
+    status: str
+    cf_project_name: Optional[str]
+    cf_deployment_url: Optional[str]
+    custom_domain: Optional[str]
+    domain_status: str
+    ssl_status: str
+    site_config: Dict[str, Any]
+    pages_data: List[Dict[str, Any]]
+    created_at: datetime
+    updated_at: datetime
+    deployed_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+class WebsiteDeployOut(BaseModel):
+    id: int
+    project_id: int
+    cf_deployment_id: Optional[str]
+    cf_url: Optional[str]
+    status: str
+    deploy_type: str
+    error_message: Optional[str]
+    created_at: datetime
+    completed_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+class WebsiteGenerateRequest(BaseModel):
+    company_id: int
+    template: str = "corporate"
+    description: Optional[str] = None
+
+
+class DomainCheckRequest(BaseModel):
+    domain: str
+
+
+class DomainConnectRequest(BaseModel):
+    domain: str
