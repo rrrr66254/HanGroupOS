@@ -11,7 +11,7 @@
 set -e
 
 HAN_REPO="https://github.com/rrrr66254/HanGroupOS.git"
-HAN_VERSION="32"
+HAN_VERSION="39"
 INSTALL_DIR="$HOME/HanGroupOS"
 BIN_DIR="$HOME/.local/bin"
 GROUP_DISPLAY_NAME="${GROUP_NAME:-Group OS}"  # 환경변수로 그룹명 오버라이드 가능
