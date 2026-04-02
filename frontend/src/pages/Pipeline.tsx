@@ -296,7 +296,7 @@ export default function Pipeline() {
                     { key: 'actions_created', label: '액션 아이템', icon: '⚡' },
                   ].map(({ key, label, icon }) => {
                     const val = selected.meta[key]
-                    const display = Array.isArray(val) ? val.length : val
+                    const display = Array.isArray(val) ? val.length : (val as string | number | null | undefined)
                     return (
                       <div key={key} className="bg-gray-800 rounded-xl p-4 text-center">
                         <div className="text-2xl mb-1">{icon}</div>
