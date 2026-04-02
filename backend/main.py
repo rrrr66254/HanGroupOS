@@ -16,7 +16,7 @@ logging.getLogger().addHandler(_log_handler)
 logging.getLogger("uvicorn.access").addHandler(_log_handler)
 logging.getLogger("uvicorn.error").addHandler(_log_handler)
 logging.getLogger().setLevel(logging.INFO)
-from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks, group_settings, agent_metrics, delegation, kpi_scoreboard, agent_personality, data_feeds, webhook_notify, chat_summary, synergy_match, dashboard_layout, ai_feedback, workflow, financial, permissions, news, messenger
+from routers import auth, companies, org, chat, approvals, meetings, market, simulation, ai_models, memory, strategy, knowledge, work, sites, events, terminal, data_collect, media, executor, capabilities, game, audit, video_gen, notifications, docs, competitors, kpi_links, briefing, webhooks, group_settings, agent_metrics, delegation, kpi_scoreboard, agent_personality, data_feeds, webhook_notify, chat_summary, synergy_match, dashboard_layout, ai_feedback, workflow, financial, permissions, news, messenger, pipeline
 
 
 app = FastAPI(
@@ -83,6 +83,7 @@ app.include_router(financial.router)      # 계열사 재무제표 자동 생성
 app.include_router(permissions.router)    # 멀티테넌트 권한 관리
 app.include_router(news.router)           # 뉴스 수집 + AI 브리핑 (NewsAPI/RSS)
 app.include_router(messenger.router)      # 그룹 내부 메신저 (채팅방/메시지)
+app.include_router(pipeline.router)      # 자율 파이프라인 엔진
 
 
 @app.get("/health")

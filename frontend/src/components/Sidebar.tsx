@@ -38,6 +38,7 @@ const NAV_GROUPS = [
     icon: TrendingUp,
     badge: null,
     items: [
+      { to: '/pipeline', icon: Zap, labelKey: 'nav.pipeline' },
       { to: '/market', icon: TrendingUp, labelKey: 'nav.market' },
       { to: '/strategy', icon: Map, labelKey: 'nav.strategy' },
       { to: '/synergy', icon: GitMerge, labelKey: 'nav.synergy' },

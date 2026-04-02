@@ -73,6 +73,7 @@ const ja = {
     permissions: '権限管理',
     messenger: 'メッセンジャー',
     notifications: '通知センター',
+    pipeline: '自律パイプライン',
   },
 
   // グループカテゴリ

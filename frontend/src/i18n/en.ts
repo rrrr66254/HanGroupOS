@@ -73,6 +73,7 @@ const en = {
     permissions: 'Permissions',
     messenger: 'Messenger',
     notifications: 'Notifications',
+    pipeline: 'Autonomous Pipeline',
   },
 
   // Group categories

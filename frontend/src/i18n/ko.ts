@@ -73,6 +73,7 @@ const ko = {
     permissions: '권한 관리',
     messenger: '메신저',
     notifications: '알림 센터',
+    pipeline: '자율 파이프라인',
   },
 
   // 그룹 카테고리

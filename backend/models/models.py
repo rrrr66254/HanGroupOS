@@ -890,3 +890,37 @@ class NewsFeedSubscription(Base):
     last_fetched_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── 자율 파이프라인 ────────────────────────────────────────────────────────────
+
+class PipelineRun(Base):
+    """자율 파이프라인 실행 기록 — 데이터 스캔→인사이트→전략→보고→제안 전 과정."""
+    __tablename__ = "pipeline_runs"
+    id = Column(Integer, primary_key=True, index=True)
+    status = Column(String(20), default="running")
+    trigger = Column(String(50), default="manual")
+    triggered_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    current_stage = Column(Integer, default=0)
+    total_stages = Column(Integer, default=6)
+    summary = Column(Text, default="")
+    action_items = Column(JSON, default=[])
+    meta = Column(JSON, default={})
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
+
+
+class PipelineStageLog(Base):
+    """파이프라인 각 단계의 실행 로그 및 AI 출력."""
+    __tablename__ = "pipeline_stage_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(Integer, ForeignKey("pipeline_runs.id"), nullable=False)
+    stage_index = Column(Integer, nullable=False)
+    stage_name = Column(String(100), nullable=False)
+    status = Column(String(20), default="pending")
+    input_summary = Column(Text, default="")
+    output = Column(Text, default="")
+    stats = Column(JSON, default={})
+    error = Column(Text, default="")
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)

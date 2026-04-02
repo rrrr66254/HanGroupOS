@@ -49,6 +49,7 @@ import FinancialStatements from './pages/FinancialStatements'
 import Permissions from './pages/Permissions'
 import Messenger from './pages/Messenger'
 import NotificationCenterPage from './pages/NotificationCenterPage'
+import Pipeline from './pages/Pipeline'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -135,6 +136,7 @@ export default function App() {
           <Route path="permissions" element={<Permissions />} />
           <Route path="messenger" element={<Messenger />} />
           <Route path="notifications" element={<NotificationCenterPage />} />
+          <Route path="pipeline" element={<Pipeline />} />
         </Route>
         <Route path="*" element={<Navigate to="/group-home" replace />} />
       </Routes>
